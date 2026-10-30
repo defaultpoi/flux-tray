@@ -127,8 +127,12 @@ class TrayController:
         if not self.feeds.state["feeds"]:
             self._append("No feeds configured", sensitive=False)
         for feed in self.feeds.state["feeds"]:
-            self._append(f"{feed['name']} ({sum(1 for i in unread if i['feed_id'] == feed['id'])})",
+            count = sum(1 for item in unread if item["feed_id"] == feed["id"])
+            self._append(f"{feed['name']} ({count})",
                          lambda _item, fid=feed["id"]: self._mark_feed_read(fid))
+            muted = bool(feed.get("muted"))
+            self._append(("Unmute " if muted else "Mute ") + feed["name"],
+                         lambda _item, fid=feed["id"], value=not muted: self._set_feed_muted(fid, value))
         if unread:
             self.menu.append(Gtk.SeparatorMenuItem())
             for item in unread[:20]:
@@ -198,6 +202,10 @@ class TrayController:
     def _save_for_later(self, item):
         self.feeds.save_for_later(item["id"])
         self._rebuild_menu(self.menu)
+    def _set_feed_muted(self, feed_id, muted):
+        self.feeds.set_muted(feed_id, muted)
+        self._rebuild_menu(self.menu)
+
     def _mark_feed_read(self, feed_id):
         self.feeds.mark_feed_read(feed_id)
         self._rebuild_menu(self.menu)
