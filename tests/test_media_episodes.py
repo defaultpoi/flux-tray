@@ -56,7 +56,7 @@ def test_episode_normalization_validates_dates_numbers_headers_and_subtitles():
     for invalid in (
         {"id": "bad-date", "title": "Bad", "date": "yesterday"},
         {"id": "bad-number", "title": "Bad", "season": -1},
-        {"id": "bad-header", "title": "Bad", "headers": {"X-Test": "ok\\r\\nInjected: yes"}},
+        {"id": "bad-header", "title": "Bad", "headers": {"X-Test": "ok\r\nInjected: yes"}},
         {"id": "bad-sub", "title": "Bad", "subs": {"en": "file:///tmp/sub.vtt"}},
     ):
         try:
