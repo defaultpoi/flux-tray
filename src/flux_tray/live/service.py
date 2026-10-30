@@ -42,11 +42,14 @@ class StreamlinkProbe:
 
 class LiveService:
     def __init__(self, store: JsonStore, probe: StreamlinkProbe | None = None,
-                 *, interval: int = 900, now: Callable[[], datetime] | None = None):
+                 *, interval: int = 900, now: Callable[[], datetime] | None = None,
+                 player=None, quality: str = "best"):
         self.store = store
         self.probe = probe or StreamlinkProbe()
         self.interval = max(60, int(interval))
         self.now = now or (lambda: datetime.now(timezone.utc))
+        self.player = player
+        self.quality = quality
         self.state = store.load()
         if not isinstance(self.state, dict):
             self.state = {}
@@ -108,5 +111,23 @@ class LiveService:
                 transitions += 1
         return transitions
 
+    def play_channel(self, channel_id: str) -> None:
+        if self.player is None:
+            raise RuntimeError("mpv player is not configured")
+        channel = next((c for c in self.state["channels"] if c["id"] == channel_id), None)
+        if channel is None:
+            raise KeyError(channel_id)
+        result = self.probe.runner(["streamlink", "--stream-url", channel["url"], self.quality],
+                                   timeout=45)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "Streamlink could not resolve the channel")
+        urls = [line.strip() for line in result.stdout.splitlines()
+                if line.strip().startswith(("http://", "https://"))]
+        if not urls:
+            raise RuntimeError("Streamlink did not return a playable URL")
+        metadata = channel.get("metadata", {})
+        title = metadata.get("title") or "Live"
+        site = channel["platform"].title()
+        self.player.load(urls[-1], f"{site} · {channel['name']} · {title}")
     def live_channels(self) -> list[dict[str, Any]]:
         return [channel for channel in self.state["channels"] if channel.get("status") == "live"]
