@@ -1,4 +1,4 @@
-"""Safe subprocess boundary with timeout and process-group cleanup."""
+"""Safe subprocess boundary with timeout, cancellation and process-group cleanup."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from typing import Mapping, Sequence
 
 
@@ -25,6 +25,11 @@ class ProcessError(RuntimeError):
 
 
 class ProcessSupervisor:
+    def __init__(self):
+        self._lock = Lock()
+        self._processes: set[subprocess.Popen] = set()
+        self._closed = False
+
     def run(
         self, argv: Sequence[str], *, timeout: float = 30, cwd: Path | None = None,
         env: Mapping[str, str] | None = None, cancelled: Event | None = None,
@@ -33,29 +38,45 @@ class ProcessSupervisor:
             raise ValueError("argv must be a non-empty sequence of strings")
         if timeout <= 0:
             raise ValueError("timeout must be positive")
-
         process = subprocess.Popen(
             list(argv), cwd=cwd, env=dict(os.environ, **(env or {})),
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, start_new_session=True,
         )
+        with self._lock:
+            if self._closed:
+                self._terminate(process)
+                raise ProcessError("process supervisor is shutting down")
+            self._processes.add(process)
         deadline = time.monotonic() + timeout
-        while True:
-            if cancelled is not None and cancelled.is_set():
-                self._terminate(process)
-                raise ProcessError(f"command cancelled: {argv[0]}")
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                self._terminate(process)
-                raise ProcessError(f"command timed out after {timeout:g}s: {argv[0]}")
-            try:
-                stdout, stderr = process.communicate(timeout=min(0.1, remaining))
-                return ProcessResult(tuple(argv), process.returncode, stdout, stderr)
-            except subprocess.TimeoutExpired:
-                continue
+        try:
+            while True:
+                if cancelled is not None and cancelled.is_set():
+                    self._terminate(process)
+                    raise ProcessError(f"command cancelled: {argv[0]}")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._terminate(process)
+                    raise ProcessError(f"command timed out after {timeout:g}s: {argv[0]}")
+                try:
+                    stdout, stderr = process.communicate(timeout=min(0.1, remaining))
+                    return ProcessResult(tuple(argv), process.returncode, stdout, stderr)
+                except subprocess.TimeoutExpired:
+                    continue
+        finally:
+            with self._lock:
+                self._processes.discard(process)
+
+    def terminate_all(self) -> None:
+        """Prevent new work and terminate every child process group currently owned."""
+        with self._lock:
+            self._closed = True
+            processes = tuple(self._processes)
+        for process in processes:
+            self._terminate(process)
 
     @staticmethod
-    def _terminate(process: subprocess.Popen[str]) -> None:
+    def _terminate(process: subprocess.Popen) -> None:
         if process.poll() is not None:
             return
         try:
