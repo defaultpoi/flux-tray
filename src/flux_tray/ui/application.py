@@ -16,6 +16,7 @@ from flux_tray.core.tasks import TaskManager
 from flux_tray.feeds.service import FeedService
 from flux_tray.ui.tray import TrayController
 from flux_tray.timers.service import CountdownTimer
+from flux_tray.connectivity.service import ConnectivityService
 
 
 class FluxTrayApplication(Gtk.Application):
@@ -42,7 +43,9 @@ class FluxTrayApplication(Gtk.Application):
             maximum=config.get_int("timer", "max", 120, minimum=1) * 60,
             step=config.get_int("timer", "step", 60, minimum=1),
         )
-        self.tray = TrayController(self, feeds, self.tasks, timer)
+        connectivity_store = JsonStore(self.paths.data_dir / "connectivity.json", dict)
+        connectivity = ConnectivityService(connectivity_store)
+        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity)
         self.hold()
         self.connect("shutdown", self._shutdown)
         logger.info("Flux Tray started")
