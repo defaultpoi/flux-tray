@@ -115,7 +115,7 @@ class UpdateService:
             return None
         versions = {}
         for line in result.stdout.splitlines():
-            match = re.match(r"^\\[\\*\\]\\s+(.+)-([0-9][^\\s]*)", line.strip())
+            match = re.match(r"^\[\*\]\s+(.+)-([0-9][^\s]*)", line.strip())
             if match:
                 versions[match.group(1)] = match.group(2)
         return versions
