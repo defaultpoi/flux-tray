@@ -438,13 +438,14 @@ class TrayController:
             try:
                 if not re.fullmatch(r"[A-Za-z0-9_-]+", command_name):
                     raise ValueError("Use a simple command name with letters, numbers, _ or -")
+                command_name = command_name.casefold()
                 parsed = json.loads(argv.get_text())
                 if (not isinstance(parsed, list) or not parsed
                         or not all(isinstance(part, str) and part for part in parsed)):
                     raise ValueError("Arguments must be a non-empty JSON array of non-empty strings")
+                self.config.set_many("launcher", {command_name: json.dumps(parsed)})
                 if command and command.name != command_name:
                     self.config.remove_option("launcher", command.name)
-                self.config.set_many("launcher", {command_name: json.dumps(parsed)})
             except (ValueError, json.JSONDecodeError, OSError) as exc:
                 error = str(exc)
         dialog.destroy()
