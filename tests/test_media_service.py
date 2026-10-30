@@ -126,3 +126,13 @@ def test_live_hls_stream_is_played_without_download(tmp_path):
 
     service.play_episode("live")
     assert player.loaded == (url, "Live channel")
+
+
+
+def test_media_source_can_be_renamed(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/media.xml", "Old name")
+    service.rename_source(source_id, "My media")
+    assert service.state["sources"][0]["name"] == "My media"
