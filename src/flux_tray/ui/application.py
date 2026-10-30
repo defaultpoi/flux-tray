@@ -15,6 +15,7 @@ from flux_tray.core.storage import JsonStore
 from flux_tray.core.tasks import TaskManager
 from flux_tray.feeds.service import FeedService
 from flux_tray.ui.tray import TrayController
+from flux_tray.timers.service import CountdownTimer
 
 
 class FluxTrayApplication(Gtk.Application):
@@ -35,7 +36,13 @@ class FluxTrayApplication(Gtk.Application):
         store = JsonStore(self.paths.data_dir / "feeds.json",
                           lambda: {"feeds": [], "items": {}, "read_later": []})
         feeds = FeedService(store)
-        self.tray = TrayController(self, feeds, self.tasks)
+        timer_store = JsonStore(self.paths.data_dir / "timer.json", dict)
+        timer = CountdownTimer(
+            timer_store,
+            maximum=config.get_int("timer", "max", 120, minimum=1) * 60,
+            step=config.get_int("timer", "step", 60, minimum=1),
+        )
+        self.tray = TrayController(self, feeds, self.tasks, timer)
         self.hold()
         self.connect("shutdown", self._shutdown)
         logger.info("Flux Tray started")
