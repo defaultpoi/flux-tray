@@ -332,3 +332,33 @@ def test_media_source_summary_reports_next_episode_progress_and_last_watched(tmp
     summary = service.source_summary(source_id)
     assert summary["episode"] == "Second"
     assert "Last watched: First" in summary["tooltip"]
+
+
+def test_play_next_unwatched_respects_default_driver_order(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/feed.xml")
+    service.state["episodes"] = {
+        "driver-first": {"id": "driver-first", "source_id": source_id, "status": "new",
+                         "source_order": 0, "season": 2, "episode": 5},
+        "number-first": {"id": "number-first", "source_id": source_id, "status": "new",
+                         "source_order": 1, "season": 1, "episode": 1},
+    }
+    service.play_episode = lambda episode_id: {"id": episode_id}
+    assert service.play_next_unwatched(source_id)["id"] == "driver-first"
+
+
+def test_play_next_unwatched_respects_newest_episode_order(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/feed.xml", order="newest")
+    service.state["episodes"] = {
+        "old": {"id": "old", "source_id": source_id, "status": "new",
+                "season": 1, "episode": 1, "source_order": 0},
+        "new": {"id": "new", "source_id": source_id, "status": "new",
+                "season": 1, "episode": 8, "source_order": 1},
+    }
+    service.play_episode = lambda episode_id: {"id": episode_id}
+    assert service.play_next_unwatched(source_id)["id"] == "new"
