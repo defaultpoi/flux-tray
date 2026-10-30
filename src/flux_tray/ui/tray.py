@@ -174,7 +174,7 @@ class TrayController:
                 self._append("Launch", sensitive=False)
                 for command in commands:
                     self._append(command.name, lambda _item, name=command.name: self._launch_command(name))
-        self._append("Refresh feeds", lambda _item: self.refresh())
+        self._append("Refresh feeds", lambda _item: self.refresh(force=True))
         self._append("Quit", lambda _item: self.application.quit())
         self.menu.show_all()
         self._update_icon()
@@ -530,7 +530,7 @@ class TrayController:
             self.log.exception("Connectivity check failed")
             return GLib.SOURCE_REMOVE
         if previous in {"offline", "dns-error"} and current == "online":
-            self.refresh()
+            self.refresh(force=True)
             if self.weather is not None:
                 self._weather_tick()
             if self.media is not None:
@@ -590,11 +590,11 @@ class TrayController:
             self._rebuild_menu(self.menu)
         return GLib.SOURCE_CONTINUE
 
-    def refresh(self):
+    def refresh(self, *, force: bool = False):
         def work():
             if self.connectivity is not None and self.connectivity.state.get("status") in {"offline", "dns-error"}:
                 return 0
-            return self.feeds.check_due()
+            return self.feeds.check_due(force=force)
         future = self.tasks.submit("feed-refresh", work)
         if future is not None:
             future.add_done_callback(lambda done: GLib.idle_add(self._refresh_complete, done))
