@@ -36,6 +36,7 @@ class FluxTrayApplication(Gtk.Application):
                           lambda: {"feeds": [], "items": {}, "read_later": []})
         feeds = FeedService(store)
         self.tray = TrayController(self, feeds, self.tasks)
+        self.hold()
         self.connect("shutdown", self._shutdown)
         logger.info("Flux Tray started")
         self.tray.refresh()
@@ -45,3 +46,4 @@ class FluxTrayApplication(Gtk.Application):
             self.tasks.shutdown(wait=False)
             self.tasks = None
         logging.getLogger("flux_tray").info("Flux Tray stopped")
+        self.release()
