@@ -31,7 +31,7 @@ def parse_season_episode(title: str) -> tuple[int, int] | None:
 
 def safe_filename(value: str, limit: int = 160) -> str:
     normalized = unicodedata.normalize("NFKC", value)
-    cleaned = "".join("_" if char in {"/", "\"} or ord(char) < 32 else char
+    cleaned = "".join("_" if char in {"/", "\\"} or ord(char) < 32 else char
                       for char in normalized).strip(" .")
     cleaned = re.sub(r"\s+", " ", cleaned)
     cleaned = cleaned.lstrip(". ")
