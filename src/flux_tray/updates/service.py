@@ -58,6 +58,25 @@ class UpdateService:
             return self.runner(list(argv), timeout=timeout, env=self._env(),
                                shutdown_protected=shutdown_protected)
 
+    def _record_action(self, action: str, results: Sequence[ProcessResult]) -> None:
+        records = [{
+            "argv": list(result.argv),
+            "returncode": int(result.returncode),
+            "stdout": str(result.stdout)[-4000:],
+            "stderr": str(result.stderr)[-4000:],
+        } for result in results]
+        self.state["last_action"] = {
+            "action": action,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "success": all(item["returncode"] == 0 for item in records),
+            "results": records,
+        }
+        self.store.save(self.state)
+
+    def dismiss_last_action(self) -> None:
+        self.state.pop("last_action", None)
+        self._save()
+
     def scan_updates(self) -> list[PackageChange]:
         result = self._run(["xbps-install", "-Mn", "-u"], timeout=180)
 
@@ -68,9 +87,12 @@ class UpdateService:
             fields = line.split()
             if len(fields) == 6:
                 changes.append(PackageChange(*fields))
+        last_action = self.state.get("last_action")
         self.state = {"checked_at": datetime.now(timezone.utc).isoformat(),
                       "changes": [asdict(change) for change in changes],
                       "scan_output": result.stdout, "scan_error": None}
+        if last_action:
+            self.state["last_action"] = last_action
         self.store.save(self.state)
         return changes
 
@@ -86,7 +108,9 @@ class UpdateService:
         if self.installer == "topgrade" and shutil.which(self.topgrade_executable):
             steps = tuple(dict.fromkeys(("system", *self.topgrade_steps)))
             argv = [self.topgrade_executable, "--only", *steps, "--yes", "--no-retry"]
-            return self._run(argv, timeout=self.timeout, shutdown_protected=True)
+            result = self._run(argv, timeout=self.timeout, shutdown_protected=True)
+            self._record_action("System update (Topgrade)", (result,))
+            return result
         changes = self.state.get("changes") or []
         results = []
         for change in changes:
@@ -99,17 +123,22 @@ class UpdateService:
             results.append(result)
             if result.returncode != 0:
                 break
+        self._record_action("System update (XBPS)", results)
         return tuple(results)
 
     def remove_orphans(self) -> ProcessResult:
         """Remove current automatic orphans after an explicit confirmation in the UI."""
-        return self._run(self._privileged(["xbps-remove", "-y", "-o"]),
-                         timeout=self.timeout, shutdown_protected=True)
+        result = self._run(self._privileged(["xbps-remove", "-y", "-o"]),
+                           timeout=self.timeout, shutdown_protected=True)
+        self._record_action("Remove orphan packages", (result,))
+        return result
 
     def clean_cache(self) -> ProcessResult:
         """Remove outdated cached packages after an explicit confirmation in the UI."""
-        return self._run(self._privileged(["xbps-remove", "-y", "-O"]),
-                         timeout=self.timeout, shutdown_protected=True)
+        result = self._run(self._privileged(["xbps-remove", "-y", "-O"]),
+                           timeout=self.timeout, shutdown_protected=True)
+        self._record_action("Clean package cache", (result,))
+        return result
 
     def remove_orphans_and_clean_cache(self) -> tuple[ProcessResult, ProcessResult]:
         removed = self.remove_orphans()
