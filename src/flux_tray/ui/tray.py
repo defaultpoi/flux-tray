@@ -989,14 +989,19 @@ class TrayController:
         url = Gtk.Entry()
         url.set_text(source.get("url", ""))
         url.set_placeholder_text("Channel, playlist, feed or URL")
-        for widget in (kind, name, url):
+        order = Gtk.ComboBoxText()
+        for label_text in ("Driver default", "Oldest first", "Newest first"):
+            order.append_text(label_text)
+        order.set_active({"oldest": 1, "newest": 2}.get(source.get("order"), 0))
+        for widget in (kind, name, url, order):
             box.pack_start(widget, False, False, 0)
         dialog.show_all()
         if dialog.run() == Gtk.ResponseType.OK:
             try:
                 selected_kind = labels[kind.get_active()][1]
+                selected_order = (None, "oldest", "newest")[order.get_active()]
                 self.media.update_source(source["id"], selected_kind, url.get_text(),
-                                         name.get_text())
+                                         name.get_text(), order=selected_order)
                 self._media_tick(force=True)
             except (ValueError, IndexError) as exc:
                 self.log.warning("Could not edit media source: %s", exc)
@@ -1048,9 +1053,14 @@ class TrayController:
         name.set_placeholder_text("Source name (optional)")
         url = Gtk.Entry()
         url.set_placeholder_text("Channel, playlist, feed or URL")
+        order = Gtk.ComboBoxText()
+        for label_text in ("Driver default", "Oldest first", "Newest first"):
+            order.append_text(label_text)
+        order.set_active(0)
         box.pack_start(kind, False, False, 0)
         box.pack_start(name, False, False, 0)
         box.pack_start(url, False, False, 0)
+        box.pack_start(order, False, False, 0)
         dialog.show_all()
         response = dialog.run()
         if response == Gtk.ResponseType.OK:
@@ -1058,7 +1068,9 @@ class TrayController:
             source_kind = {"youtube": "youtube", "rss/atom": "rss",
                            "url (yt-dlp)": "url", "plugin": "plugin"}[selected]
             try:
-                self.media.add_source(source_kind, url.get_text(), name.get_text().strip() or None)
+                selected_order = (None, "oldest", "newest")[order.get_active()]
+                self.media.add_source(source_kind, url.get_text(),
+                                      name.get_text().strip() or None, order=selected_order)
                 self._media_tick()
             except ValueError as exc:
                 self.log.warning("Could not add media source: %s", exc)
