@@ -186,14 +186,31 @@ class MediaService:
         # or the smallest available resolution if every format is larger.
         return f"res:{max(144, int(height * 0.85))}"
 
+    @staticmethod
+    def _is_streaming_episode(episode: dict[str, Any]) -> bool:
+        metadata = episode.get("metadata") or {}
+        live = (metadata.get("is_live") or episode.get("is_live")
+                or metadata.get("live_status") == "is_live"
+                or episode.get("live_status") == "is_live")
+        protocol = str(metadata.get("protocol") or episode.get("protocol") or "").lower()
+        extension = str(episode.get("ext") or metadata.get("ext") or "").lower()
+        url_path = str(episode.get("url") or "").split("?", 1)[0].lower()
+        return bool(live or extension == "m3u8" or "m3u8" in protocol
+                    or url_path.endswith(".m3u8"))
+
     def play_episode(self, episode_id: str) -> dict[str, Any]:
         if self.player is None:
             raise RuntimeError("Shared mpv player is not configured")
         episode = self.state["episodes"][episode_id]
         path = episode.get("path")
         if not path or not Path(path).is_file():
-            path = self._download_episode(episode)
-            self.mark_downloaded(episode_id, path)
+            if self._is_streaming_episode(episode):
+                path = episode.get("url")
+                if not path:
+                    raise ValueError("Streaming episode has no playable URL")
+            else:
+                path = self._download_episode(episode)
+                self.mark_downloaded(episode_id, path)
         self.player.load(path, episode.get("title", "Flux Tray"))
         self.current_episode_id = episode_id
         return episode
@@ -213,7 +230,10 @@ class MediaService:
         if self.player is None or self.current_episode_id is None:
             return False
         episode = self.state["episodes"].get(self.current_episode_id)
-        if episode is None or not episode.get("path"):
+        if episode is None:
+            return False
+        source = episode.get("path") or episode.get("url")
+        if not source:
             return False
         try:
             position = self.player.get_property("time-pos")
@@ -221,7 +241,7 @@ class MediaService:
             current_path = self.player.get_property("path")
         except OSError:
             return False
-        if current_path != episode["path"] or not isinstance(position, (int, float)) or not isinstance(duration, (int, float)) or duration <= 0:
+        if current_path != source or not isinstance(position, (int, float)) or not isinstance(duration, (int, float)) or duration <= 0:
             return False
         fraction = position / duration
         if fraction >= 0.90 or (fraction >= 0.50 and duration - position <= 20):
