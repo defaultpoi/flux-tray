@@ -33,7 +33,7 @@ class ConnectivityService:
         self.connector = connector
         self.timeout = timeout
         self.process = process or ProcessSupervisor()
-        self.reset_command = tuple(reset_command) if reset_command else None
+        self.reset_command = list(reset_command) if reset_command else None
         self.state = store.load()
         if not isinstance(self.state, dict):
             self.state = {}
@@ -44,7 +44,7 @@ class ConnectivityService:
 
     def reset(self) -> ProcessResult:
         if not self.reset_command:
-            raise RuntimeError("No connectivity reset command is configured")
+            raise RuntimeError("Connectivity reset is not configured")
         result = self.process.run(self.reset_command, timeout=60)
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "Connectivity reset command failed")
