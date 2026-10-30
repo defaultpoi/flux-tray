@@ -113,7 +113,16 @@ class FluxTrayApplication(Gtk.Application):
                     alerts_client=alerts_client,
                 )
             except ValueError as exc:
-                logger.warning("Weather is disabled: %s", exc)
+                logger.warning("Weather setup is incomplete: %s", exc)
+                weather = WeatherService(
+                    JsonStore(self.paths.data_dir / "weather.json", dict),
+                    interval=config.get_int("weather", "interval", 30, minimum=5) * 60,
+                )
+        else:
+            weather = WeatherService(
+                JsonStore(self.paths.data_dir / "weather.json", dict),
+                interval=config.get_int("weather", "interval", 30, minimum=5) * 60,
+            )
         live_store = JsonStore(self.paths.data_dir / "live.json", lambda: {"channels": []})
         self.player = MpvController(self.paths.state_dir / "mpv.sock")
         live = LiveService(
@@ -143,6 +152,7 @@ class FluxTrayApplication(Gtk.Application):
             self, feeds, self.tasks, timer, connectivity, updates, weather, live, media, launcher,
             connectivity_interval=config.get_int("connectivity", "interval", 10, minimum=1),
             update_interval=config.get_int("updates", "interval", 12, minimum=1) * 3600,
+            config=config,
         )
         self.hold()
         self.connect("shutdown", self._shutdown)
