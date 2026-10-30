@@ -95,8 +95,17 @@ class TrayController:
             episodes = list(self.media.state.get("episodes", {}).values())
             episodes.sort(key=lambda item: item.get("discovered_at", ""), reverse=True)
             for episode in episodes[:8]:
-                label = f"{episode.get('title', 'Untitled')} [{episode.get('status', 'new')}] "[:100]
-                self._append(label, lambda _item, current=episode: self._play_media_episode(current))
+                label = f"{episode.get('title', 'Untitled')} [{episode.get('status', 'new')}]"[:100]
+                parent = Gtk.MenuItem.new_with_label(label)
+                submenu = Gtk.Menu()
+                play_item = Gtk.MenuItem.new_with_label("Play")
+                play_item.connect("activate", lambda _widget, current=episode: self._play_media_episode(current))
+                queue_item = Gtk.MenuItem.new_with_label("Queue download")
+                queue_item.connect("activate", lambda _widget, current=episode: self._queue_media_episode(current))
+                submenu.append(play_item)
+                submenu.append(queue_item)
+                parent.set_submenu(submenu)
+                self.menu.append(parent)
             self._append("Add media source…", lambda _item: self._add_media_dialog())
             self._append("Check media sources", lambda _item: self._media_tick())
             self._append("Download next", lambda _item: self._media_download_next())
@@ -246,6 +255,10 @@ class TrayController:
         if self.media.state.get("queue"):
             self._media_download_next()
         return GLib.SOURCE_REMOVE
+
+    def _queue_media_episode(self, episode):
+        self.media.queue_episode(episode["id"])
+        self._media_download_next()
 
     def _media_download_next(self):
         future = self.tasks.submit("media-download", self.media.download_next)
