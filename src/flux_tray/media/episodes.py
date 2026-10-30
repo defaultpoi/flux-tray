@@ -69,6 +69,10 @@ def normalize_episode(raw: dict[str, Any], source_id: str) -> MediaEpisode:
     episode = raw.get("episode", raw.get("episode_number"))
     if parsed and (season is None or episode is None):
         season, episode = parsed
+    metadata = dict(raw.get("metadata")) if isinstance(raw.get("metadata"), dict) else {}
+    for key in ("live_status", "is_live", "was_live", "duration"):
+        if key in raw:
+            metadata[key] = raw[key]
     return MediaEpisode(
         id=f"{source_id}:{identity}", title=title, date=raw.get("date") or raw.get("upload_date"),
         url=str(url) if isinstance(url, str) and url.startswith(("http://", "https://")) else None,
@@ -77,5 +81,5 @@ def normalize_episode(raw: dict[str, Any], source_id: str) -> MediaEpisode:
         headers=raw.get("headers") if isinstance(raw.get("headers"), dict) else {},
         season=int(season) if season is not None else None,
         episode=int(episode) if episode is not None else None,
-        metadata=raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {},
+        metadata=metadata,
     )
