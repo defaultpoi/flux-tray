@@ -355,10 +355,10 @@ class TrayController:
                 self.log.warning("Could not add media source: %s", exc)
         dialog.destroy()
 
-    def _live_tick(self):
+    def _live_tick(self, *, force: bool = False):
         if self.live is None:
             return GLib.SOURCE_REMOVE
-        future = self.tasks.submit("live-check", self.live.check_due)
+        future = self.tasks.submit("live-check", self.live.check_due, force=force)
         if future is not None:
             future.add_done_callback(lambda done: GLib.idle_add(self._live_complete, done))
         return GLib.SOURCE_CONTINUE
