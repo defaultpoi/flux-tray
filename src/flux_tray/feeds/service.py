@@ -221,9 +221,10 @@ class FeedService:
             text = " ".join([item["title"], *item["categories"]])
             item["breaking"] = _whole_word_match(text, self.breaking_words)
             self.state["items"][item_id] = item
-            if not item["seen"]:
+            routed = self._matches_routing_rule(item) and not feed.get("muted")
+            if not item["seen"] and not routed:
                 fresh += 1
-            if self._matches_routing_rule(item) and not feed.get("muted"):
+            if routed:
                 item["read"] = item["seen"] = True
                 self.state["read_later"].append(item_id)
         unread = sorted((i for i in self.state["items"].values() if not i["read"]),
