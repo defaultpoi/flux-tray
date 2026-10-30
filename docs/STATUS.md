@@ -21,7 +21,7 @@ This document is deliberately conservative. A service existing in the repository
 | XBPS | Dry-run update scan, orphan listing, explicitly confirmed system update, orphan removal and cache cleanup | Topgrade integration, individual-package fallback, detailed version-change summaries and real Void package-manager validation |
 | Timers | Persistent countdown, suspend/restart missed-deadline handling, one-shot alert | Recurring schedules, snooze/warn/fire-once workflow and alert UI polish |
 | Launcher | JSON argv commands, managed background spawn | Launcher configuration UI and optional explicitly trusted shell commands |
-| Tray | GTK3 status icon, popup, notifications and basic actions | Required color states, pulse behavior, focus-out rules, theme/icon fallback validation and real XFCE interaction tests |
+| Tray | GTK3 status icon, popup, notifications and basic actions | Breaking/severe-weather pulse behavior, focus-out rules, theme/icon fallback validation and real XFCE interaction tests |
 
 ## Verification status
 
