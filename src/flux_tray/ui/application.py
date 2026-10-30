@@ -17,6 +17,7 @@ from flux_tray.feeds.service import FeedService
 from flux_tray.ui.tray import TrayController
 from flux_tray.timers.service import CountdownTimer
 from flux_tray.connectivity.service import ConnectivityService
+from flux_tray.updates.service import UpdateService
 
 
 class FluxTrayApplication(Gtk.Application):
@@ -45,7 +46,9 @@ class FluxTrayApplication(Gtk.Application):
         )
         connectivity_store = JsonStore(self.paths.data_dir / "connectivity.json", dict)
         connectivity = ConnectivityService(connectivity_store)
-        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity)
+        update_store = JsonStore(self.paths.data_dir / "updates.json", dict)
+        updates = UpdateService(update_store)
+        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates)
         self.hold()
         self.connect("shutdown", self._shutdown)
         logger.info("Flux Tray started")
