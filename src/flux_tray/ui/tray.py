@@ -178,6 +178,23 @@ class TrayController:
                 error.destroy()
         dialog.destroy()
 
+    def _weather_tick(self):
+        if self.weather is None:
+            return GLib.SOURCE_REMOVE
+        future = self.tasks.submit("weather-refresh", self.weather.refresh)
+        if future is not None:
+            future.add_done_callback(lambda done: GLib.idle_add(self._weather_complete, done))
+        return GLib.SOURCE_CONTINUE
+
+    def _weather_complete(self, future):
+        try:
+            future.result()
+        except Exception:
+            self.log.exception("Weather refresh failed")
+        self._update_icon()
+        if self.menu.get_mapped():
+            self._rebuild_menu(self.menu)
+        return GLib.SOURCE_REMOVE
     def _update_scan_tick(self):
         if self.updates is None:
             return GLib.SOURCE_REMOVE
