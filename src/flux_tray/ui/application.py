@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 
 import gi
@@ -61,7 +62,20 @@ class FluxTrayApplication(Gtk.Application):
             step=config.get_int("timer", "step", 60, minimum=1),
         )
         connectivity_store = JsonStore(self.paths.data_dir / "connectivity.json", dict)
-        connectivity = ConnectivityService(connectivity_store)
+        reset_command = None
+        raw_reset = config.get("connectivity", "reset_command", "") or ""
+        if raw_reset.strip():
+            try:
+                parsed_reset = json.loads(raw_reset)
+                if isinstance(parsed_reset, list) and parsed_reset and all(isinstance(part, str) and part for part in parsed_reset):
+                    reset_command = parsed_reset
+                else:
+                    logger.warning("Ignoring invalid connectivity.reset_command; expected a JSON argv array")
+            except json.JSONDecodeError:
+                logger.warning("Ignoring invalid connectivity.reset_command JSON")
+        connectivity = ConnectivityService(
+            connectivity_store, process=self.process, reset_command=reset_command,
+        )
         update_store = JsonStore(self.paths.data_dir / "updates.json", dict)
         topgrade_steps = tuple(step.strip() for step in (config.get("updates", "topgrade_steps", "") or "").split(",") if step.strip())
         updates = UpdateService(
