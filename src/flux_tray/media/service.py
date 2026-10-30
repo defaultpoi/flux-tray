@@ -159,6 +159,8 @@ class MediaService:
     def _download_episode(self, episode: dict[str, Any], cancelled=None) -> str:
         source = self._source(episode["source_id"])
         resolved = self.plugins.resolve_episode(source["url"], episode)
+        if is_archive_org(resolved.get("url")):
+            raise ValueError("Archive.org media downloads are intentionally unsupported")
         plugin_path = self.plugins.download_episode(source["url"], resolved,
                                                      self.output_dir, lambda *_args: None, cancelled)
         if plugin_path is not None:
