@@ -5,6 +5,17 @@ Every item is required. Flux Tray starts with fresh config/state; no legacy migr
 ## Tray and popup
 GTK3 tray icon for XFCE/X11. Green = no unread feed items (show temperature if available), orange = unread feeds, red = XBPS updates. Severe weather can pulse matching value/badge. Live/media never affect badge. Compact popup; independently refresh sections and preserve scroll/expanded state. Open on new feed items, live transitions and media episodes. Close automatically when the last unread feed item is marked read; live streams, media and read-later entries do not keep it open. Right-clicking the blank gap after the unread/read-later lists and before the footer closes it. Optional sound. Theme icon fallback; U+FE0E for text glyphs when needed. Menus must fit popup bounds; Gtk.Popover cannot reliably escape parent.
 
+## Additional interaction and media details inferred from the handoff brief
+
+- Unread feed rows: left-click opens and marks read; right-click marks read without opening. Hover text exposes the full title, author and categories.
+- Feed header context menu: mark all read, open all feed items as browser tabs, open the feed website or raw XML, and manage category/author mute and read-later rules.
+- Media source ordering: each source can use the driver's default order or explicitly choose oldest-first/newest-first. Recognize season/episode notation such as S01E05 and 1x05; otherwise use publication date and stable source order.
+- Media presentation and files: show a compact per-source summary with next unwatched episode, download state/progress and failure reason; use predictable source/season/episode/title filenames and keep subtitles beside the video for mpv auto-loading.
+- HLS downloads: choose a screen-appropriate rendition, report progress from playlist duration, support cancellation and partial playback while downloading when the container permits it; reject live playlists as downloads. A failed subtitle must not fail the video.
+- Media plugins: expose small helpers for bounded JSON fetches, resumable downloads and season/episode parsing; plugin output and optional resolver/downloader results are validated before use.
+
+These details extend the current feature list; they do not reintroduce Archive.org support, DRM circumvention, Plex support or cross-platform targets.
+
 ## RSS/Atom
 Multiple feeds, names, per-feed intervals, configured feed ordering. Default tick 60 s; pause offline; failed feed retry after 2 min. First-seen items older than 24 h silently marked seen. Cap unread at 500, oldest excess remains seen. Opening item marks read; feed header marks all read. Read-later is separate, not unread/badged/notified; open/remove removes it. Rules route categories/authors to read-later. Global/per-feed mute; mute beats read-later. Breaking/urgent whole-word, case/accent-insensitive matching in title/categories; configurable words, default breaking; pulse until read/dismissed. Hover shows categories/author; retain Website/XML links. All fetches bounded and off GTK.
 
