@@ -112,9 +112,49 @@ class MediaService:
         if is_archive_org(url):
             raise ValueError("Archive.org media sources are intentionally unsupported")
         source = self._source(source_id)
-        source.update({"kind": kind, "url": url, "name": str(name).strip() or url,
-                       "order": self._validate_order(order) if order is not None else source.get("order"),
-                       "initialized": False, "next_check": None, "last_error": None})
+        identity_changed = source.get("kind") != kind or source.get("url") != url
+        new_order = self._validate_order(order) if order is not None else source.get("order")
+
+        if identity_changed:
+            download = self.state.get("download") or {}
+            active_episode = self.state["episodes"].get(download.get("episode_id"))
+            if (download.get("status") == "downloading" and active_episode
+                    and active_episode.get("source_id") == source_id):
+                raise RuntimeError("Cannot change a media source while one of its episodes is downloading")
+            removed = {key for key, episode in self.state["episodes"].items()
+                       if episode.get("source_id") == source_id}
+            self.state["episodes"] = {
+                key: episode for key, episode in self.state["episodes"].items()
+                if key not in removed
+            }
+            self.state["queue"] = [key for key in self.state["queue"] if key not in removed]
+            self.state["watched"] = [key for key in self.state["watched"] if key not in removed]
+            source.pop("last_watched", None)
+            source.update({
+                "kind": kind, "url": url, "name": str(name).strip() or url,
+                "order": new_order, "initialized": False, "next_check": None,
+                "last_error": None, "last_success": None,
+            })
+        else:
+            old_order = source.get("order")
+            source.update({
+                "kind": kind, "url": url, "name": str(name).strip() or url,
+                "order": new_order,
+            })
+            if old_order != new_order:
+                queued_ids = {
+                    key for key in self.state["queue"]
+                    if key in self.state["episodes"]
+                    and self.state["episodes"][key].get("source_id") == source_id
+                }
+                queued = [self.state["episodes"][key] for key in queued_ids]
+                ordered_ids = iter(
+                    episode["id"] for episode in self._ordered_episodes(queued, new_order)
+                )
+                self.state["queue"] = [
+                    next(ordered_ids) if key in queued_ids else key
+                    for key in self.state["queue"]
+                ]
         self._save()
 
     def rename_source(self, source_id: str, name: str) -> None:
