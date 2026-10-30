@@ -11,7 +11,7 @@ import feedparser
 
 from flux_tray.core.process import ProcessResult, ProcessSupervisor
 from flux_tray.feeds.fetch import fetch_feed
-from flux_tray.media.episodes import normalize_episode
+from flux_tray.media.episodes import is_archive_org, normalize_episode
 
 
 class YtDlpAdapter:
@@ -22,6 +22,8 @@ class YtDlpAdapter:
         self.timeout = timeout
 
     def list_episodes(self, url: str, source_id: str) -> list[dict[str, Any]]:
+        if is_archive_org(url):
+            raise ValueError("Archive.org is not a supported media source")
         result = self.runner([
             "yt-dlp", "--flat-playlist", "--dump-single-json", "--no-warnings",
             "--no-progress", url,
@@ -54,6 +56,8 @@ class RssMediaAdapter:
         self.fetcher = fetcher
 
     def list_episodes(self, url: str, source_id: str) -> list[dict[str, Any]]:
+        if is_archive_org(url):
+            raise ValueError("Archive.org is not a supported media source")
         result = self.fetcher(url)
         if result.body is None:
             return []
