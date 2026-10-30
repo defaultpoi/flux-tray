@@ -38,7 +38,7 @@ def test_topgrade_runs_system_and_configured_steps(monkeypatch, tmp_path):
     assert calls[0][1]["shutdown_protected"] is True
 
 
-def test_topgrade_missing_falls_back_to_xbps(monkeypatch, tmp_path):
+def test_topgrade_missing_falls_back_to_individual_xbps_updates(monkeypatch, tmp_path):
     calls = []
     def runner(argv, **kwargs):
         calls.append(argv)
@@ -46,5 +46,11 @@ def test_topgrade_missing_falls_back_to_xbps(monkeypatch, tmp_path):
     monkeypatch.setattr("flux_tray.updates.service.shutil.which", lambda _name: None)
     service = UpdateService(JsonStore(tmp_path / "updates.json", dict), runner=runner,
                             installer="topgrade")
-    service.apply_updates()
-    assert calls[0][-3:] == ["xbps-install", "-y", "-u"]
+    service.state["changes"] = [
+        {"pkgver": "curl-8.1_1"},
+        {"pkgver": "libfoo-devel-1.0_1"},
+    ]
+    results = service.apply_updates()
+    assert len(results) == 2
+    assert calls[0][-4:] == ["xbps-install", "-y", "-u", "curl"]
+    assert calls[1][-4:] == ["xbps-install", "-y", "-u", "libfoo-devel"]
