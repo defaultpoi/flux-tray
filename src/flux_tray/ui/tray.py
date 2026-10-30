@@ -279,6 +279,13 @@ class TrayController:
     def _sync_weather_pulse(self):
         severe = (self.weather is not None and
                   self.weather.state.get("alert_level", 0) >= 3)
+        if severe and self._weather_tray_pulse_source is None:
+            self._weather_tray_pulse_source = GLib.timeout_add(600, self._pulse_weather_tray)
+        elif not severe and self._weather_tray_pulse_source is not None:
+            GLib.source_remove(self._weather_tray_pulse_source)
+            self._weather_tray_pulse_source = None
+            self._weather_tray_pulse_phase = False
+            self._update_icon()
         if severe and self.menu.get_mapped() and self._weather_pulse_source is None:
             self._weather_pulse_source = GLib.timeout_add(600, self._pulse_weather_alerts)
         elif (not severe or not self.menu.get_mapped()) and self._weather_pulse_source is not None:
@@ -287,6 +294,18 @@ class TrayController:
             self._weather_pulse_phase = False
             for item, label in self._weather_alert_items:
                 item.set_label(label)
+
+    def _pulse_weather_tray(self):
+        severe = (self.weather is not None and
+                  self.weather.state.get("alert_level", 0) >= 3)
+        if not severe:
+            self._weather_tray_pulse_source = None
+            self._weather_tray_pulse_phase = False
+            self._update_icon()
+            return GLib.SOURCE_REMOVE
+        self._weather_tray_pulse_phase = not self._weather_tray_pulse_phase
+        self._update_icon()
+        return GLib.SOURCE_CONTINUE
 
     def _pulse_weather_alerts(self):
         severe = (self.weather is not None and
@@ -331,7 +350,12 @@ class TrayController:
     def _update_icon(self):
         unread = self.feeds.unread_count()
         updates = len(self.updates.state.get("changes", [])) if self.updates is not None else 0
-        if updates:
+        alert_level = self.weather.state.get("alert_level", 0) if self.weather is not None else 0
+        if alert_level >= 3:
+            color = "#d83b3b" if self._weather_tray_pulse_phase else "#e69a24"
+            fallback = "dialog-warning-symbolic"
+            mark = '<path d="M8 3v5m0 2v.2" stroke="white" stroke-width="1.8" stroke-linecap="round" fill="none"/>'
+        elif updates:
             color, fallback = "#d83b3b", "software-update-urgent-symbolic"
             mark = '<path d="M8 3v7m-3-3 3 3 3-3M4 13h8" stroke="white" stroke-width="1.7" fill="none"/>'
         elif unread:
@@ -352,7 +376,6 @@ class TrayController:
         suffix = f" · {network}" if network else ""
         temperature = self.weather.state.get("temperature") if self.weather is not None else None
         weather_suffix = f" · {temperature}°C" if temperature is not None else ""
-        alert_level = self.weather.state.get("alert_level", 0) if self.weather is not None else 0
         alert_suffix = " · severe weather warning" if alert_level >= 3 else ""
         self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}{weather_suffix}{alert_suffix}")
 
@@ -609,6 +632,7 @@ class TrayController:
             future.result()
         except Exception:
             self.log.exception("Weather refresh failed")
+        self._sync_weather_pulse()
         self._update_icon()
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
