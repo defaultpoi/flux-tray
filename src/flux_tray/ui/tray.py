@@ -39,6 +39,7 @@ class TrayController:
         self._weather_alert_items = []
         self._weather_pulse_source = None
         self._weather_pulse_phase = False
+        self._last_schedule_alert_token = None
         GLib.timeout_add_seconds(60, self._periodic_refresh)
         if self.timer is not None:
             self.timer.poll()
@@ -228,6 +229,21 @@ class TrayController:
             self._append("Start timer…", lambda _item: self._timer_dialog())
             if status in {"running", "missed", "ringing"}:
                 self._append("Cancel timer", lambda _item: self._cancel_timer())
+            self._append("Recurring alarms", sensitive=False)
+            for alarm in self.timer.schedules:
+                days = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+                day_text = ",".join(days[index] for index in alarm.get("weekdays", []) if 0 <= index < 7)
+                parent = Gtk.MenuItem.new_with_label(f"{day_text} {alarm.get('time')} — {alarm.get('label')}"[:100])
+                submenu = Gtk.Menu()
+                remove = Gtk.MenuItem.new_with_label("Remove alarm")
+                remove.connect("activate", lambda _item, current=alarm: self._remove_recurring_alarm(current))
+                submenu.append(remove)
+                parent.set_submenu(submenu)
+                self.menu.append(parent)
+            self._append("Add recurring alarm…", lambda _item: self._recurring_alarm_dialog())
+            if self.timer.state.get("schedule_alert"):
+                self._append("Snooze alarm 5 minutes", lambda _item: self._snooze_recurring_alarm())
+                self._append("Dismiss alarm", lambda _item: self._dismiss_recurring_alarm())
         if self.updates is not None:
             changes = self.updates.state.get("changes", [])
             self._append(f"XBPS updates: {len(changes)}", sensitive=False)
@@ -763,10 +779,71 @@ class TrayController:
         self.timer.cancel()
         self._rebuild_menu(self.menu)
 
+    def _recurring_alarm_dialog(self):
+        dialog = Gtk.Dialog(title="Add recurring alarm", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        days = Gtk.Entry()
+        days.set_placeholder_text("Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun")
+        days.set_text("Mon,Tue,Wed,Thu,Fri")
+        clock = Gtk.Entry()
+        clock.set_placeholder_text("Time: 07:30 (24-hour local time)")
+        clock.set_text("07:30")
+        label = Gtk.Entry()
+        label.set_placeholder_text("Alarm label")
+        label.set_text("Reminder")
+        for widget in (days, clock, label):
+            box.pack_start(widget, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            names = {"mon": 0, "tue": 1, "wed": 2, "thu": 3,
+                     "fri": 4, "sat": 5, "sun": 6}
+            try:
+                weekdays = [names[token.strip().lower()[:3]]
+                            for token in days.get_text().split(",") if token.strip()]
+                self.timer.add_schedule(weekdays, clock.get_text().strip(), label.get_text())
+            except (KeyError, ValueError) as exc:
+                self.log.warning("Could not save recurring alarm: %s", exc)
+        dialog.destroy()
+        self._rebuild_menu(self.menu)
+
+    def _remove_recurring_alarm(self, alarm):
+        self.timer.remove_schedule(alarm["id"])
+        self._rebuild_menu(self.menu)
+
+    def _snooze_recurring_alarm(self):
+        self.timer.snooze_schedule_alert(5)
+        self._last_schedule_alert_token = None
+        self._rebuild_menu(self.menu)
+
+    def _dismiss_recurring_alarm(self):
+        self.timer.dismiss_schedule_alert()
+        self._last_schedule_alert_token = None
+        self._rebuild_menu(self.menu)
+
     def _timer_tick(self):
         if self.timer is None:
             return GLib.SOURCE_REMOVE
         result = self.timer.poll()
+        schedule_alert = self.timer.poll_schedules()
+        if schedule_alert:
+            token = schedule_alert.get("fired_at")
+            if token != self._last_schedule_alert_token:
+                self._last_schedule_alert_token = token
+                display = Gdk.Display.get_default()
+                if display is not None:
+                    display.beep()
+                notification = Gio.Notification.new(schedule_alert.get("label", "Recurring alarm"))
+                notification.set_body("Recurring alarm — snooze for 5 minutes or dismiss in Flux Tray.")
+                self.application.send_notification(None, notification)
+                self.icon.set_tooltip_text("Flux Tray — recurring alarm")
         if self.media is not None:
             try:
                 self.media.update_playback_progress()
