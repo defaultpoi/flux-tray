@@ -70,3 +70,15 @@ def test_alarm_catches_up_if_app_wakes_after_scheduled_time(tmp_path):
     alert = timer.poll_schedules(monday_later)
     assert alert["label"] == "Missed morning alarm"
     assert alert["fired_at"].startswith("2026-10-26T08:15")
+
+
+
+def test_countdown_start_and_cancel_preserve_weekly_alarms(tmp_path):
+    timer = make_timer(tmp_path)
+    alarm = timer.add_schedule([0, 4], "07:30", "Keep this alarm")
+    timer.start(60)
+    timer.cancel()
+
+    restored = make_timer(tmp_path)
+    assert [item["id"] for item in restored.schedules] == [alarm["id"]]
+    assert restored.state["status"] == "idle"
