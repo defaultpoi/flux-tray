@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import webbrowser
+from datetime import datetime, timezone
 
 import gi
 
@@ -97,8 +98,27 @@ class TrayController:
             for channel in channels:
                 metadata = channel.get("metadata", {})
                 title = metadata.get("title") or channel["status"]
-                label = f"{channel['name']} — {title}"[:100]
-                self._append(label, lambda _item, current=channel: self._play_live_channel(current))
+                category = metadata.get("category")
+                viewers = metadata.get("viewers")
+                started = metadata.get("created_at")
+                elapsed = ""
+                if started:
+                    try:
+                        began = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                        seconds = max(0, int((datetime.now(timezone.utc) - began).total_seconds()))
+                        hours, remainder = divmod(seconds, 3600)
+                        minutes = remainder // 60
+                        elapsed = f"{hours}h {minutes}m" if hours else f"{minutes}m"
+                    except (TypeError, ValueError):
+                        pass
+                details = [value for value in (category, f"{viewers:,} viewers" if isinstance(viewers, int) else None, elapsed or None) if value]
+                label = f"{channel['name']} — {title}"
+                if details:
+                    label += " · " + " · ".join(details)
+                item = Gtk.MenuItem.new_with_label(label[:110])
+                item.set_tooltip_text(title)
+                item.connect("activate", lambda _widget, current=channel: self._play_live_channel(current))
+                self.menu.append(item)
             self._append("Add live channel…", lambda _item: self._add_live_dialog())
             self._append("Check live channels", lambda _item: self._live_tick(force=True))
         if self.media is not None:
