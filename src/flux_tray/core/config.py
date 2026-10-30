@@ -96,6 +96,7 @@ step = 60
 
 [connectivity]
 interval = 10
+reset_command =
 
 [launcher]
 """
