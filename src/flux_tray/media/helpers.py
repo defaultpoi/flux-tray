@@ -47,7 +47,7 @@ def download_file(url: str, destination: Path, *, timeout: float = 30,
         expected_response_length = response_length
         if status == 206:
             content_range = response.headers.get("Content-Range", "")
-            match = re.fullmatch(r"bytes (\\d+)-(\\d+)/(\\d+|\\*)", content_range)
+            match = re.fullmatch(r"bytes ([0-9]+)-([0-9]+)/([0-9]+|[*])", content_range)
             if match is None or int(match.group(1)) != offset:
                 raise ValueError("Server returned an invalid range for the resumed download")
             range_end = int(match.group(2))
