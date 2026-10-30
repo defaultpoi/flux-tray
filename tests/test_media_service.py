@@ -57,3 +57,24 @@ def test_ahead_queue_downloads_sequentially(tmp_path):
     assert first["status"] == "downloaded"
     assert len(downloader.calls) == 1
     assert len(service.state["queue"]) == 0
+
+def test_resolution_sort_uses_monitor_with_headroom_and_manual_override(tmp_path):
+    store = JsonStore(tmp_path / "media.json", lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    automatic = MediaService(store, tmp_path / "plugins", screen_height=768)
+    assert automatic._format_sort() == "res:652"
+    manual = MediaService(store, tmp_path / "plugins", screen_height=768,
+                          yt_dlp_sort="height:480")
+    assert manual._format_sort() == "height:480"
+
+
+def test_resolution_sort_detects_current_monitor_each_time(tmp_path):
+    class Display:
+        height = 768
+        def screen_height(self):
+            return self.height
+    display = Display()
+    store = JsonStore(tmp_path / "media.json", lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", display=display)
+    assert service._format_sort() == "res:652"
+    display.height = 1080
+    assert service._format_sort() == "res:918"
