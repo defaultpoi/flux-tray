@@ -81,14 +81,25 @@ class UpdateService:
         return sorted({line.strip().split()[0] for line in result.stdout.splitlines()
                        if line.strip()})
 
-    def apply_updates(self) -> ProcessResult:
+    def apply_updates(self) -> ProcessResult | tuple[ProcessResult, ...]:
         """Run the real system update; callers must only expose this after explicit user action."""
         if self.installer == "topgrade" and shutil.which(self.topgrade_executable):
             steps = tuple(dict.fromkeys(("system", *self.topgrade_steps)))
             argv = [self.topgrade_executable, "--only", *steps, "--yes", "--no-retry"]
             return self._run(argv, timeout=self.timeout, shutdown_protected=True)
-        return self._run(self._privileged(["xbps-install", "-y", "-u"]),
-                         timeout=self.timeout, shutdown_protected=True)
+        changes = self.state.get("changes") or []
+        results = []
+        for change in changes:
+            pkgver = str(change.get("pkgver", ""))
+            package = pkgver.rsplit("-", 1)[0] if "-" in pkgver else pkgver
+            if not package:
+                continue
+            result = self._run(self._privileged(["xbps-install", "-y", "-u", package]),
+                               timeout=self.timeout, shutdown_protected=True)
+            results.append(result)
+            if result.returncode != 0:
+                break
+        return tuple(results)
 
     def remove_orphans(self) -> ProcessResult:
         """Remove current automatic orphans after an explicit confirmation in the UI."""
