@@ -118,7 +118,7 @@ class TrayController:
                 parent.set_submenu(submenu)
                 self.menu.append(parent)
             self._append("Add media source…", lambda _item: self._add_media_dialog())
-            self._append("Check media sources", lambda _item: self._media_tick())
+            self._append("Check media sources", lambda _item: self._media_tick(force=True))
             self._append("Download next", lambda _item: self._media_download_next())
             self._append("Play next unwatched", lambda _item: self._media_play_next())
         self.menu.append(Gtk.SeparatorMenuItem())
@@ -251,10 +251,10 @@ class TrayController:
             self.log.exception("Streamlink/mpv playback failed; opening browser fallback")
             webbrowser.open(fallback_url)
         return GLib.SOURCE_REMOVE
-    def _media_tick(self):
+    def _media_tick(self, *, force: bool = False):
         if self.media is None:
             return GLib.SOURCE_REMOVE
-        future = self.tasks.submit("media-check", self.media.check_due)
+        future = self.tasks.submit("media-check", self.media.check_due, force=force)
         if future is not None:
             future.add_done_callback(lambda done: GLib.idle_add(self._media_check_complete, done))
         return GLib.SOURCE_CONTINUE
