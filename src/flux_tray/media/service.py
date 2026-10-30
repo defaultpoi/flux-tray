@@ -142,17 +142,18 @@ class MediaService:
                 "order": new_order,
             })
             if old_order != new_order:
-                queued_ids = {
+                queued_ids = [
                     key for key in self.state["queue"]
                     if key in self.state["episodes"]
                     and self.state["episodes"][key].get("source_id") == source_id
-                }
+                ]
+                queued_set = set(queued_ids)
                 queued = [self.state["episodes"][key] for key in queued_ids]
                 ordered_ids = iter(
                     episode["id"] for episode in self._ordered_episodes(queued, new_order)
                 )
                 self.state["queue"] = [
-                    next(ordered_ids) if key in queued_ids else key
+                    next(ordered_ids) if key in queued_set else key
                     for key in self.state["queue"]
                 ]
         self._save()
