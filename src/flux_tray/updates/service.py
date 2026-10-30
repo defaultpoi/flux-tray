@@ -72,8 +72,9 @@ class UpdateService:
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "success": all(item["returncode"] == 0 for item in records),
             "results": records,
-            "version_changes": version_changes,
         }
+        if action.startswith("System update"):
+            self.state["last_action"]["version_changes"] = version_changes
         self.store.save(self.state)
 
     def dismiss_last_action(self) -> None:
