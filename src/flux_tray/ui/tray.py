@@ -88,6 +88,19 @@ class TrayController:
                 label = f"{channel['name']} — {title}"[:100]
                 self._append(label, lambda _item, current=channel: self._play_live_channel(current))
             self._append("Add live channel…", lambda _item: self._add_live_dialog())
+        if self.media is not None:
+            sources = self.media.state.get("sources", [])
+            queue = self.media.state.get("queue", [])
+            self._append(f"Media sources: {len(sources)} · queued: {len(queue)}", sensitive=False)
+            episodes = list(self.media.state.get("episodes", {}).values())
+            episodes.sort(key=lambda item: item.get("discovered_at", ""), reverse=True)
+            for episode in episodes[:8]:
+                label = f"{episode.get('title', 'Untitled')} [{episode.get('status', 'new')}] "[:100]
+                self._append(label, lambda _item, current=episode: self._play_media_episode(current))
+            self._append("Add media source…", lambda _item: self._add_media_dialog())
+            self._append("Check media sources", lambda _item: self._media_tick())
+            self._append("Download next", lambda _item: self._media_download_next())
+            self._append("Play next unwatched", lambda _item: self._media_play_next())
         self.menu.append(Gtk.SeparatorMenuItem())
         if not self.feeds.state["feeds"]:
             self._append("No feeds configured", sensitive=False)
