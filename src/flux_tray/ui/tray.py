@@ -242,6 +242,8 @@ class TrayController:
                 self.menu.append(parent)
             self._append("Add recurring alarm…", lambda _item: self._recurring_alarm_dialog())
             if self.timer.state.get("schedule_alert"):
+                active_alarm = self.timer.state["schedule_alert"]
+                self._append(f"Alarm: {active_alarm.get('label', 'Reminder')}", sensitive=False)
                 self._append("Snooze alarm 5 minutes", lambda _item: self._snooze_recurring_alarm())
                 self._append("Dismiss alarm", lambda _item: self._dismiss_recurring_alarm())
         if self.updates is not None:
