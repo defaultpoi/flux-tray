@@ -72,6 +72,8 @@ quality = best
 interval = 60
 ahead = 2
 path = ~/Videos
+screen_height =
+yt_dlp_sort =
 
 [weather]
 interval = 30
