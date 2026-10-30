@@ -44,6 +44,9 @@ class FluxTrayApplication(Gtk.Application):
         self.process = None
 
     def do_activate(self) -> None:
+        if self.tray is not None:
+            self.tray._on_activate(None)
+            return
         self.paths.config_dir.mkdir(parents=True, exist_ok=True)
         self.paths.data_dir.mkdir(parents=True, exist_ok=True)
         logger = configure_logging(self.paths.state_dir)
@@ -164,6 +167,9 @@ class FluxTrayApplication(Gtk.Application):
         self.tray.refresh()
 
     def _shutdown(self, *_args):
+        if self.tray is not None:
+            self.tray.close()
+            self.tray = None
         if self.tasks is not None:
             self.tasks.shutdown(wait=False)
             self.tasks = None
