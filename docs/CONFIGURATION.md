@@ -29,6 +29,7 @@ lon =
 [updates]
 interval = 12
 installer = topgrade
+topgrade_steps =
 orphans = true
 
 [timer]
@@ -59,6 +60,8 @@ file_manager = ["thunar"]
 - `weather.country`: MeteoAlarm country-feed slug (default `romania`).
 - `weather.region`: required region/county text used to filter active warnings, accent-insensitively. Example: `Buzau`.
 - `updates.interval`: hours; default 12.
+- `updates.installer`: `topgrade` (default) or `xbps`; if Topgrade is unavailable, Flux Tray falls back to XBPS directly.
+- `updates.topgrade_steps`: optional comma-separated Topgrade step names to run in addition to `system`. Use only step names accepted by your installed Topgrade version.
 - `timer.max`: maximum countdown in minutes.
 - `timer.step`: countdown step in seconds.
 - `connectivity.interval`: seconds; default 10.
