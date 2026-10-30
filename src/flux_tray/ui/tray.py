@@ -259,6 +259,9 @@ class TrayController:
                 self.log.info("Downloaded media episode: %s", episode.get("title"))
         except Exception:
             self.log.exception("Media download failed")
+        else:
+            if self.media.state.get("queue"):
+                self._media_download_next()
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
         return GLib.SOURCE_REMOVE
