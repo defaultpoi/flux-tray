@@ -13,11 +13,26 @@ from urllib.request import Request, urlopen
 from flux_tray.media.episodes import parse_season_episode
 
 
+def _safe_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    if headers is None:
+        return {}
+    if not isinstance(headers, dict):
+        raise ValueError("HTTP headers must be a dictionary")
+    result = {}
+    for name, value in headers.items():
+        if not isinstance(name, str) or not name.strip() or not isinstance(value, str):
+            raise ValueError("HTTP headers must contain non-empty string names and values")
+        if any(char in name + value for char in "\\r\\n"):
+            raise ValueError("HTTP headers cannot contain line breaks")
+        result[name.strip()] = value.strip()
+    return result
+
+
 def fetch_json(url: str, *, timeout: float = 10, max_bytes: int = 1_000_000,
                headers: dict[str, str] | None = None):
     if not url.startswith(("https://", "http://")):
         raise ValueError("URL must use HTTP or HTTPS")
-    request = Request(url, headers={"User-Agent": "FluxTray/0.1", **(headers or {})})
+    request = Request(url, headers={"User-Agent": "FluxTray/0.1", **_safe_headers(headers)})
     with urlopen(request, timeout=timeout) as response:
         payload = response.read(max_bytes + 1)
     if len(payload) > max_bytes:
