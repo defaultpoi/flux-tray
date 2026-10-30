@@ -17,3 +17,12 @@ def test_filename_sanitization_removes_path_separators():
     assert "/" not in safe_filename("../episode\\name")
     assert not safe_filename("../episode\\name").startswith(".")
     assert safe_filename("   ") == "untitled"
+
+def test_archive_org_urls_are_rejected():
+    from flux_tray.media.episodes import normalize_episode
+    try:
+        normalize_episode({"id": "x", "url": "https://archive.org/details/example"}, "source")
+    except ValueError as exc:
+        assert "Archive.org" in str(exc)
+    else:
+        raise AssertionError("Archive.org source accepted")
