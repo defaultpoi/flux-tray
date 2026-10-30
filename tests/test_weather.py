@@ -75,3 +75,15 @@ def test_weather_geocodes_place_once_and_caches_coordinates(tmp_path):
                             fetcher=fetcher)
     assert second.refresh(force=True)["longitude"] == 26.67
     assert calls == ["Buzau, Romania"]
+
+
+
+def test_weather_can_be_configured_after_first_launch(tmp_path):
+    store = JsonStore(tmp_path / "weather.json", dict)
+    payload = {"current": {"temperature_2m": 15}, "daily": {}}
+    service = WeatherService(store, fetcher=lambda _url: payload)
+    service.configure(latitude=45.15, longitude=26.82)
+    state = service.refresh(force=True)
+    assert state["latitude"] == 45.15
+    assert state["longitude"] == 26.82
+    assert state["temperature"] == 15
