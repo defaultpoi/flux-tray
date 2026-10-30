@@ -75,9 +75,11 @@ class FeedPopup:
             return
         geometry = monitor.get_workarea()
         width, height = self.window.get_size()
+        # The monitor workarea starts below panels that reserve screen space,
+        # so this places the popup just under the XFCE panel/tray.
         self.window.move(
             geometry.x + geometry.width - width - 16,
-            geometry.y + geometry.height - height - 16,
+            geometry.y + 16,
         )
 
     def rebuild(self):
