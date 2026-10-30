@@ -12,7 +12,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 
 
 class TrayController:
-    def __init__(self, application, feed_service, task_manager, timer_service=None, connectivity_service=None, update_service=None, weather_service=None):
+    def __init__(self, application, feed_service, task_manager, timer_service=None, connectivity_service=None, update_service=None, weather_service=None, live_service=None):
         self.application = application
         self.feeds = feed_service
         self.tasks = task_manager
@@ -20,6 +20,7 @@ class TrayController:
         self.connectivity = connectivity_service
         self.updates = update_service
         self.weather = weather_service
+        self.live = live_service
         self.log = logging.getLogger("flux_tray.ui")
         self.icon = Gtk.StatusIcon.new_from_icon_name("view-list-symbolic")
         self.icon.set_visible(True)
@@ -40,6 +41,9 @@ class TrayController:
         if self.weather is not None:
             GLib.timeout_add_seconds(1800, self._weather_tick)
             self._weather_tick()
+        if self.live is not None:
+            GLib.timeout_add_seconds(900, self._live_tick)
+            self._live_tick()
 
     def _on_activate(self, _icon):
         self._rebuild_menu(self.menu)
