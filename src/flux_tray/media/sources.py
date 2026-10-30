@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from calendar import timegm
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 import feedparser
@@ -65,10 +67,12 @@ class RssMediaAdapter:
                 media_url = enclosure.get("href") or enclosure.get("url")
                 if not media_url:
                     continue
+                published = entry.get("published_parsed") or entry.get("updated_parsed")
+                date = datetime.fromtimestamp(timegm(published), timezone.utc).isoformat() if published else None
                 raw = {
                     "id": str(entry.get("id") or media_url) + f":{index}",
                     "title": entry.get("title") or "Untitled media",
-                    "date": entry.get("published") or entry.get("updated"),
+                    "date": date,
                     "url": media_url,
                     "ext": enclosure.get("type", "").split("/")[-1] or None,
                     "metadata": {"author": entry.get("author", ""),
