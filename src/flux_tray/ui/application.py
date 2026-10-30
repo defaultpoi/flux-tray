@@ -22,6 +22,7 @@ from flux_tray.connectivity.service import ConnectivityService
 from flux_tray.updates.service import UpdateService
 from flux_tray.weather.service import WeatherService
 from flux_tray.live.service import LiveService, StreamlinkProbe
+from flux_tray.live.twitch import TwitchProbe
 from flux_tray.media.player import MpvController
 from flux_tray.media.service import MediaService
 from flux_tray.media.sources import YtDlpAdapter
@@ -77,6 +78,7 @@ class FluxTrayApplication(Gtk.Application):
         live = LiveService(
             live_store,
             probe=StreamlinkProbe(process=self.process),
+            twitch_probe=TwitchProbe(),
             interval=config.get_int("live", "interval", 15, minimum=1) * 60,
             player=self.player,
             quality=config.get("live", "quality", "best") or "best",
