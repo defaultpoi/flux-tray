@@ -51,7 +51,7 @@ def download_file(url: str, destination: Path, *, timeout: float = 30,
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix(destination.suffix + ".part")
     offset = partial.stat().st_size if partial.exists() else 0
-    request_headers = {"User-Agent": "FluxTray/0.1", **(headers or {})}
+    request_headers = {"User-Agent": "FluxTray/0.1", **_safe_headers(headers)}
     if offset:
         request_headers["Range"] = f"bytes={offset}-"
     request = Request(url, headers=request_headers)
