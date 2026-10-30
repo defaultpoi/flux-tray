@@ -1,4 +1,4 @@
-"""A compact popup listing unread feed-item titles."""
+"""Borderless feed popup grouped by feed title."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from gi.repository import Gdk, Gtk, Pango
 
 
 class FeedPopup:
-    """Displays unread feed titles as a simple, one-line-per-item list."""
+    """Displays unread feed items grouped under their configured feed names."""
 
     def __init__(self, feeds, *, width: int = 440, max_height: int = 620):
         self.feeds = feeds
@@ -20,14 +20,15 @@ class FeedPopup:
         self.window.set_title("Flux Tray")
         self.window.set_default_size(width, max_height)
         self.window.set_size_request(320, 180)
-        self.window.set_resizable(True)
+        self.window.set_resizable(False)
+        self.window.set_decorated(False)
         self.window.set_keep_above(True)
         self.window.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
         self.window.set_skip_taskbar_hint(True)
         self.window.set_skip_pager_hint(True)
         self.window.connect("delete-event", self._on_delete)
 
-        self.root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.root.set_border_width(12)
         self.window.add(self.root)
         self._visible = False
@@ -83,33 +84,19 @@ class FeedPopup:
             self.root.remove(child)
             child.destroy()
 
+        feeds = self.feeds.state.get("feeds", [])
         items = self.feeds.unread_items()
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        heading = Gtk.Label()
-        heading.set_markup(
-            f"<b>New items</b>  <span foreground='#888888'>{len(items)} unread</span>"
-        )
-        heading.set_xalign(0)
-        header.pack_start(heading, True, True, 0)
-
-        close = Gtk.Button.new_from_icon_name(
-            "window-close-symbolic", Gtk.IconSize.BUTTON
-        )
-        close.set_relief(Gtk.ReliefStyle.NONE)
-        close.connect("clicked", lambda *_: self.hide())
-        header.pack_end(close, False, False, 0)
-        self.root.pack_start(header, False, False, 0)
-        self.root.pack_start(
-            Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 0
-        )
+        items_by_feed = {}
+        for item in items:
+            items_by_feed.setdefault(item.get("feed_id"), []).append(item)
 
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroller.set_min_content_height(120)
-        scroller.set_max_content_height(500)
+        scroller.set_max_content_height(590)
         self.root.pack_start(scroller, True, True, 0)
 
-        listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
         listing.set_border_width(2)
         scroller.add(listing)
 
@@ -119,13 +106,28 @@ class FeedPopup:
             empty.set_margin_bottom(24)
             listing.pack_start(empty, False, False, 0)
 
-        for item in items[:100]:
-            self._append_item(listing, item)
+        for feed in feeds:
+            feed_items = items_by_feed.get(feed["id"], [])
+            if not feed_items:
+                continue
+            self._append_feed_title(listing, feed, len(feed_items))
+            for item in feed_items:
+                self._append_item(listing, item)
 
-        dismiss = Gtk.Button(label="Dismiss")
-        dismiss.set_halign(Gtk.Align.END)
-        dismiss.connect("clicked", lambda *_: self.hide())
-        self.root.pack_end(dismiss, False, False, 0)
+        self.root.show_all()
+
+    def _append_feed_title(self, listing, feed, count):
+        title = Gtk.Label()
+        escaped = GLib_MARKUP_ESCAPE(feed.get("name") or feed.get("url") or "Feed")
+        title.set_markup(
+            f"<b>{escaped}</b> <span foreground='#888888'>{count}</span>"
+        )
+        title.set_xalign(0)
+        title.set_margin_top(5)
+        title.set_tooltip_text(feed.get("url", ""))
+        title.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        title.connect("button-press-event", self._on_feed_title_click, feed["id"])
+        listing.pack_start(title, False, False, 0)
 
     def _append_item(self, listing, item):
         title = (item.get("title") or "(untitled)").strip()
@@ -157,6 +159,15 @@ class FeedPopup:
         row.pack_end(bookmark, False, False, 0)
         listing.pack_start(row, False, True, 0)
 
+    def _on_feed_title_click(self, _widget, event, feed_id):
+        if event.button == Gdk.BUTTON_PRIMARY:
+            self.feeds.mark_feed_read(feed_id)
+            self.rebuild()
+            if not self.feeds.unread_items():
+                self.hide()
+            return True
+        return False
+
     def _on_item_click(self, _widget, event, item):
         if event.button == Gdk.BUTTON_PRIMARY:
             link = item.get("link", "")
@@ -175,13 +186,14 @@ class FeedPopup:
         self.rebuild()
         if not self.feeds.unread_items():
             self.hide()
-        else:
-            self.window.show_all()
 
     def _save_for_later(self, item_id):
         self.feeds.save_for_later(item_id)
         self.rebuild()
         if not self.feeds.unread_items():
             self.hide()
-        else:
-            self.window.show_all()
+
+
+def GLib_MARKUP_ESCAPE(value):
+    from html import escape
+    return escape(str(value), quote=True)
