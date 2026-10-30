@@ -165,6 +165,9 @@ class MediaService:
         resolved = self.plugins.resolve_episode(source["url"], episode)
         if is_archive_org(resolved.get("url")):
             raise ValueError("Archive.org media downloads are intentionally unsupported")
+        metadata = resolved.get("metadata") or {}
+        if metadata.get("is_live") or resolved.get("is_live") or metadata.get("live_status") == "is_live":
+            raise ValueError("Live HLS streams cannot be queued as media downloads")
         plugin_path = self.plugins.download_episode(source["url"], resolved,
                                                      self.output_dir, lambda *_args: None, cancelled)
         if plugin_path is not None:
