@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from threading import Event
 from typing import Callable
@@ -40,13 +41,34 @@ def download_file(url: str, destination: Path, *, timeout: float = 30,
         request_headers["Range"] = f"bytes={offset}-"
     request = Request(url, headers=request_headers)
     with urlopen(request, timeout=timeout) as response:
-        resumed = offset > 0 and getattr(response, "status", 200) == 206
-        if not resumed:
-            offset = 0
+        status = getattr(response, "status", 200)
         remaining = response.headers.get("Content-Length")
-        total = offset + int(remaining) if remaining and remaining.isdigit() else None
-        mode = "ab" if resumed else "wb"
+        response_length = int(remaining) if remaining and remaining.isdigit() else None
+        expected_response_length = response_length
+        if status == 206:
+            content_range = response.headers.get("Content-Range", "")
+            match = re.fullmatch(r"bytes (\\d+)-(\\d+)/(\\d+|\\*)", content_range)
+            if match is None or int(match.group(1)) != offset:
+                raise ValueError("Server returned an invalid range for the resumed download")
+            range_end = int(match.group(2))
+            if range_end < offset:
+                raise ValueError("Server returned an invalid range for the resumed download")
+            expected_response_length = range_end - offset + 1
+            if response_length is not None and response_length != expected_response_length:
+                raise ValueError("Server range length does not match Content-Length")
+            range_total = match.group(3)
+            total = int(range_total) if range_total.isdigit() else (
+                offset + expected_response_length if response_length is not None else None
+            )
+            if total is not None and range_end >= total:
+                raise ValueError("Server returned an invalid total for the resumed download")
+            mode = "ab" if offset else "wb"
+        else:
+            offset = 0
+            total = response_length
+            mode = "wb"
         downloaded = offset
+        received = 0
         with partial.open(mode) as output:
             while True:
                 if cancelled is not None and cancelled.is_set():
@@ -55,10 +77,15 @@ def download_file(url: str, destination: Path, *, timeout: float = 30,
                 if not chunk:
                     break
                 output.write(chunk)
+                received += len(chunk)
                 downloaded += len(chunk)
                 if progress is not None:
                     progress(downloaded, total)
             output.flush()
             os.fsync(output.fileno())
+        if expected_response_length is not None and received != expected_response_length:
+            raise RuntimeError("Download response ended before the expected byte count")
+        if total is not None and downloaded != total:
+            raise RuntimeError("Download ended before the expected total size")
     os.replace(partial, destination)
     return str(destination)
