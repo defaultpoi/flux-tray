@@ -236,6 +236,7 @@ class TrayController:
                 self._append(title, lambda _widget, current=item: self._open_item(current))
         self.menu.append(Gtk.SeparatorMenuItem())
         self._append("Add feed…", lambda _item: self._add_feed_dialog())
+        self._append("Reorder feeds…", lambda _item: self._reorder_feeds_dialog())
         self._append("Feed rules…", lambda _item: self._feed_rules_dialog())
         if self.timer is not None:
             status = self.timer.state.get("status", "idle")
@@ -397,6 +398,38 @@ class TrayController:
         weather_suffix = f" · {temperature}°C" if temperature is not None else ""
         alert_suffix = " · severe weather warning" if alert_level >= 3 else ""
         self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}{weather_suffix}{alert_suffix}")
+
+    def _reorder_feeds_dialog(self):
+        dialog = Gtk.Dialog(title="Reorder feeds", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        box.pack_start(Gtk.Label(label="Drag rows to set the feed order."), False, False, 0)
+        model = Gtk.ListStore(str, str)
+        for feed in self.feeds.state["feeds"]:
+            model.append([feed["id"], feed["name"]])
+        view = Gtk.TreeView(model=model)
+        renderer = Gtk.CellRendererText()
+        view.append_column(Gtk.TreeViewColumn("Feed", renderer, text=1))
+        view.set_reorderable(True)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_min_content_height(220)
+        scroll.add(view)
+        box.pack_start(scroll, True, True, 0)
+        dialog.show_all()
+        if dialog.run() == Gtk.ResponseType.OK:
+            ordered_ids = [row[0] for row in model]
+            try:
+                self.feeds.reorder_feeds(ordered_ids)
+            except ValueError as exc:
+                self.log.warning("Could not reorder feeds: %s", exc)
+        dialog.destroy()
+        self._rebuild_menu(self.menu)
 
     def _rename_feed_dialog(self, feed):
         dialog = Gtk.Dialog(title="Rename feed", flags=Gtk.DialogFlags.MODAL)
