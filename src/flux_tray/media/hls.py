@@ -189,8 +189,8 @@ class HlsDownloader:
                                  output_callback=on_output if progress_callback else None)
             if result.returncode != 0:
                 raise RuntimeError(result.stderr.strip() or "HLS download failed")
-            if not partial.is_file():
-                raise RuntimeError("ffmpeg completed without creating the media file")
+            if not partial.is_file() or partial.stat().st_size == 0:
+                raise RuntimeError("ffmpeg completed without creating a non-empty media file")
             os.replace(partial, destination)
             self._download_subtitles(episode, output_dir, destination.stem, headers)
             if progress_callback is not None:
