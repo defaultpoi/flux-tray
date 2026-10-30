@@ -27,6 +27,7 @@ def safe_filename(value: str, limit: int = 160) -> str:
     cleaned = "".join("_" if char in {"/", "\\"} or ord(char) < 32 else char
                       for char in normalized).strip(" .")
     cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = cleaned.lstrip(". ")
     return (cleaned or "untitled")[:limit]
 
 
