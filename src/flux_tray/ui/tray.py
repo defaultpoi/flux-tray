@@ -58,6 +58,7 @@ class TrayController:
                 title = item["title"].replace("\n", " ").strip()[:90]
                 self._append(title, lambda _widget, current=item: self._open_item(current))
         self.menu.append(Gtk.SeparatorMenuItem())
+        self._append("Add feed…", lambda _item: self._add_feed_dialog())
         self._append("Refresh feeds", lambda _item: self.refresh())
         self._append("Quit", lambda _item: self.application.quit())
         self.menu.show_all()
@@ -80,6 +81,36 @@ class TrayController:
         unread = self.feeds.unread_count()
         self.icon.set_from_icon_name("mail-unread-symbolic" if unread else "view-list-symbolic")
         self.icon.set_tooltip_text(f"Flux Tray — {unread} unread")
+
+    def _add_feed_dialog(self):
+        dialog = Gtk.Dialog(title="Add RSS/Atom feed", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Add", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        name = Gtk.Entry()
+        name.set_placeholder_text("Feed name (optional)")
+        url = Gtk.Entry()
+        url.set_placeholder_text("https://example.com/feed.xml")
+        box.pack_start(name, False, False, 0)
+        box.pack_start(url, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            try:
+                self.feeds.add_feed(url.get_text(), name.get_text().strip() or None)
+                self.refresh()
+            except (ValueError, OSError) as exc:
+                error = Gtk.MessageDialog(flags=0, message_type=Gtk.MessageType.ERROR,
+                    buttons=Gtk.ButtonsType.CLOSE, text="Could not add feed")
+                error.format_secondary_text(str(exc))
+                error.run()
+                error.destroy()
+        dialog.destroy()
 
     def refresh(self):
         def work():
