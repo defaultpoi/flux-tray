@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass
-from threading import Lock
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Callable, Sequence
 
 from flux_tray.core.process import ProcessResult, ProcessSupervisor
@@ -82,12 +82,12 @@ class UpdateService:
     def remove_orphans(self) -> ProcessResult:
         """Remove current automatic orphans after an explicit confirmation in the UI."""
         return self._run(self._privileged(["xbps-remove", "-y", "-o"]),
-                           timeout=self.timeout)
+                         timeout=self.timeout)
 
     def clean_cache(self) -> ProcessResult:
         """Remove outdated cached packages after an explicit confirmation in the UI."""
         return self._run(self._privileged(["xbps-remove", "-y", "-O"]),
-                           timeout=self.timeout, env=self._env())
+                           timeout=self.timeout)
 
     def remove_orphans_and_clean_cache(self) -> tuple[ProcessResult, ProcessResult]:
         removed = self.remove_orphans()
