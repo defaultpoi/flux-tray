@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 import subprocess
 import time
@@ -92,9 +91,11 @@ class MpvController:
                     except subprocess.TimeoutExpired:
                         self.process.kill()
                         self.process.wait()
+            was_owned = self._owned
             self.process = None
             self._owned = False
-            try:
-                self.socket_path.unlink()
-            except FileNotFoundError:
-                pass
+            if was_owned:
+                try:
+                    self.socket_path.unlink()
+                except FileNotFoundError:
+                    pass
