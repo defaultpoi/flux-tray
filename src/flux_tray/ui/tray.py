@@ -229,6 +229,7 @@ class TrayController:
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
         return GLib.SOURCE_REMOVE
+
     def _connectivity_tick(self):
         if self.connectivity is None:
             return GLib.SOURCE_REMOVE
@@ -254,6 +255,7 @@ class TrayController:
             self._rebuild_menu(self.menu)
         self._update_icon()
         return GLib.SOURCE_REMOVE
+
     def _timer_dialog(self):
         dialog = Gtk.Dialog(title="Countdown timer", flags=Gtk.DialogFlags.MODAL)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
@@ -295,6 +297,7 @@ class TrayController:
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
         return GLib.SOURCE_CONTINUE
+
     def refresh(self):
         def work():
             return self.feeds.check_due()
