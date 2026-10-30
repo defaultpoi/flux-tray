@@ -6,7 +6,7 @@ This is a clean implementation. It does not migrate, import or maintain compatib
 
 ## Project status
 
-The repository is being built in feature-complete milestones. The target is the complete feature set in [the feature specification](docs/FEATURES.md), with architecture and implementation decisions in [the architecture](docs/ARCHITECTURE.md) and [the roadmap](docs/ROADMAP.md).
+The repository is being built in feature-complete milestones. The target is the complete feature set in [the feature specification](docs/FEATURES.md), with architecture and implementation decisions in [the architecture](docs/ARCHITECTURE.md), [the roadmap](docs/ROADMAP.md) and the conservative [implementation status](docs/STATUS.md).
 
 ## Design goals
 
