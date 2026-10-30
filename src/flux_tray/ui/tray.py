@@ -114,6 +114,9 @@ class TrayController:
         self.feeds.mark_read(item["id"])
         self._rebuild_menu(self.menu)
 
+    def _save_for_later(self, item):
+        self.feeds.save_for_later(item["id"])
+        self._rebuild_menu(self.menu)
     def _mark_feed_read(self, feed_id):
         self.feeds.mark_feed_read(feed_id)
         self._rebuild_menu(self.menu)
