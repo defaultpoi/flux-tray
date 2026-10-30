@@ -14,15 +14,18 @@ from flux_tray.core.config import Config, Paths
 from flux_tray.core.logging import configure_logging
 from flux_tray.core.storage import JsonStore
 from flux_tray.core.tasks import TaskManager
+from flux_tray.core.process import ProcessSupervisor
 from flux_tray.feeds.service import FeedService
 from flux_tray.ui.tray import TrayController
 from flux_tray.timers.service import CountdownTimer
 from flux_tray.connectivity.service import ConnectivityService
 from flux_tray.updates.service import UpdateService
 from flux_tray.weather.service import WeatherService
-from flux_tray.live.service import LiveService
+from flux_tray.live.service import LiveService, StreamlinkProbe
 from flux_tray.media.player import MpvController
 from flux_tray.media.service import MediaService
+from flux_tray.media.sources import YtDlpAdapter
+from flux_tray.media.downloader import MediaDownloader
 
 
 class FluxTrayApplication(Gtk.Application):
@@ -32,6 +35,7 @@ class FluxTrayApplication(Gtk.Application):
         self.tasks = None
         self.tray = None
         self.player = None
+        self.process = None
 
     def do_activate(self) -> None:
         self.paths.config_dir.mkdir(parents=True, exist_ok=True)
@@ -41,6 +45,7 @@ class FluxTrayApplication(Gtk.Application):
         config.ensure_exists()
         config.load()
         self.tasks = TaskManager(workers=2)
+        self.process = ProcessSupervisor()
         store = JsonStore(self.paths.data_dir / "feeds.json",
                           lambda: {"feeds": [], "items": {}, "read_later": []})
         feeds = FeedService(store)
@@ -53,7 +58,7 @@ class FluxTrayApplication(Gtk.Application):
         connectivity_store = JsonStore(self.paths.data_dir / "connectivity.json", dict)
         connectivity = ConnectivityService(connectivity_store)
         update_store = JsonStore(self.paths.data_dir / "updates.json", dict)
-        updates = UpdateService(update_store)
+        updates = UpdateService(update_store, process=self.process)
         weather = None
         latitude = config.get("weather", "lat", "") or ""
         longitude = config.get("weather", "lon", "") or ""
@@ -70,6 +75,7 @@ class FluxTrayApplication(Gtk.Application):
         self.player = MpvController(self.paths.state_dir / "mpv.sock")
         live = LiveService(
             live_store,
+            probe=StreamlinkProbe(process=self.process),
             interval=config.get_int("live", "interval", 15, minimum=1) * 60,
             player=self.player,
             quality=config.get("live", "quality", "best") or "best",
@@ -82,6 +88,8 @@ class FluxTrayApplication(Gtk.Application):
             interval=config.get_int("media", "interval", 60, minimum=10) * 60,
             output_dir=Path(config.get("media", "path", "~/Videos") or "~/Videos"),
             player=self.player,
+            yt_dlp=YtDlpAdapter(process=self.process),
+            downloader=MediaDownloader(process=self.process),
         )
         self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates, weather, live, media)
         self.hold()
@@ -93,6 +101,9 @@ class FluxTrayApplication(Gtk.Application):
         if self.tasks is not None:
             self.tasks.shutdown(wait=False)
             self.tasks = None
+        if self.process is not None:
+            self.process.terminate_all()
+            self.process = None
         if self.player is not None:
             self.player.close()
             self.player = None
