@@ -75,7 +75,7 @@ class UpdateService:
 
     def dismiss_last_action(self) -> None:
         self.state.pop("last_action", None)
-        self._save()
+        self.store.save(self.state)
 
     def scan_updates(self) -> list[PackageChange]:
         result = self._run(["xbps-install", "-Mn", "-u"], timeout=180)
