@@ -40,6 +40,8 @@ class MediaService:
             raise ValueError("Source kind must be youtube, rss, url or plugin")
         if not url.strip():
             raise ValueError("Source URL cannot be empty")
+        if kind != "plugin" and not url.strip().startswith(("https://", "http://")):
+            raise ValueError("Media source must use HTTP or HTTPS")
         source_id = uuid4().hex
         self.state["sources"].append({"id": source_id, "kind": kind, "url": url.strip(),
             "name": name or url.strip(), "initialized": False, "next_check": None,
