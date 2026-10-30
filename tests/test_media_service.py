@@ -200,3 +200,13 @@ def test_media_service_forwards_and_stores_download_progress(tmp_path):
     assert updates[0]["percent"] == 37.5
     assert service.state["download"]["percent"] == 100.0
     assert service.state["download"]["status"] == "completed"
+
+
+
+def test_interrupted_download_is_recovered_on_service_restart(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+        lambda: {"sources": [], "episodes": {}, "queue": [], "watched": [],
+                 "download": {"status": "downloading", "title": "Episode"}})
+    service = MediaService(store, tmp_path / "plugins")
+    assert service.state["download"]["status"] == "failed"
+    assert "interrupted" in service.state["download"]["error"]
