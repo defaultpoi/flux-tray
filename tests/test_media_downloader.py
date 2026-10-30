@@ -11,7 +11,7 @@ def test_download_uses_resume_subtitles_and_safe_output_name(tmp_path):
 
     downloader = MediaDownloader(runner=runner)
     path = downloader.download({"url": "https://example.test/video",
-                                "title": "../Episode S01E01"})
+                                "title": "../Episode S01E01"}, tmp_path)
     assert path == "/tmp/Episode.mkv"
     argv = calls[0][0]
     assert "--continue" in argv
