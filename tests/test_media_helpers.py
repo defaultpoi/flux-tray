@@ -124,3 +124,11 @@ def test_resumable_download_rejects_empty_response(tmp_path):
         thread.join(timeout=2)
         server.server_close()
 
+def test_plugin_http_helpers_reject_header_line_breaks(tmp_path):
+    with pytest.raises(ValueError, match="line breaks"):
+        download_file(
+            "https://example.test/video",
+            tmp_path / "video.bin",
+            headers={"X-Test": "value\\r\\nInjected: yes"},
+        )
+
