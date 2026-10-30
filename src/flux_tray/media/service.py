@@ -209,6 +209,7 @@ class MediaService:
             raise
         self.mark_downloaded(episode["id"], path)
         episode["download_error"] = None
+        self._save()
         return episode
     def mark_downloaded(self, episode_id: str, path: str) -> None:
         episode = self.state["episodes"][episode_id]
