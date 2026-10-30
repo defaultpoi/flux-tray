@@ -8,7 +8,7 @@ import webbrowser
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gdk, Gio, GLib, Gtk
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk
 
 
 class TrayController:
@@ -204,7 +204,24 @@ class TrayController:
 
     def _update_icon(self):
         unread = self.feeds.unread_count()
-        self.icon.set_from_icon_name("mail-unread-symbolic" if unread else "view-list-symbolic")
+        updates = len(self.updates.state.get("changes", [])) if self.updates is not None else 0
+        if updates:
+            color, fallback = "#d83b3b", "software-update-urgent-symbolic"
+            mark = '<path d="M8 3v7m-3-3 3 3 3-3M4 13h8" stroke="white" stroke-width="1.7" fill="none"/>'
+        elif unread:
+            color, fallback = "#e69a24", "mail-unread-symbolic"
+            mark = '<circle cx="8" cy="8" r="2.2" fill="white"/>'
+        else:
+            color, fallback = "#36a269", "view-list-symbolic"
+            mark = '<path d="m4 8 2.5 2.5L12 5" stroke="white" stroke-width="1.8" fill="none"/>'
+        svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7.3" fill="{color}"/>{mark}</svg>'
+        try:
+            loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
+            loader.write(svg.encode("utf-8"))
+            loader.close()
+            self.icon.set_from_pixbuf(loader.get_pixbuf())
+        except Exception:
+            self.icon.set_from_icon_name(fallback)
         network = self.connectivity.state.get("status") if self.connectivity is not None else None
         suffix = f" · {network}" if network else ""
         temperature = self.weather.state.get("temperature") if self.weather is not None else None
