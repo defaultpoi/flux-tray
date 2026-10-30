@@ -22,6 +22,7 @@ from flux_tray.connectivity.service import ConnectivityService
 from flux_tray.updates.service import UpdateService
 from flux_tray.weather.service import WeatherService
 from flux_tray.weather.alerts import MeteoAlarmClient
+from flux_tray.weather.geocode import NominatimGeocoder
 from flux_tray.live.service import LiveService, StreamlinkProbe
 from flux_tray.live.twitch import TwitchProbe
 from flux_tray.media.player import MpvController
@@ -66,7 +67,11 @@ class FluxTrayApplication(Gtk.Application):
         weather = None
         latitude = config.get("weather", "lat", "") or ""
         longitude = config.get("weather", "lon", "") or ""
-        if latitude.strip() and longitude.strip():
+        location = config.get("weather", "location", "") or ""
+        has_latitude, has_longitude = bool(latitude.strip()), bool(longitude.strip())
+        if has_latitude != has_longitude:
+            logger.warning("Weather is disabled: configure both latitude and longitude")
+        elif (has_latitude and has_longitude) or location.strip():
             try:
                 weather_store = JsonStore(self.paths.data_dir / "weather.json", dict)
                 alerts_client = None
@@ -80,7 +85,11 @@ class FluxTrayApplication(Gtk.Application):
                     else:
                         logger.warning("MeteoAlarm alerts are enabled but weather.region is empty")
                 weather = WeatherService(
-                    weather_store, float(latitude), float(longitude),
+                    weather_store,
+                    float(latitude) if has_latitude else None,
+                    float(longitude) if has_longitude else None,
+                    location=location or None,
+                    geocoder=NominatimGeocoder() if not has_latitude else None,
                     interval=config.get_int("weather", "interval", 30, minimum=5) * 60,
                     alerts_client=alerts_client,
                 )
