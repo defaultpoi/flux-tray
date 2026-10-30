@@ -1,5 +1,7 @@
 # User-supplied notes from previous app
 
+These notes preserve behavior and implementation gotchas; they are not a mandate to reproduce the old architecture. **Archive.org support is explicitly excluded from Flux Tray**, even though the previous application supported it.
+
 All GTK mutations from threads used GLib.idle_add; never block GTK on network/subprocesses. New architecture should use ownership and task de-duplication rather than copying many old locks.
 
 Cadence to preserve: feeds 60 s; timer/schedule 1 s (also corner readout); connectivity 10 s; alert pulse 600 ms; breaking/missed pulse 700 ms, no work while popup hidden.
