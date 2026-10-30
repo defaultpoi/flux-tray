@@ -25,7 +25,7 @@ This document is deliberately conservative. A service existing in the repository
 
 ## Verification status
 
-- Unit tests have been added for several pure services and command contracts, including Twitch batching and schedule validation; tests have not been executed in this session.
-- The code has **not** been run on the target Void Linux desktop in this development session.
-- No successful CI result or real XFCE/X11 integration result has been verified here.
+- GitHub Actions compiles `src` and `tests`, then runs the pytest suite successfully on Python 3.11, 3.12, 3.13 and 3.14 (latest verified run: guided weather configuration tests).
+- CI does not exercise GTK interactions, real network providers, mpv, XBPS/Topgrade or the target desktop.
+- The code has **not** been run on the target Void Linux desktop in this development session; real XFCE/X11 integration remains unverified.
 - Do not treat this branch as a release until the missing behavior is implemented, the test suite passes, and the application has been exercised on the target machine over an extended run.
