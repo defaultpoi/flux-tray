@@ -102,11 +102,11 @@ class LiveService:
         self._save()
         return channel["status"]
 
-    def check_due(self) -> int:
+    def check_due(self, *, force: bool = False) -> int:
         transitions = 0
         for channel in list(self.state["channels"]):
             previous = channel.get("status")
-            current = self.check_channel(channel["id"])
+            current = self.check_channel(channel["id"], force=force)
             if current == "live" and previous != "live":
                 transitions += 1
         return transitions
