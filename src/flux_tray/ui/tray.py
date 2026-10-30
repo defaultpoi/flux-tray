@@ -784,6 +784,7 @@ class TrayController:
                 self._media_download_next()
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
+        self._update_icon()
         return GLib.SOURCE_REMOVE
 
     def _media_play_next(self):
