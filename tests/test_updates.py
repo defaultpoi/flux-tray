@@ -28,7 +28,7 @@ def test_topgrade_runs_system_and_configured_steps(monkeypatch, tmp_path):
     def runner(argv, **kwargs):
         calls.append((argv, kwargs))
         if argv == ["xbps-query", "-l"]:
-            return ProcessResult(tuple(argv), 0, "[*] bash-5.1_1 (installed)\\n", "")
+            return ProcessResult(tuple(argv), 0, "[*] bash-5.1_1 (installed)\n", "")
         return ProcessResult(tuple(argv), 0, "Topgrade completed", "")
     monkeypatch.setattr("flux_tray.updates.service.shutil.which", lambda _name: "/usr/bin/topgrade")
     service = UpdateService(JsonStore(tmp_path / "updates.json", dict), runner=runner,
@@ -65,7 +65,7 @@ def test_maintenance_result_persists_across_scans_and_can_be_dismissed(monkeypat
         calls.append(list(argv))
         if argv[0] == "topgrade":
             return ProcessResult(tuple(argv), 1, "", "update failed")
-        return ProcessResult(tuple(argv), 0, "curl-8.1_1 update x86_64 current 10 20\\n", "")
+        return ProcessResult(tuple(argv), 0, "curl-8.1_1 update x86_64 current 10 20\n", "")
 
     monkeypatch.setattr("flux_tray.updates.service.shutil.which", lambda _name: "/usr/bin/topgrade")
     store = JsonStore(tmp_path / "updates.json", dict)
@@ -83,8 +83,8 @@ def test_maintenance_result_persists_across_scans_and_can_be_dismissed(monkeypat
 
 def test_installed_versions_are_compared_before_and_after_topgrade(monkeypatch, tmp_path):
     snapshots = iter((
-        "[*] curl-8.1_1 (installed)\\n[*] libfoo-devel-1.0_1 (installed)\\n",
-        "[*] curl-8.2_1 (installed)\\n[*] libfoo-devel-1.0_1 (installed)\\n[*] newpkg-2.0_1 (installed)\\n",
+        "[*] curl-8.1_1 (installed)\n[*] libfoo-devel-1.0_1 (installed)\n",
+        "[*] curl-8.2_1 (installed)\n[*] libfoo-devel-1.0_1 (installed)\n[*] newpkg-2.0_1 (installed)\n",
     ))
     calls = []
 
@@ -108,7 +108,7 @@ def test_installed_versions_are_compared_before_and_after_topgrade(monkeypatch, 
 def test_version_change_parser_uses_package_name_before_version(tmp_path):
     service = UpdateService(JsonStore(tmp_path / "updates.json", dict), runner=lambda *a, **k: None)
     result = ProcessResult(("xbps-query", "-l"), 0,
-                           "[*] libfoo-devel-1.2_3 (installed)\\n[*] python3.14-3.14.1_1 (installed)\\n", "")
+                           "[*] libfoo-devel-1.2_3 (installed)\n[*] python3.14-3.14.1_1 (installed)\n", "")
     service.runner = lambda *args, **kwargs: result
     assert service._installed_versions() == {
         "libfoo-devel": "1.2_3", "python3.14": "3.14.1_1",
