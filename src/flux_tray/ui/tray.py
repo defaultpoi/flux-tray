@@ -45,13 +45,13 @@ class TrayController:
             GLib.timeout_add_seconds(self.update_interval, self._update_scan_tick)
             self._update_scan_tick()
         if self.weather is not None:
-            GLib.timeout_add_seconds(1800, self._weather_tick)
+            GLib.timeout_add_seconds(max(300, self.weather.interval), self._weather_tick)
             self._weather_tick()
         if self.live is not None:
             GLib.timeout_add_seconds(max(60, self.live.interval), self._live_tick)
             self._live_tick()
         if self.media is not None:
-            GLib.timeout_add_seconds(3600, self._media_tick)
+            GLib.timeout_add_seconds(max(600, self.media.interval), self._media_tick)
             self._media_tick()
 
     def _on_activate(self, _icon):
