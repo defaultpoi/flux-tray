@@ -90,6 +90,10 @@ class TrayController:
         source_id = None
 
         def invoke():
+            if self._closing:
+                if source_id in self._timeout_sources:
+                    self._timeout_sources.remove(source_id)
+                return GLib.SOURCE_REMOVE
             keep = callback()
             if keep == GLib.SOURCE_REMOVE and source_id in self._timeout_sources:
                 self._timeout_sources.remove(source_id)
