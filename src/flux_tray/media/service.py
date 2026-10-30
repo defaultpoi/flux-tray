@@ -275,15 +275,26 @@ class MediaService:
         episode = self.next_queued()
         if episode is None:
             return None
+        download_state = {
+            "episode_id": episode["id"], "title": episode.get("title", "Untitled"),
+            "status": "downloading", "started_at": self.now().isoformat(),
+            "error": None,
+        }
+        self.state["download"] = download_state
+        self._save()
         try:
             path = self._download_episode(episode, cancelled=cancelled)
         except Exception as exc:
             episode["download_error"] = str(exc)
             episode["last_attempt"] = self.now().isoformat()
+            download_state.update({"status": "failed", "error": str(exc),
+                                   "completed_at": self.now().isoformat()})
             self._save()
             raise
         self.mark_downloaded(episode["id"], path)
         episode["download_error"] = None
+        download_state.update({"status": "completed", "path": path,
+                               "completed_at": self.now().isoformat()})
         self._save()
         return episode
     def mark_downloaded(self, episode_id: str, path: str) -> None:
