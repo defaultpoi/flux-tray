@@ -51,3 +51,21 @@ def test_live_hls_episode_is_rejected(tmp_path):
         assert "Live HLS" in str(exc)
     else:
         raise AssertionError("live HLS episode was accepted")
+
+
+
+def test_download_reports_progress_callback(tmp_path):
+    progress = []
+    def runner(argv, **kwargs):
+        assert "--newline" in argv
+        assert "--progress-template" in argv
+        kwargs["output_callback"]("stderr", "download:500|1000|1000|10\\n")
+        return ProcessResult(tuple(argv), 0, "/tmp/video.mkv\\n", "")
+
+    downloader = MediaDownloader(runner=runner)
+    downloader.download({"url": "https://example.test/video", "title": "Video"},
+                        tmp_path, progress_callback=progress.append)
+    assert progress[-1]["percent"] == 50.0
+    assert progress[-1]["downloaded_bytes"] == 500.0
+    assert progress[-1]["total_bytes"] == 1000.0
+    assert progress[-1]["eta"] == 10.0
