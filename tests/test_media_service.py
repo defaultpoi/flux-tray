@@ -403,9 +403,9 @@ def test_media_newest_order_preserves_adapter_order_for_equal_episode_numbers(tm
     source_id = service.add_source("rss", "https://example.test/feed.xml", order="newest")
     service.state["episodes"] = {
         "first": {"id": "first", "source_id": source_id, "status": "new",
-                  "season": 1, "episode": 5, "source_order": 0},
+                  "title": "first", "season": 1, "episode": 5, "source_order": 0},
         "second": {"id": "second", "source_id": source_id, "status": "new",
-                   "season": 1, "episode": 5, "source_order": 1},
+                   "title": "second", "season": 1, "episode": 5, "source_order": 1},
     }
 
     service._fill_queue(source_id)
