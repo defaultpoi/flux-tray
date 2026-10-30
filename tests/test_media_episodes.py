@@ -39,3 +39,29 @@ def test_media_filename_includes_source_episode_and_clean_title():
     assert media_filename("Daily Podcast", {"title": "Morning News"}) == (
         "Daily Podcast - Morning News"
     )
+
+
+def test_episode_normalization_validates_dates_numbers_headers_and_subtitles():
+    normalized = normalize_episode({
+        "id": "daily", "title": "Daily S01E02",
+        "upload_date": "20261030", "ext": ".MP4",
+        "headers": {"Referer": "https://example.test/"},
+        "subs": {"en": "https://example.test/subtitle.vtt"},
+    }, "source")
+    assert normalized.date == "2026-10-30"
+    assert normalized.ext == "mp4"
+    assert normalized.season == 1
+    assert normalized.episode == 2
+
+    for invalid in (
+        {"id": "bad-date", "title": "Bad", "date": "yesterday"},
+        {"id": "bad-number", "title": "Bad", "season": -1},
+        {"id": "bad-header", "title": "Bad", "headers": {"X-Test": "ok\\r\\nInjected: yes"}},
+        {"id": "bad-sub", "title": "Bad", "subs": {"en": "file:///tmp/sub.vtt"}},
+    ):
+        try:
+            normalize_episode(invalid, "source")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"Invalid plugin episode accepted: {invalid}")
