@@ -344,8 +344,21 @@ class MediaService:
                           and (source_id is None or episode.get("source_id") == source_id))
         if not candidates:
             return None
-        candidates.sort(key=lambda item: (item.get("season") or 0, item.get("episode") or 0,
-                                          item.get("date") or item.get("discovered_at") or ""))
+        if source_id is not None:
+            order = self._source(source_id).get("order")
+            if order in {"oldest", "newest"}:
+                def sort_key(item):
+                    season, number = item.get("season"), item.get("episode")
+                    if isinstance(season, int) and isinstance(number, int):
+                        return (0, season, number, item.get("source_order", 0))
+                    return (1, str(item.get("date") or ""), item.get("source_order", 0))
+                candidates.sort(key=lambda item: item.get("source_order", 0))
+                candidates.sort(key=sort_key, reverse=order == "newest")
+            else:
+                candidates.sort(key=lambda item: item.get("source_order", 0))
+        else:
+            candidates.sort(key=lambda item: (item.get("season") or 0, item.get("episode") or 0,
+                                              item.get("date") or item.get("discovered_at") or ""))
         return self.play_episode(candidates[0]["id"])
 
     def update_playback_progress(self) -> bool:
