@@ -7,7 +7,7 @@ from threading import Event
 from typing import Callable
 
 from flux_tray.core.process import ProcessResult, ProcessSupervisor
-from flux_tray.media.episodes import safe_filename
+from flux_tray.media.episodes import is_archive_org, safe_filename
 
 
 class MediaDownloader:
@@ -23,6 +23,8 @@ class MediaDownloader:
         url = episode.get("url")
         if not url or not str(url).startswith(("http://", "https://")):
             raise ValueError("Episode has no playable HTTP(S) URL")
+        if is_archive_org(str(url)):
+            raise ValueError("Archive.org media downloads are intentionally unsupported")
         output_dir = Path(output_dir).expanduser()
         output_dir.mkdir(parents=True, exist_ok=True)
         title = safe_filename(str(episode.get("title") or "untitled"))
