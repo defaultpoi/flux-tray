@@ -62,8 +62,9 @@ class MpvController:
         raise TimeoutError("mpv IPC socket did not become ready")
 
     def load(self, url: str, title: str) -> None:
-        if not url.startswith(("http://", "https://")):
-            raise ValueError("mpv URL must use HTTP or HTTPS")
+        local_file = Path(url).expanduser()
+        if not url.startswith(("http://", "https://")) and not local_file.is_file():
+            raise ValueError("mpv source must be an HTTP(S) URL or existing local file")
         with self._lock:
             if self.process is not None and self.process.poll() is not None:
                 self.process = None
@@ -75,7 +76,7 @@ class MpvController:
                     self._send(["get_property", "idle-active"])
                 except OSError:
                     self._start()
-            self._send(["loadfile", url, "replace"])
+            self._send(["loadfile", str(local_file) if local_file.is_file() else url, "replace"])
             self._send(["set_property", "force-media-title", title])
 
     def close(self) -> None:
