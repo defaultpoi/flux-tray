@@ -129,6 +129,6 @@ def test_plugin_http_helpers_reject_header_line_breaks(tmp_path):
         download_file(
             "https://example.test/video",
             tmp_path / "video.bin",
-            headers={"X-Test": "value\\r\\nInjected: yes"},
+            headers={"X-Test": "value" + chr(13) + chr(10) + "Injected: yes"},
         )
 
