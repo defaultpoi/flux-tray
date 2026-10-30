@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -93,6 +95,74 @@ class CountdownTimer:
             self._save()
             return "ring"
         return "running"
+
+    @property
+    def schedules(self) -> list[dict]:
+        entries = self.state.get("schedules", [])
+        return [item for item in entries if isinstance(item, dict)]
+
+    def add_schedule(self, weekdays: list[int], clock: str, label: str) -> dict:
+        """Add a local-time weekly alarm. Weekdays use Monday=0 through Sunday=6."""
+        import re
+
+        normalized_days = sorted({int(day) for day in weekdays})
+        if not normalized_days or any(day < 0 or day > 6 for day in normalized_days):
+            raise ValueError("Choose at least one weekday")
+        if not re.fullmatch(r"(?:[01]\\d|2[0-3]):[0-5]\\d", clock):
+            raise ValueError("Time must use 24-hour HH:MM format")
+        label = str(label).strip()[:80]
+        if not label:
+            raise ValueError("Alarm label cannot be empty")
+        item = {"id": uuid.uuid4().hex, "weekdays": normalized_days,
+                "time": clock, "label": label, "enabled": True,
+                "last_fired": None}
+        self.state.setdefault("schedules", []).append(item)
+        self._save()
+        return item
+
+    def remove_schedule(self, schedule_id: str) -> None:
+        self.state["schedules"] = [
+            item for item in self.schedules if item.get("id") != schedule_id
+        ]
+        alert = self.state.get("schedule_alert")
+        if isinstance(alert, dict) and alert.get("schedule_id") == schedule_id:
+            self.state.pop("schedule_alert", None)
+        self._save()
+
+    def poll_schedules(self, now: datetime | None = None) -> dict | None:
+        """Return the active recurring alarm, firing each matching schedule once per date."""
+        now = now or datetime.now().astimezone()
+        minute = now.strftime("%H:%M")
+        date_key = now.date().isoformat()
+        active = self.state.get("schedule_alert")
+        if isinstance(active, dict):
+            snooze_until = float(active.get("snooze_until", 0) or 0)
+            if snooze_until <= time.time():
+                active.pop("snooze_until", None)
+                self._save()
+                return active
+            return None
+        for item in self.schedules:
+            if (item.get("enabled", True) and now.weekday() in item.get("weekdays", [])
+                    and item.get("time") == minute and item.get("last_fired") != date_key):
+                item["last_fired"] = date_key
+                alert = {"schedule_id": item["id"], "label": item["label"],
+                         "fired_at": now.isoformat()}
+                self.state["schedule_alert"] = alert
+                self._save()
+                return alert
+        return None
+
+    def snooze_schedule_alert(self, minutes: int = 5) -> None:
+        alert = self.state.get("schedule_alert")
+        if not isinstance(alert, dict):
+            return
+        self.state["schedule_alert"]["snooze_until"] = time.time() + max(1, int(minutes)) * 60
+        self._save()
+
+    def dismiss_schedule_alert(self) -> None:
+        self.state.pop("schedule_alert", None)
+        self._save()
 
     def acknowledge(self) -> None:
         if self.state.get("status") in {"ringing", "missed"}:
