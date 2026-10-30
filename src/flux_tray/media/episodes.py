@@ -60,7 +60,8 @@ def normalize_episode(raw: dict[str, Any], source_id: str) -> MediaEpisode:
         season, episode = parsed
     return MediaEpisode(
         id=f"{source_id}:{identity}", title=title, date=raw.get("date") or raw.get("upload_date"),
-        url=str(url) if url else None, ext=raw.get("ext"),
+        url=str(url) if isinstance(url, str) and url.startswith(("http://", "https://")) else None,
+        ext=raw.get("ext"),
         subs=raw.get("subs") if isinstance(raw.get("subs"), dict) else {},
         headers=raw.get("headers") if isinstance(raw.get("headers"), dict) else {},
         season=int(season) if season is not None else None,
