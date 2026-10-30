@@ -19,6 +19,7 @@ from flux_tray.timers.service import CountdownTimer
 from flux_tray.connectivity.service import ConnectivityService
 from flux_tray.updates.service import UpdateService
 from flux_tray.weather.service import WeatherService
+from flux_tray.live.service import LiveService
 
 
 class FluxTrayApplication(Gtk.Application):
@@ -61,7 +62,9 @@ class FluxTrayApplication(Gtk.Application):
                 )
             except ValueError as exc:
                 logger.warning("Weather is disabled: %s", exc)
-        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates, weather)
+        live_store = JsonStore(self.paths.data_dir / "live.json", lambda: {"channels": []})
+        live = LiveService(live_store, interval=config.get_int("live", "interval", 15, minimum=1) * 60)
+        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates, weather, live)
         self.hold()
         self.connect("shutdown", self._shutdown)
         logger.info("Flux Tray started")
