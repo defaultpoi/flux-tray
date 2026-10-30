@@ -26,6 +26,7 @@ from flux_tray.media.player import MpvController
 from flux_tray.media.service import MediaService
 from flux_tray.media.sources import YtDlpAdapter
 from flux_tray.media.downloader import MediaDownloader
+from flux_tray.launcher.service import LauncherService
 
 
 class FluxTrayApplication(Gtk.Application):
@@ -91,7 +92,8 @@ class FluxTrayApplication(Gtk.Application):
             yt_dlp=YtDlpAdapter(process=self.process),
             downloader=MediaDownloader(process=self.process),
         )
-        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates, weather, live, media)
+        launcher = LauncherService(config, self.process)
+        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates, weather, live, media, launcher)
         self.hold()
         self.connect("shutdown", self._shutdown)
         logger.info("Flux Tray started")
