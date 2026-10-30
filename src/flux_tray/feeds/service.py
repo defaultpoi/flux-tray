@@ -40,7 +40,7 @@ def _normal(value: str) -> str:
 
 def _whole_word_match(text: str, words: list[str]) -> bool:
     normalized = _normal(text)
-    return any(re.search(r"(?<!\\w)" + re.escape(_normal(word)) + r"(?!\\w)", normalized)
+    return any(re.search(r"(?<!\w)" + re.escape(_normal(word)) + r"(?!\w)", normalized)
                for word in words if word.strip())
 
 
