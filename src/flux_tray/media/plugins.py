@@ -63,6 +63,34 @@ class MediaPluginRegistry:
                                        getattr(plugin, "NAME", plugin.__name__))
         return None
 
+    def resolve_episode(self, source: str, episode: dict[str, Any]) -> dict[str, Any]:
+        selected = self._select(source)
+        if selected is None:
+            return episode
+        plugin, _plugin_source = selected
+        resolver = getattr(plugin, "resolve", None)
+        if not callable(resolver):
+            return episode
+        resolved = resolver(dict(episode))
+        if resolved is None:
+            return episode
+        if not isinstance(resolved, dict):
+            raise TypeError("Plugin resolve must return a dictionary or None")
+        return {**episode, **resolved}
+
+    def download_episode(self, source: str, episode: dict[str, Any], base: Path,
+                         progress=None, cancelled=None) -> str | None:
+        selected = self._select(source)
+        if selected is None:
+            return None
+        plugin, _plugin_source = selected
+        downloader = getattr(plugin, "download", None)
+        if not callable(downloader):
+            return None
+        result = downloader(dict(episode), base, progress, cancelled)
+        if result is None:
+            return None
+        return str(result)
     def list_episodes(self, source: str) -> list[dict[str, Any]] | None:
         selected = self._select(source)
         if selected is None:
