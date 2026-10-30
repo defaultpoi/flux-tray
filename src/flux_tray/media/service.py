@@ -19,7 +19,8 @@ class MediaService:
                  interval: int = 3600, yt_dlp: YtDlpAdapter | None = None,
                  rss: RssMediaAdapter | None = None,
                  downloader: MediaDownloader | None = None,
-                 output_dir: Path | None = None, player=None,
+                 output_dir: Path | None = None, player=None, display=None,
+                 screen_height: int | None = None, yt_dlp_sort: str | None = None,
                  now: Callable[[], datetime] | None = None):
         self.store = store
         self.plugins = MediaPluginRegistry(plugin_dir)
@@ -30,6 +31,9 @@ class MediaService:
         self.downloader = downloader or MediaDownloader()
         self.output_dir = Path(output_dir or Path.home() / "Videos").expanduser()
         self.player = player
+        self.display = display
+        self.screen_height = int(screen_height) if screen_height else None
+        self.yt_dlp_sort = yt_dlp_sort.strip() if yt_dlp_sort and yt_dlp_sort.strip() else None
         self.current_episode_id: str | None = None
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.state = store.load()
@@ -165,7 +169,20 @@ class MediaService:
                                                      self.output_dir, lambda *_args: None, cancelled)
         if plugin_path is not None:
             return plugin_path
-        return self.downloader.download(resolved, self.output_dir, cancelled=cancelled)
+        return self.downloader.download(resolved, self.output_dir,
+                                        format_sort=self._format_sort(), cancelled=cancelled)
+    def _format_sort(self) -> str | None:
+        if self.yt_dlp_sort:
+            return self.yt_dlp_sort
+        height = self.screen_height
+        if height is None and self.display is not None:
+            height = self.display.screen_height()
+        if height is None or height <= 0:
+            return None
+        # Leave 15% headroom; yt-dlp selects the best resolution at/below this cap,
+        # or the smallest available resolution if every format is larger.
+        return f"res:{max(144, int(height * 0.85))}"
+
     def play_episode(self, episode_id: str) -> dict[str, Any]:
         if self.player is None:
             raise RuntimeError("Shared mpv player is not configured")
