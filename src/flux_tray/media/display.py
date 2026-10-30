@@ -8,7 +8,7 @@ from typing import Callable
 from flux_tray.core.process import ProcessResult, ProcessSupervisor
 
 
-_CONNECTED = re.compile(r"^\\S+ connected(?: primary)?\\s+(.*)$")
+_CONNECTED = re.compile(r"^\\S+ connected(?: (primary))?\\s+(.*)$")
 _MODE = re.compile(r"(?<!\\d)(\\d{3,5})x(\\d{3,5})(?:[+-]\\d+[+-]\\d+)?")
 
 
@@ -30,7 +30,8 @@ class XrandrDisplay:
             connected = _CONNECTED.match(line)
             if not connected:
                 continue
-            mode = _MODE.search(connected.group(1))
+            mode = _MODE.search(connected.group(2))
             if mode:
-                heights.append(int(mode.group(2)))
-        return max(heights) if heights else None
+                heights.append((bool(connected.group(1)), int(mode.group(2))))
+        primary = [height for is_primary, height in heights if is_primary]
+        return primary[0] if primary else max((height for _, height in heights), default=None)
