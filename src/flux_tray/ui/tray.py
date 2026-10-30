@@ -79,10 +79,17 @@ class TrayController:
             network = self.connectivity.state.get("status", "checking")
             self._append(f"Network: {network}", sensitive=False)
         if self.weather is not None:
-            temperature = self.weather.state.get("temperature")
-            condition = self.weather.state.get("condition", "Weather unavailable")
-            weather_text = f"Weather: {temperature}°C · {condition}" if temperature is not None else condition
+            weather = self.weather.state
+            temperature = weather.get("temperature")
+            condition = weather.get("condition", "Weather unavailable")
+            if temperature is not None:
+                weather_text = f"Weather: {temperature}°C · {condition} · wind {weather.get('wind_speed', '?')} km/h"
+            else:
+                weather_text = condition
             self._append(weather_text, sensitive=False)
+            for day in weather.get("forecast", []):
+                label = f"{day.get('date')}: {day.get('condition')} · H {day.get('high')}° L {day.get('low')}°"
+                self._append(label, sensitive=False)
         if self.live is not None:
             channels = self.live.state.get("channels", [])
             self._append(f"Live channels ({len(channels)})", sensitive=False)
