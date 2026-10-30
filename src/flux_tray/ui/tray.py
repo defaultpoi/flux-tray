@@ -1325,16 +1325,16 @@ class TrayController:
                  f"{'success' if action.get('success') else 'FAILED'}"]
         changes = action.get("version_changes")
         if changes is None:
-            lines.append("\\nInstalled XBPS version comparison unavailable.")
+            lines.append("\nInstalled XBPS version comparison unavailable.")
         elif changes:
-            lines.append("\\nInstalled XBPS package changes:")
+            lines.append("\nInstalled XBPS package changes:")
             for change in changes:
                 lines.append(f"{change.get('package')}: {change.get('old') or 'not installed'} -> {change.get('new') or 'removed'}")
         else:
-            lines.append("\\nNo installed XBPS package versions changed.")
+            lines.append("\nNo installed XBPS package versions changed.")
         for result in results:
             argv = " ".join(result.get("argv", []))
-            lines.append(f"\\n$ {argv}\\nExit code: {result.get('returncode')}")
+            lines.append(f"\n$ {argv}\nExit code: {result.get('returncode')}")
             output = result.get("stderr") or result.get("stdout") or ""
             if output:
                 lines.append(output[-2500:])
