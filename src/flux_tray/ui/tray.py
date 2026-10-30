@@ -99,6 +99,7 @@ class TrayController:
                 label = f"{channel['name']} — {title}"[:100]
                 self._append(label, lambda _item, current=channel: self._play_live_channel(current))
             self._append("Add live channel…", lambda _item: self._add_live_dialog())
+            self._append("Check live channels", lambda _item: self._live_tick(force=True))
         if self.media is not None:
             sources = self.media.state.get("sources", [])
             queue = self.media.state.get("queue", [])
