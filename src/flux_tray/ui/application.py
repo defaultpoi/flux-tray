@@ -89,7 +89,11 @@ class FluxTrayApplication(Gtk.Application):
         location = config.get("weather", "location", "") or ""
         has_latitude, has_longitude = bool(latitude.strip()), bool(longitude.strip())
         if has_latitude != has_longitude:
-            logger.warning("Weather is disabled: configure both latitude and longitude")
+            logger.warning("Weather coordinates are incomplete; configure weather in the tray menu")
+            weather = WeatherService(
+                JsonStore(self.paths.data_dir / "weather.json", dict),
+                interval=config.get_int("weather", "interval", 30, minimum=5) * 60,
+            )
         elif (has_latitude and has_longitude) or location.strip():
             try:
                 weather_store = JsonStore(self.paths.data_dir / "weather.json", dict)
