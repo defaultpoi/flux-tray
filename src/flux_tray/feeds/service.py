@@ -185,7 +185,7 @@ class FeedService:
             feed["last_success"] = _iso(now)
             feed["next_check"] = _iso(now + timedelta(seconds=feed["interval"]))
             self._save()
-            return fresh
+            return 0 if feed.get("muted") else fresh
         except Exception as exc:
             feed["last_error"] = str(exc)
             feed["next_check"] = _iso(now + timedelta(minutes=2))
