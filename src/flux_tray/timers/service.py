@@ -38,6 +38,7 @@ class CountdownTimer:
         if not isinstance(self.state, dict):
             self.state = {}
         self.state.setdefault("status", "idle")
+        self._recovered = self.state.get("status") == "running"
 
     def _save(self) -> None:
         self.store.save(self.state)
@@ -75,6 +76,12 @@ class CountdownTimer:
             return "missed"
         mono_expired = self.monotonic() >= self.state.get("monotonic_deadline", 0)
         boot_expired = self.boottime() >= self.state.get("boottime_deadline", 0)
+        if self._recovered:
+            self._recovered = False
+            if mono_expired or boot_expired:
+                self.state["status"] = "missed"
+                self._save()
+                return "missed"
         if boot_expired and not mono_expired:
             self.state["status"] = "missed"
             self._save()
