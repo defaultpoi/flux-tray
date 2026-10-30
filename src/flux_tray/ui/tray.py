@@ -243,6 +243,8 @@ class TrayController:
                 self.menu.popup_at_pointer(None)
         elif self.menu.get_mapped():
             self._rebuild_menu(self.menu)
+        if self.media.state.get("queue"):
+            self._media_download_next()
         return GLib.SOURCE_REMOVE
 
     def _media_download_next(self):
