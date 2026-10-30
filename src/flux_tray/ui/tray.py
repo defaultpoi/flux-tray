@@ -87,6 +87,7 @@ class TrayController:
             else:
                 weather_text = condition
             self._append(weather_text, sensitive=False)
+            self._append("Refresh weather", lambda _item: self._weather_tick(force=True))
             for day in weather.get("forecast", []):
                 label = f"{day.get('date')}: {day.get('condition')} · H {day.get('high')}° L {day.get('low')}° · rain {day.get('rain_probability')}%"
                 self._append(label, sensitive=False)
@@ -412,10 +413,10 @@ class TrayController:
             except (ValueError, OSError) as exc:
                 self.log.warning("Could not add live channel: %s", exc)
         dialog.destroy()
-    def _weather_tick(self):
+    def _weather_tick(self, *, force: bool = False):
         if self.weather is None:
             return GLib.SOURCE_REMOVE
-        future = self.tasks.submit("weather-refresh", self.weather.refresh)
+        future = self.tasks.submit("weather-refresh", self.weather.refresh, force=force)
         if future is not None:
             future.add_done_callback(lambda done: GLib.idle_add(self._weather_complete, done))
         return GLib.SOURCE_CONTINUE
@@ -533,7 +534,7 @@ class TrayController:
         if previous in {"offline", "dns-error"} and current == "online":
             self.refresh(force=True)
             if self.weather is not None:
-                self._weather_tick()
+                self._weather_tick(force=True)
             if self.media is not None:
                 self._media_tick(force=True)
             if self.live is not None:
