@@ -63,6 +63,13 @@ class MediaService:
         self._save()
         return source_id
 
+    def rename_source(self, source_id: str, name: str) -> None:
+        name = str(name).strip()
+        if not name:
+            raise ValueError("Media source name cannot be empty")
+        self._source(source_id)["name"] = name[:120]
+        self._save()
+
     def remove_source(self, source_id: str) -> None:
         self.state["sources"] = [s for s in self.state["sources"] if s["id"] != source_id]
         removed = {key for key, episode in self.state["episodes"].items()
