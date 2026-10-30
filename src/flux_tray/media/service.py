@@ -140,7 +140,9 @@ class MediaService:
             added = 0
             for source_index, episode in enumerate(listed):
                 episode_id = episode["id"]
-                if episode_id in self.state["episodes"]:
+                existing = self.state["episodes"].get(episode_id)
+                if existing is not None:
+                    existing["source_order"] = source_index
                     continue
                 episode["source_id"] = source_id
                 episode["source_order"] = source_index
@@ -184,6 +186,8 @@ class MediaService:
                     return (0, season, number, source_index)
                 return (1, str(item.get("date") or ""), source_index)
 
+            candidates.sort(key=lambda item: item.get("source_order", 0))
+            # Stable sorting keeps the adapter's order for equal dates/numbers.
             candidates.sort(key=sort_key, reverse=order == "newest")
         else:
             # The adapter's listing order is the default; source_order preserves it
