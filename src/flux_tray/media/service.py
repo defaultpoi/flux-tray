@@ -134,10 +134,10 @@ class MediaService:
             episode["status"] = "queued"
             self.state["queue"].append(episode["id"])
 
-    def check_due(self) -> int:
+    def check_due(self, *, force: bool = False) -> int:
         added = 0
         for source in list(self.state["sources"]):
-            added += self.check_source(source["id"])
+            added += self.check_source(source["id"], force=force)
         return added
 
     def queue_episode(self, episode_id: str) -> None:
