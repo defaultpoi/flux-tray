@@ -55,6 +55,7 @@ def test_ahead_queue_downloads_sequentially(tmp_path):
     service.check_source(source_id, force=True)
     first = service.download_next()
     assert first["status"] == "downloaded"
+    assert service.state["download"]["status"] == "completed"
     assert len(downloader.calls) == 1
     assert len(service.state["queue"]) == 0
 
@@ -150,3 +151,29 @@ def test_media_source_can_change_type_url_and_name(tmp_path):
     assert source["url"] == "https://youtube.com/@example"
     assert source["name"] == "New"
     assert source["initialized"] is False
+
+
+
+def test_download_failure_is_persisted_for_manual_retry(tmp_path):
+    class FailingDownloader:
+        def download(self, episode, output_dir, **kwargs):
+            raise RuntimeError("network disconnected")
+
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=1,
+                           yt_dlp=FakeYtDlp(), downloader=FailingDownloader())
+    source_id = service.add_source("youtube", "https://youtube.com/playlist?list=x")
+    service.check_source(source_id)
+    service.check_source(source_id, force=True)
+
+    try:
+        service.download_next()
+    except RuntimeError as exc:
+        assert "network disconnected" in str(exc)
+    else:
+        raise AssertionError("download failure was not propagated")
+
+    assert service.state["download"]["status"] == "failed"
+    assert service.state["download"]["error"] == "network disconnected"
+    assert service.next_queued() is not None
