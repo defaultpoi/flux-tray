@@ -54,13 +54,36 @@ class WeatherService:
         if latitude is not None and (not -90 <= float(latitude) <= 90 or
                                      not -180 <= float(longitude) <= 180):
             raise ValueError("Invalid latitude or longitude")
-        if latitude is None and not self.location:
-            raise ValueError("Configure coordinates or a weather location")
         self.latitude = float(latitude) if latitude is not None else None
         self.longitude = float(longitude) if longitude is not None else None
         self.fetcher = fetcher
         self.alerts_client = alerts_client
         self.interval = max(300, int(interval))
+
+    def configure(self, *, latitude: float | None = None,
+                  longitude: float | None = None, location: str | None = None,
+                  geocoder=None, alerts_client=None) -> None:
+        location = location.strip() if location and location.strip() else None
+        if (latitude is None) != (longitude is None):
+            raise ValueError("Latitude and longitude must be configured together")
+        if latitude is not None and (not -90 <= float(latitude) <= 90 or
+                                     not -180 <= float(longitude) <= 180):
+            raise ValueError("Invalid latitude or longitude")
+        if latitude is None and not location:
+            raise ValueError("Enter a place name or both coordinates")
+        self.location = location
+        self.latitude = float(latitude) if latitude is not None else None
+        self.longitude = float(longitude) if longitude is not None else None
+        if self.latitude is None:
+            if geocoder is None:
+                from flux_tray.weather.geocode import NominatimGeocoder
+                geocoder = NominatimGeocoder()
+        self.geocoder = geocoder
+        self.alerts_client = alerts_client
+        self.state.update({"fetched_at": None, "alerts": [], "alert_level": 0,
+                           "alerts_error": None, "location": self.location,
+                           "latitude": self.latitude, "longitude": self.longitude})
+        self.store.save(self.state)
 
     def refresh(self, *, force: bool = False) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
