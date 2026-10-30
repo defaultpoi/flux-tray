@@ -76,6 +76,42 @@ class FeedService:
         self._save()
         return feed_id
 
+    def rename_feed(self, feed_id: str, name: str) -> None:
+        name = name.strip()
+        if not name:
+            raise ValueError("Feed name cannot be empty")
+        self._feed(feed_id)["name"] = name
+        self._save()
+
+    def set_interval(self, feed_id: str, interval: int) -> None:
+        self._feed(feed_id)["interval"] = max(60, int(interval))
+        self._save()
+
+    def reorder_feeds(self, ordered_ids: list[str]) -> None:
+        current = {feed["id"]: feed for feed in self.state["feeds"]}
+        if len(ordered_ids) != len(current) or set(ordered_ids) != set(current):
+            raise ValueError("Order must contain every feed exactly once")
+        self.state["feeds"] = [current[feed_id] for feed_id in ordered_ids]
+        self._save()
+
+    def set_breaking_words(self, words: list[str]) -> None:
+        cleaned = list(dict.fromkeys(word.strip() for word in words if word.strip()))
+        self.breaking_words = cleaned
+        for item in self.state["items"].values():
+            text = " ".join([item.get("title", ""), *item.get("categories", [])])
+            item["breaking"] = _whole_word_match(text, cleaned)
+        self._save()
+
+    def breaking_items(self) -> list[dict[str, Any]]:
+        return [item for item in self.unread_items() if item.get("breaking")]
+
+    def read_later_items(self) -> list[dict[str, Any]]:
+        return [self.state["items"][item_id] for item_id in self.state["read_later"]
+                if item_id in self.state["items"]]
+
+    def clear_read_later(self, item_id: str) -> None:
+        self.remove_read_later(item_id)
+
     def remove_feed(self, feed_id: str) -> None:
         self.state["feeds"] = [f for f in self.state["feeds"] if f["id"] != feed_id]
         self.state["items"] = {k: v for k, v in self.state["items"].items()
