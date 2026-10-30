@@ -52,3 +52,44 @@ def test_play_channel_resolves_url_and_reuses_injected_player(tmp_path):
     service.state["channels"][0]["metadata"] = {"title": "Stream title"}
     service.play_channel(channel_id)
     assert player.loaded == ("https://cdn.example/live.m3u8", "Youtube · Example · Stream title")
+
+
+def test_twitch_batch_checks_preserve_state_on_batch_failure(tmp_path):
+    class Twitch:
+        def __init__(self):
+            self.calls = []
+        def check_many(self, urls):
+            self.calls.append(urls)
+            if len(self.calls) == 1:
+                return {url: {"status": "live", "metadata": {"title": "On air"}, "streams": ["best"]}
+                        for url in urls}
+            raise RuntimeError("temporary GQL outage")
+        def check(self, url):
+            raise AssertionError("single lookup should not be used for batch-capable probe")
+
+    twitch = Twitch()
+    store = JsonStore(tmp_path / "live.json", lambda: {"channels": []})
+    service = LiveService(store, probe=StreamlinkProbe(runner=lambda *a, **k: None),
+                          twitch_probe=twitch)
+    first = service.add_channel("twitch", "One", "https://twitch.tv/one")
+    second = service.add_channel("twitch", "Two", "https://twitch.tv/two")
+    assert service.check_due(force=True) == 2
+    assert len(twitch.calls) == 1 and len(twitch.calls[0]) == 2
+    service.check_due(force=True)
+    assert service.channel_state(first)["status"] == "live"
+    assert service.channel_state(second)["status"] == "live"
+    assert service.channel_state(first)["last_error"] == "temporary GQL outage"
+
+
+def test_live_channel_schedule_validation_and_persistence(tmp_path):
+    store = JsonStore(tmp_path / "live.json", lambda: {"channels": []})
+    service = LiveService(store)
+    channel_id = service.add_channel("youtube", "Example", "https://youtube.com/@example/live")
+    service.set_schedule(channel_id, [{"weekday": 4, "time": "19:30"}])
+    assert service.channel_state(channel_id)["schedule"] == [{"weekday": 4, "time": "19:30"}]
+    try:
+        service.set_schedule(channel_id, [{"weekday": 8, "time": "19:30"}])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid weekday accepted")
