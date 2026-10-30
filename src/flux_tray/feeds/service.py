@@ -132,7 +132,6 @@ class FeedService:
 
     def _ingest(self, feed: dict[str, Any], entries: list[Any], now: datetime) -> int:
         fresh = 0
-        first_check = feed.get("last_success") is None
         for entry in entries:
             link = str(entry.get("link") or "").strip()
             identity = str(entry.get("id") or link or entry.get("title") or "").strip()
@@ -149,7 +148,7 @@ class FeedService:
                 "author": str(entry.get("author") or ""),
                 "categories": [str(t.get("term", "")) for t in entry.get("tags", [])],
                 "published": _iso(published) if published else None,
-                "seen": bool(first_check or old), "read": bool(first_check or old),
+                "seen": bool(old), "read": bool(old),
                 "breaking": False}
             text = " ".join([item["title"], *item["categories"]])
             item["breaking"] = _whole_word_match(text, self.breaking_words)
