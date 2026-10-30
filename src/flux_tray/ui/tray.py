@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import webbrowser
 from datetime import datetime, timezone
 
@@ -305,10 +307,23 @@ class TrayController:
             self._append("List orphan packages…", lambda _item: self._list_orphans())
         if self.launcher is not None:
             commands = self.launcher.commands()
-            if commands:
-                self._append("Launch", sensitive=False)
-                for command in commands:
-                    self._append(command.name, lambda _item, name=command.name: self._launch_command(name))
+            self._append("Launch", sensitive=False)
+            for command in commands:
+                parent = Gtk.MenuItem.new_with_label(command.name)
+                submenu = Gtk.Menu()
+                run = Gtk.MenuItem.new_with_label("Run")
+                run.connect("activate", lambda _item, name=command.name: self._launch_command(name))
+                edit = Gtk.MenuItem.new_with_label("Edit…")
+                edit.connect("activate", lambda _item, current=command:
+                             self._launcher_command_dialog(current))
+                remove = Gtk.MenuItem.new_with_label("Remove…")
+                remove.connect("activate", lambda _item, current=command:
+                               self._remove_launcher_command_dialog(current))
+                for action in (run, edit, remove):
+                    submenu.append(action)
+                parent.set_submenu(submenu)
+                self.menu.append(parent)
+            self._append("Add launcher command…", lambda _item: self._launcher_command_dialog())
         self._append("Refresh feeds", lambda _item: self.refresh(force=True))
         self._append("Quit", lambda _item: self.application.quit())
         self.menu.show_all()
@@ -392,6 +407,65 @@ class TrayController:
         for item, label in self._weather_alert_items:
             item.set_label(prefix + label.lstrip("⚠🚨 "))
         return GLib.SOURCE_CONTINUE
+
+    def _launcher_command_dialog(self, command=None):
+        if self.config is None:
+            return
+        dialog = Gtk.Dialog(title="Edit launcher command" if command else "Add launcher command",
+                            flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(6)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.pack_start(Gtk.Label(label="Command name (letters, numbers, _ and -)"), False, False, 0)
+        name = Gtk.Entry()
+        name.set_text(command.name if command else "")
+        box.pack_start(name, False, False, 0)
+        box.pack_start(Gtk.Label(label="Arguments as a JSON array; no shell parsing"), False, False, 0)
+        argv = Gtk.Entry()
+        argv.set_text(json.dumps(list(command.argv) if command else [""]))
+        argv.set_placeholder_text('[ "firefox", "--private-window" ]')
+        box.pack_start(argv, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        error = None
+        if response == Gtk.ResponseType.OK:
+            command_name = name.get_text().strip()
+            try:
+                if not re.fullmatch(r"[A-Za-z0-9_-]+", command_name):
+                    raise ValueError("Use a simple command name with letters, numbers, _ or -")
+                parsed = json.loads(argv.get_text())
+                if (not isinstance(parsed, list) or not parsed
+                        or not all(isinstance(part, str) and part for part in parsed)):
+                    raise ValueError("Arguments must be a non-empty JSON array of non-empty strings")
+                if command and command.name != command_name:
+                    self.config.remove_option("launcher", command.name)
+                self.config.set_many("launcher", {command_name: json.dumps(parsed)})
+            except (ValueError, json.JSONDecodeError, OSError) as exc:
+                error = str(exc)
+        dialog.destroy()
+        if error:
+            message = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+                message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE,
+                text="Launcher command was not saved")
+            message.format_secondary_text(error)
+            message.run()
+            message.destroy()
+        self._rebuild_menu(self.menu)
+
+    def _remove_launcher_command_dialog(self, command):
+        dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+            message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.YES_NO,
+            text=f"Remove launcher command ‘{command.name}’?") 
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.YES and self.config is not None:
+            self.config.remove_option("launcher", command.name)
+        self._rebuild_menu(self.menu)
 
     def _launch_command(self, name):
         try:
