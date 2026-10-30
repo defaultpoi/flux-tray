@@ -311,3 +311,24 @@ def test_hls_download_uses_source_folder_and_detected_screen(tmp_path):
     assert path.endswith("episode.mkv")
     assert hls.call[1] == tmp_path / "videos" / "Example Show"
     assert hls.call[2]["screen"] == (1366, 768)
+
+
+def test_media_source_summary_reports_next_episode_progress_and_last_watched(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=2)
+    source_id = service.add_source("rss", "https://example.test/feed.xml", "Podcast")
+    service.state["episodes"] = {
+        "first": {"id": "first", "source_id": source_id, "status": "downloaded",
+                  "path": "/tmp/first.mkv", "title": "First", "source_order": 0},
+        "second": {"id": "second", "source_id": source_id, "status": "new",
+                   "title": "Second", "source_order": 1},
+    }
+    summary = service.source_summary(source_id)
+    assert summary["episode"] == "First"
+    assert summary["status"] == "ready"
+    assert summary["new_count"] == 1
+    service.mark_watched("first")
+    summary = service.source_summary(source_id)
+    assert summary["episode"] == "Second"
+    assert "Last watched: First" in summary["tooltip"]
