@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Flux Tray
+Comment=Feeds, media, weather and Void system status
+Exec=flux-tray
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=false
