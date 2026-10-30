@@ -19,6 +19,7 @@ class MediaDownloader:
 
     def download(self, episode: dict, output_dir: Path, *,
                  subtitle_languages: tuple[str, ...] = ("en",),
+                 format_sort: str | None = None,
                  cancelled: Event | None = None) -> str:
         url = episode.get("url")
         if not url or not str(url).startswith(("http://", "https://")):
@@ -36,6 +37,8 @@ class MediaDownloader:
         ]
         if subtitle_languages:
             argv.extend(["--sub-langs", ",".join(subtitle_languages)])
+        if format_sort:
+            argv.extend(["-S", format_sort])
         argv.append(str(url))
         result = self.runner(argv, timeout=self.timeout, cancelled=cancelled)
         if result.returncode != 0:
