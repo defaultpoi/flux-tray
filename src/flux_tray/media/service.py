@@ -63,6 +63,21 @@ class MediaService:
         self._save()
         return source_id
 
+    def update_source(self, source_id: str, kind: str, url: str, name: str) -> None:
+        if kind not in {"youtube", "rss", "url", "plugin"}:
+            raise ValueError("Source kind must be youtube, rss, url or plugin")
+        url = str(url).strip()
+        if not url:
+            raise ValueError("Source URL cannot be empty")
+        if kind != "plugin" and not url.startswith(("https://", "http://")):
+            raise ValueError("Media source must use HTTP or HTTPS")
+        if is_archive_org(url):
+            raise ValueError("Archive.org media sources are intentionally unsupported")
+        source = self._source(source_id)
+        source.update({"kind": kind, "url": url, "name": str(name).strip() or url,
+                       "initialized": False, "next_check": None, "last_error": None})
+        self._save()
+
     def rename_source(self, source_id: str, name: str) -> None:
         name = str(name).strip()
         if not name:
