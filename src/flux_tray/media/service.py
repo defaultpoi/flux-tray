@@ -182,7 +182,7 @@ class MediaService:
                 return episode
         return None
 
-    def _download_episode(self, episode: dict[str, Any], cancelled=None) -> str:
+    def _download_episode(self, episode: dict[str, Any], cancelled=None, progress_callback=None) -> str:
         source = self._source(episode["source_id"])
         resolved = self.plugins.resolve_episode(source["url"], episode)
         if is_archive_org(resolved.get("url")):
@@ -191,11 +191,12 @@ class MediaService:
         if metadata.get("is_live") or resolved.get("is_live") or metadata.get("live_status") == "is_live":
             raise ValueError("Live HLS streams cannot be queued as media downloads")
         plugin_path = self.plugins.download_episode(source["url"], resolved,
-                                                     self.output_dir, lambda *_args: None, cancelled)
+                                                     self.output_dir, progress_callback, cancelled)
         if plugin_path is not None:
             return plugin_path
         return self.downloader.download(resolved, self.output_dir,
-                                        format_sort=self._format_sort(), cancelled=cancelled)
+                                        format_sort=self._format_sort(), cancelled=cancelled,
+                                        progress_callback=progress_callback)
     def _format_sort(self) -> str | None:
         if self.yt_dlp_sort:
             return self.yt_dlp_sort
@@ -271,7 +272,7 @@ class MediaService:
             self.current_episode_id = None
             return True
         return False
-    def download_next(self, *, cancelled=None) -> dict[str, Any] | None:
+    def download_next(self, *, cancelled=None, progress_callback=None) -> dict[str, Any] | None:
         episode = self.next_queued()
         if episode is None:
             return None
@@ -282,8 +283,21 @@ class MediaService:
         }
         self.state["download"] = download_state
         self._save()
+
+        def report_progress(*args):
+            if len(args) == 1 and isinstance(args[0], dict):
+                details = args[0]
+            elif len(args) >= 2:
+                details = {"downloaded_bytes": args[0], "total_bytes": args[1]}
+            else:
+                details = {"message": str(args[0]) if args else ""}
+            download_state.update(details)
+            if progress_callback is not None:
+                progress_callback(dict(download_state))
+
         try:
-            path = self._download_episode(episode, cancelled=cancelled)
+            path = self._download_episode(episode, cancelled=cancelled,
+                                          progress_callback=report_progress)
         except Exception as exc:
             episode["download_error"] = str(exc)
             episode["last_attempt"] = self.now().isoformat()
@@ -293,7 +307,7 @@ class MediaService:
             raise
         self.mark_downloaded(episode["id"], path)
         episode["download_error"] = None
-        download_state.update({"status": "completed", "path": path,
+        download_state.update({"status": "completed", "path": path, "percent": 100.0,
                                "completed_at": self.now().isoformat()})
         self._save()
         return episode
