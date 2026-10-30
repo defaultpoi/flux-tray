@@ -192,5 +192,11 @@ class LiveService:
         title = metadata.get("title") or "Live"
         site = channel["platform"].title()
         self.player.load(urls[-1], f"{site} · {channel['name']} · {title}")
+    def channel_state(self, channel_id: str) -> dict[str, Any]:
+        channel = next((item for item in self.state["channels"] if item["id"] == channel_id), None)
+        if channel is None:
+            raise KeyError(channel_id)
+        return channel
+
     def live_channels(self) -> list[dict[str, Any]]:
         return [channel for channel in self.state["channels"] if channel.get("status") == "live"]
