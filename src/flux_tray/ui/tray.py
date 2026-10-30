@@ -13,6 +13,8 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk
 
+from flux_tray.ui.popup import FeedPopup
+
 
 class TrayController:
     def __init__(self, application, feed_service, task_manager, timer_service=None, connectivity_service=None, update_service=None, weather_service=None, live_service=None, media_service=None, launcher_service=None,
@@ -36,9 +38,8 @@ class TrayController:
         self.icon.set_tooltip_text("Flux Tray")
         self.icon.connect("activate", self._on_activate)
         self.icon.connect("popup-menu", self._on_popup)
-        self.menu = Gtk.Menu()
-        self.menu.connect("map", self._on_menu_map)
-        self.menu.connect("unmap", self._on_menu_unmap)
+        self.menu = Gtk.Menu()  # Legacy action helpers; this menu is no longer shown.
+        self.popup = FeedPopup(self.feeds)
         self._weather_alert_items = []
         self._weather_pulse_source = None
         self._weather_pulse_phase = False
@@ -139,20 +140,17 @@ class TrayController:
         self._weather_tray_pulse_source = None
         self._breaking_pulse_source = None
         try:
-            self.menu.popdown()
+            self.popup.close()
             self.menu.destroy()
             self.icon.set_visible(False)
         except (RuntimeError, TypeError):
             self.log.debug("GTK tray objects were already disposed", exc_info=True)
 
     def _on_activate(self, _icon):
-        self._rebuild_menu(self.menu)
-        self.menu.popup_at_pointer(None)
+        self.popup.toggle()
 
-    def _on_popup(self, _icon, button, activate_time):
-        self._rebuild_menu(self.menu)
-        self.menu.popup(None, None, Gtk.StatusIcon.position_menu, self.icon,
-                        button, activate_time)
+    def _on_popup(self, _icon, _button, _activate_time):
+        self.popup.toggle()
 
     def _append(self, label, callback=None, sensitive=True):
         item = Gtk.MenuItem.new_with_label(label)
@@ -1564,8 +1562,8 @@ class TrayController:
             self.log.exception("Feed refresh failed")
             fresh = 0
         self._update_icon()
-        if self.menu.get_mapped() or fresh:
-            self._rebuild_menu(self.menu)
+        if self.popup.visible or fresh:
+            self.popup.rebuild()
         if fresh:
             breaking = self.feeds.take_unnotified_breaking_items()
             if breaking:
@@ -1578,8 +1576,7 @@ class TrayController:
                 notification = Gio.Notification.new(f"{fresh} new feed items")
                 notification.set_body("New items are ready in Flux Tray.")
             self.application.send_notification(None, notification)
-            if not self.menu.get_mapped():
-                self.menu.popup_at_pointer(None)
+            self.popup.show()
         return GLib.SOURCE_REMOVE
 
     def _periodic_refresh(self):
