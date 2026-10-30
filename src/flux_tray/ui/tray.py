@@ -272,9 +272,9 @@ class TrayController:
             if download_status == "failed" and queue:
                 self._append("Retry media download", lambda _item: self._media_download_next())
             for source in sources:
-                source_label = source.get("name", source.get("url", "Media source"))
+                source_label = str(source.get("name", source.get("url", "Media source")))[:24]
                 summary = self.media.source_summary(source["id"])
-                source_label = (f"{source_label} · {summary['episode']} · "
+                source_label = (f"{source_label} · {summary['episode'][:38]} · "
                                 f"{summary['status']} · {summary['new_count']} new")
                 parent_source = Gtk.MenuItem.new_with_label(source_label[:100])
                 parent_source.set_tooltip_text(summary["tooltip"])
