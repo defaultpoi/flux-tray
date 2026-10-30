@@ -73,12 +73,30 @@ class LiveService:
             "id": channel_id, "platform": platform, "name": name.strip() or url,
             "url": url, "status": "unknown", "metadata": {}, "streams": [],
             "last_error": None, "next_check": None, "last_check": None,
+            "schedule": [],
         })
         self._save()
         return channel_id
 
     def remove_channel(self, channel_id: str) -> None:
         self.state["channels"] = [c for c in self.state["channels"] if c["id"] != channel_id]
+        self._save()
+
+    def set_schedule(self, channel_id: str, entries: list[dict]) -> None:
+        channel = next((c for c in self.state["channels"] if c["id"] == channel_id), None)
+        if channel is None:
+            raise KeyError(channel_id)
+        normalized = []
+        for entry in entries:
+            weekday = int(entry["weekday"])
+            clock = str(entry["time"])
+            if weekday not in range(7) or len(clock) != 5 or clock[2] != ":":
+                raise ValueError("Schedule requires weekday 0-6 and HH:MM")
+            hour, minute = int(clock[:2]), int(clock[3:])
+            if hour not in range(24) or minute not in range(60):
+                raise ValueError("Invalid schedule time")
+            normalized.append({"weekday": weekday, "time": clock})
+        channel["schedule"] = sorted(normalized, key=lambda item: (item["weekday"], item["time"]))
         self._save()
 
     def check_channel(self, channel_id: str, *, force: bool = False) -> str:
