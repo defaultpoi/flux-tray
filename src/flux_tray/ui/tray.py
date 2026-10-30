@@ -1011,7 +1011,7 @@ class TrayController:
                 self.media.update_source(source["id"], selected_kind, url.get_text(),
                                          name.get_text(), order=selected_order)
                 self._media_tick(force=True)
-            except (ValueError, IndexError) as exc:
+            except (ValueError, IndexError, RuntimeError) as exc:
                 self.log.warning("Could not edit media source: %s", exc)
         dialog.destroy()
         self._rebuild_menu(self.menu)
@@ -1040,7 +1040,15 @@ class TrayController:
         response = dialog.run()
         dialog.destroy()
         if response == Gtk.ResponseType.YES:
-            self.media.remove_source(source["id"])
+            try:
+                self.media.remove_source(source["id"])
+            except RuntimeError as exc:
+                self.log.warning("Could not remove media source: %s", exc)
+                warning = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+                    message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.OK,
+                    text=str(exc))
+                warning.run()
+                warning.destroy()
         self._rebuild_menu(self.menu)
 
     def _add_media_dialog(self):
