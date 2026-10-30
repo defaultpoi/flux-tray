@@ -136,3 +136,17 @@ def test_media_source_can_be_renamed(tmp_path):
     source_id = service.add_source("rss", "https://example.test/media.xml", "Old name")
     service.rename_source(source_id, "My media")
     assert service.state["sources"][0]["name"] == "My media"
+
+
+
+def test_media_source_can_change_type_url_and_name(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/old.xml", "Old")
+    service.update_source(source_id, "youtube", "https://youtube.com/@example", "New")
+    source = service.state["sources"][0]
+    assert source["kind"] == "youtube"
+    assert source["url"] == "https://youtube.com/@example"
+    assert source["name"] == "New"
+    assert source["initialized"] is False
