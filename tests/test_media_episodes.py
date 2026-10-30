@@ -15,4 +15,5 @@ def test_normalize_episode_uses_stable_source_scoped_id():
 
 def test_filename_sanitization_removes_path_separators():
     assert "/" not in safe_filename("../episode\\name")
+    assert not safe_filename("../episode\\name").startswith(".")
     assert safe_filename("   ") == "untitled"
