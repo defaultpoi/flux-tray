@@ -7,7 +7,7 @@ from threading import Event
 from typing import Callable
 
 from flux_tray.core.process import ProcessResult, ProcessSupervisor
-from flux_tray.media.episodes import is_archive_org, safe_filename
+from flux_tray.media.episodes import is_archive_org, media_filename
 
 
 class MediaDownloader:
@@ -21,7 +21,8 @@ class MediaDownloader:
                  subtitle_languages: tuple[str, ...] = ("en",),
                  format_sort: str | None = None,
                  cancelled: Event | None = None,
-                 progress_callback: Callable[[dict], None] | None = None) -> str:
+                 progress_callback: Callable[[dict], None] | None = None,
+                 source_name: str | None = None) -> str:
         url = episode.get("url")
         if not url or not str(url).startswith(("http://", "https://")):
             raise ValueError("Episode has no playable HTTP(S) URL")
@@ -33,7 +34,7 @@ class MediaDownloader:
             raise ValueError("Live HLS streams cannot be queued as media downloads")
         output_dir = Path(output_dir).expanduser()
         output_dir.mkdir(parents=True, exist_ok=True)
-        title = safe_filename(str(episode.get("title") or "untitled"))
+        title = media_filename(source_name or "Media", episode)
         argv = [
             "yt-dlp", "--continue", "--no-overwrites", "--no-playlist",
             "--no-warnings", "--write-subs", "--write-auto-subs",
