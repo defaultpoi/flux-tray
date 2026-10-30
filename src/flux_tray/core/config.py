@@ -59,6 +59,15 @@ class Config:
             self.parser.add_section(section)
         for key, value in values.items():
             self.parser.set(section, key, str(value))
+        self._write()
+
+    def remove_option(self, section: str, key: str) -> bool:
+        removed = self.parser.remove_option(section, key)
+        if removed:
+            self._write()
+        return removed
+
+    def _write(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix=f".{self.path.name}.",
                                          suffix=".tmp", dir=self.path.parent)
