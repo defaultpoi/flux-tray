@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import datetime
 from dataclasses import asdict, dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -61,7 +61,7 @@ def _normalize_date(value: Any) -> str | None:
         return None
     text = str(value).strip()
     try:
-        if re.fullmatch(r"\\d{8}", text):
+        if re.fullmatch(r"\d{8}", text):
             return datetime.strptime(text, "%Y%m%d").date().isoformat()
         return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
     except ValueError as exc:
@@ -71,7 +71,7 @@ def _normalize_date(value: Any) -> str | None:
 def _normalize_number(value: Any, field: str) -> int | None:
     if value is None or value == "":
         return None
-    if isinstance(value, bool) or not re.fullmatch(r"\\d+", str(value).strip()):
+    if isinstance(value, bool) or not re.fullmatch(r"\d+", str(value).strip()):
         raise ValueError(f"Episode {field} must be a non-negative whole number")
     return int(value)
 
@@ -85,7 +85,7 @@ def _normalize_headers(value: Any) -> dict[str, str]:
     for key, item in value.items():
         if not isinstance(key, str) or not isinstance(item, str) or not key.strip():
             raise ValueError("Episode headers must contain string names and values")
-        if any(char in key + item for char in "\\r\\n"):
+        if any(char in key + item for char in "\r\n"):
             raise ValueError("Episode headers cannot contain line breaks")
         result[key.strip()] = item.strip()
     return result
