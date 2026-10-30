@@ -10,7 +10,7 @@ from uuid import uuid4
 from flux_tray.core.storage import JsonStore
 from flux_tray.media.plugins import MediaPluginRegistry
 from flux_tray.media.downloader import MediaDownloader
-from flux_tray.media.episodes import is_archive_org
+from flux_tray.media.episodes import is_archive_org, safe_filename
 from flux_tray.media.sources import RssMediaAdapter, YtDlpAdapter
 
 
@@ -227,13 +227,16 @@ class MediaService:
         metadata = resolved.get("metadata") or {}
         if metadata.get("is_live") or resolved.get("is_live") or metadata.get("live_status") == "is_live":
             raise ValueError("Live HLS streams cannot be queued as media downloads")
+        source_dir = self.output_dir / safe_filename(str(source.get("name") or "Media"))
+        source_dir.mkdir(parents=True, exist_ok=True)
         plugin_path = self.plugins.download_episode(source["url"], resolved,
-                                                     self.output_dir, progress_callback, cancelled)
+                                                     source_dir, progress_callback, cancelled)
         if plugin_path is not None:
             return plugin_path
-        return self.downloader.download(resolved, self.output_dir,
+        return self.downloader.download(resolved, source_dir,
                                         format_sort=self._format_sort(), cancelled=cancelled,
-                                        progress_callback=progress_callback)
+                                        progress_callback=progress_callback,
+                                        source_name=str(source.get("name") or "Media"))
     def _format_sort(self) -> str | None:
         if self.yt_dlp_sort:
             return self.yt_dlp_sort
