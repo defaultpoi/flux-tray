@@ -60,3 +60,13 @@ def test_alarm_can_be_snoozed_and_dismissed(tmp_path, monkeypatch):
     assert timer.poll_schedules(now)["label"] == "Snooze me"
     timer.dismiss_schedule_alert()
     assert timer.poll_schedules(now) is None
+
+
+
+def test_alarm_catches_up_if_app_wakes_after_scheduled_time(tmp_path):
+    timer = make_timer(tmp_path)
+    timer.add_schedule([0], "07:30", "Missed morning alarm")
+    monday_later = datetime(2026, 10, 26, 8, 15, tzinfo=timezone.utc)
+    alert = timer.poll_schedules(monday_later)
+    assert alert["label"] == "Missed morning alarm"
+    assert alert["fired_at"].startswith("2026-10-26T08:15")
