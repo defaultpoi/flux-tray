@@ -1,0 +1,39 @@
+from datetime import datetime, timezone
+
+from flux_tray.core.storage import JsonStore
+from flux_tray.media.service import MediaService
+
+
+class FakeYtDlp:
+    def __init__(self):
+        self.items = [[{"id": "one", "title": "Show S01E01"},
+                       {"id": "two", "title": "Show S01E02"}],
+                      [{"id": "one", "title": "Show S01E01"},
+                       {"id": "two", "title": "Show S01E02"},
+                       {"id": "three", "title": "Show S01E03"}]]
+
+    def list_episodes(self, url, source_id):
+        from flux_tray.media.episodes import normalize_episode
+        return [normalize_episode(item, source_id).to_dict() for item in self.items.pop(0)]
+
+
+def test_first_check_is_baseline_then_new_episodes_are_queued(tmp_path):
+    store = JsonStore(tmp_path / "media.json", lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", yt_dlp=FakeYtDlp(),
+                           now=lambda: datetime(2026, 10, 30, tzinfo=timezone.utc))
+    source_id = service.add_source("youtube", "https://youtube.com/playlist?list=x")
+    assert service.check_source(source_id) == 0
+    assert service.state["queue"] == []
+    assert service.check_source(source_id, force=True) == 1
+    assert len(service.state["queue"]) == 1
+    assert service.next_queued()["title"] == "Show S01E03"
+
+
+def test_ahead_zero_keeps_new_items_manual(tmp_path):
+    store = JsonStore(tmp_path / "media.json", lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=0,
+                           yt_dlp=FakeYtDlp(), now=lambda: datetime.now(timezone.utc))
+    source_id = service.add_source("youtube", "https://youtube.com/playlist?list=x")
+    service.check_source(source_id)
+    service.check_source(source_id, force=True)
+    assert service.state["queue"] == []
