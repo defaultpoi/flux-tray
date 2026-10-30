@@ -14,7 +14,7 @@ This document is deliberately conservative. A service existing in the repository
 | Feature | Present | Still missing or unverified |
 |---|---|---|
 | RSS/Atom | Fetch/parse, unread state, read-later, mute/routing rules, breaking-word matching, notifications and basic popup actions | Full feed settings UI, per-feed mute UI, category/author presentation, sound/pulse behavior, robust first-run and offline testing, full XFCE popup behavior |
-| Live channels | Streamlink JSON status checks, last-known state preservation, Streamlink URL resolution and shared mpv playback | Twitch batched GQL, viewer counts, elapsed/start time, schedules, complete channel management and real-provider verification |
+| Live channels | Twitch logged-out GQL lookups batched in groups of 20; Streamlink JSON checks for YouTube; live/offline/error separation; last-known state preservation; Twitch viewer/category/start-time metadata; weekly schedule storage/editing; shared mpv playback and channel removal | YouTube viewer/start-time metadata is best-effort; real-provider verification, rate-limit resilience and full end-to-end playback testing |
 | Media | yt-dlp/RSS-enclosure sources, plugin loading, episode normalization, ahead queue, resumable yt-dlp downloads, subtitles, shared mpv playback and watched threshold logic | Resolution/monitor selection, HLS partial playback, playlist-aware progress, source management polish, monitor-resolution selection, HLS partial playback, playlist-aware progress, download progress UI and end-to-end playback testing |
 | Weather | Open-Meteo current conditions and five-day forecast using configured coordinates | Region lookup, MeteoAlarm alerts, severity mapping/pulse, setup UI and provider testing |
 | Connectivity | DNS/direct-IP diagnostic, offline feed pause and recovery-triggered checks | User-configured reset action and broader outage/recovery tests |
@@ -25,7 +25,7 @@ This document is deliberately conservative. A service existing in the repository
 
 ## Verification status
 
-- Unit tests have been added for several pure services and command contracts.
+- Unit tests have been added for several pure services and command contracts, including Twitch batching and schedule validation; tests have not been executed in this session.
 - The code has **not** been run on the target Void Linux desktop in this development session.
 - No successful CI result or real XFCE/X11 integration result has been verified here.
 - Do not treat this branch as a release until the missing behavior is implemented, the test suite passes, and the application has been exercised on the target machine over an extended run.
