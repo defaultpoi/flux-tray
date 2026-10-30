@@ -28,3 +28,33 @@ def test_weather_refresh_uses_cached_result_until_interval(tmp_path):
     second = service.refresh()
     assert len(calls) == 1
     assert second == first
+
+
+def test_weather_refresh_includes_alerts_without_failing_forecast(tmp_path):
+    class Alerts:
+        def active_alerts(self):
+            return [{"id": "warning", "level": 3, "severity": "severe"}]
+    service = WeatherService(
+        JsonStore(tmp_path / "weather.json", dict), 45.0, 26.0,
+        fetcher=lambda _url: {"current": {}, "daily": {}},
+        alerts_client=Alerts(),
+    )
+    state = service.refresh()
+    assert state["alerts"][0]["id"] == "warning"
+    assert state["alert_level"] == 3
+    assert state["alerts_error"] is None
+
+
+def test_weather_alert_failure_does_not_discard_forecast(tmp_path):
+    class Alerts:
+        def active_alerts(self):
+            raise RuntimeError("feed unavailable")
+    service = WeatherService(
+        JsonStore(tmp_path / "weather.json", dict), 45.0, 26.0,
+        fetcher=lambda _url: {"current": {"temperature_2m": 10}, "daily": {}},
+        alerts_client=Alerts(),
+    )
+    state = service.refresh()
+    assert state["temperature"] == 10
+    assert state["alerts"] == []
+    assert state["alerts_error"] == "feed unavailable"
