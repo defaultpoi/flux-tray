@@ -78,3 +78,51 @@ def test_resolution_sort_detects_current_monitor_each_time(tmp_path):
     assert service._format_sort() == "res:652"
     display.height = 1080
     assert service._format_sort() == "res:918"
+
+
+
+def test_hls_episode_streams_directly_and_progress_marks_watched(tmp_path):
+    class Player:
+        def __init__(self, url):
+            self.url = url
+            self.loaded = None
+        def load(self, url, title):
+            self.loaded = (url, title)
+        def get_property(self, name):
+            return {"time-pos": 95.0, "duration": 100.0, "path": self.url}[name]
+
+    url = "https://media.example.test/episode/index.m3u8"
+    player = Player(url)
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", player=player)
+    service.state["episodes"]["hls"] = {
+        "id": "hls", "title": "HLS episode", "url": url, "ext": "m3u8",
+        "status": "new", "source_id": "source",
+    }
+
+    service.play_episode("hls")
+    assert player.loaded == (url, "HLS episode")
+    assert service.update_playback_progress() is True
+    assert service.state["episodes"]["hls"]["status"] == "watched"
+
+
+def test_live_hls_stream_is_played_without_download(tmp_path):
+    class Player:
+        def __init__(self):
+            self.loaded = None
+        def load(self, url, title):
+            self.loaded = (url, title)
+
+    player = Player()
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", player=player)
+    url = "https://live.example.test/channel/index.m3u8"
+    service.state["episodes"]["live"] = {
+        "id": "live", "title": "Live channel", "url": url, "is_live": True,
+        "status": "new", "source_id": "source",
+    }
+
+    service.play_episode("live")
+    assert player.loaded == (url, "Live channel")
