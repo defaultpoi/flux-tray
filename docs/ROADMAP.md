@@ -9,6 +9,6 @@ A milestone is complete only with behavior, tests and docs. Stubs do not count.
 - [ ] M4 Media sources: normalized models/order, YouTube, RSS/Atom enclosures, yt-dlp, dynamic plugins.
 - [ ] M5 Media runtime: sequential ahead queue, resumable downloads/retry, HLS partial playback, monitor resolution, subtitles, watched state.
 - [ ] M6 Void maintenance: XBPS scan/install, Topgrade orchestration/summary, orphan scan and explicit removal/cache cleanup.
-- [ ] M7 Tools: monotonic countdown, missed deadline, recurring schedules, launcher.
+- [ ] M7 Tools: monotonic countdown and missed-deadline handling; weekly recurring alarms with snooze/dismiss; launcher.
 - [ ] M8 Integration: popup/tray polish, CSS/theme/icon fallback, focus, suspend/resume, process cleanup, idle CPU/RAM profile, docs/install.
 Record real-machine checks as unverified until run. No migrations or cross-platform work.
