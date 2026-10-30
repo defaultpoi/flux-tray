@@ -464,6 +464,7 @@ class TrayController:
             self.log.info("XBPS scan found %d package changes", len(changes))
         except Exception:
             self.log.exception("XBPS update scan failed")
+        self._update_icon()
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
         return GLib.SOURCE_REMOVE
