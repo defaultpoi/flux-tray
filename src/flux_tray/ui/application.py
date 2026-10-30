@@ -82,5 +82,8 @@ class FluxTrayApplication(Gtk.Application):
         if self.tasks is not None:
             self.tasks.shutdown(wait=False)
             self.tasks = None
+        if self.player is not None:
+            self.player.close()
+            self.player = None
         logging.getLogger("flux_tray").info("Flux Tray stopped")
         self.release()
