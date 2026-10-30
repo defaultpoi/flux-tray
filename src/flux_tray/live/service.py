@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from flux_tray.core.process import ProcessResult, ProcessSupervisor
 from flux_tray.core.storage import JsonStore
+from flux_tray.live.twitch import TwitchProbe
 
 
 class StreamlinkProbe:
@@ -42,10 +43,11 @@ class StreamlinkProbe:
 
 class LiveService:
     def __init__(self, store: JsonStore, probe: StreamlinkProbe | None = None,
-                 *, interval: int = 900, now: Callable[[], datetime] | None = None,
-                 player=None, quality: str = "best"):
+                 *, twitch_probe=None, interval: int = 900,
+                 now: Callable[[], datetime] | None = None, player=None, quality: str = "best"):
         self.store = store
         self.probe = probe or StreamlinkProbe()
+        self.twitch_probe = twitch_probe or (TwitchProbe() if probe is None else probe)
         self.interval = max(60, int(interval))
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.player = player
@@ -88,7 +90,8 @@ class LiveService:
             if datetime.fromisoformat(channel["next_check"]) > now:
                 return channel["status"]
         try:
-            result = self.probe.check(channel["url"])
+            checker = self.twitch_probe if channel["platform"] == "twitch" else self.probe
+            result = checker.check(channel["url"])
             channel["status"] = result["status"]
             channel["metadata"] = result.get("metadata", {})
             channel["streams"] = result.get("streams", [])
@@ -104,12 +107,54 @@ class LiveService:
 
     def check_due(self, *, force: bool = False) -> int:
         transitions = 0
-        for channel in list(self.state["channels"]):
-            previous = channel.get("status")
-            current = self.check_channel(channel["id"], force=force)
-            if current == "live" and previous != "live":
-                transitions += 1
+        now = self.now()
+        due = []
+        for channel in self.state["channels"]:
+            next_check = channel.get("next_check")
+            if force or not next_check or datetime.fromisoformat(next_check) <= now:
+                due.append(channel)
+        twitch = [channel for channel in due if channel["platform"] == "twitch"]
+        youtube = [channel for channel in due if channel["platform"] == "youtube"]
+        if twitch and hasattr(self.twitch_probe, "check_many"):
+            try:
+                results = self.twitch_probe.check_many([channel["url"] for channel in twitch])
+            except Exception as exc:
+                for channel in twitch:
+                    channel["last_error"] = str(exc)
+                    channel["next_check"] = (now + timedelta(minutes=2)).isoformat()
+            else:
+                for channel in twitch:
+                    transitions += self._apply_check_result(channel, results[channel["url"]], now)
+        else:
+            for channel in twitch:
+                transitions += self._check_due_channel(channel, now)
+        for channel in youtube:
+            transitions += self._check_due_channel(channel, now)
+        if due:
+            self._save()
         return transitions
+
+    def _check_due_channel(self, channel: dict, now: datetime) -> int:
+        previous = channel.get("status")
+        try:
+            checker = self.twitch_probe if channel["platform"] == "twitch" else self.probe
+            result = checker.check(channel["url"])
+        except Exception as exc:
+            channel["last_error"] = str(exc)
+            channel["next_check"] = (now + timedelta(minutes=2)).isoformat()
+            return 0
+        return self._apply_check_result(channel, result, now, previous)
+
+    def _apply_check_result(self, channel: dict, result: dict, now: datetime,
+                            previous: str | None = None) -> int:
+        previous = channel.get("status") if previous is None else previous
+        channel["status"] = result["status"]
+        channel["metadata"] = result.get("metadata", {})
+        channel["streams"] = result.get("streams", [])
+        channel["last_error"] = None
+        channel["last_check"] = now.isoformat()
+        channel["next_check"] = (now + timedelta(seconds=self.interval)).isoformat()
+        return int(channel["status"] == "live" and previous != "live")
 
     def play_channel(self, channel_id: str) -> None:
         if self.player is None:
