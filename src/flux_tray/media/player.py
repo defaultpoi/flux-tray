@@ -16,6 +16,7 @@ class MpvController:
         self.executable = executable
         self.process: subprocess.Popen | None = None
         self._owned = False
+        self._closed = False
         self._lock = RLock()
 
     def _send(self, command: list) -> None:
@@ -62,6 +63,8 @@ class MpvController:
         raise TimeoutError("mpv IPC socket did not become ready")
 
     def load(self, url: str, title: str) -> None:
+        if self._closed:
+            raise RuntimeError("mpv controller is shutting down")
         local_file = Path(url).expanduser()
         if not url.startswith(("http://", "https://")) and not local_file.is_file():
             raise ValueError("mpv source must be an HTTP(S) URL or existing local file")
@@ -101,6 +104,7 @@ class MpvController:
 
     def close(self) -> None:
         with self._lock:
+            self._closed = True
             if self._owned and self.process is not None and self.process.poll() is None:
                 try:
                     self._send(["quit"])
