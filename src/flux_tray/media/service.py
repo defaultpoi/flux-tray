@@ -64,6 +64,24 @@ class MediaService:
             raise ValueError("Media source order must be default, oldest or newest")
         return value
 
+    @staticmethod
+    def _ordered_episodes(episodes: list[dict[str, Any]],
+                          order: str | None) -> list[dict[str, Any]]:
+        """Order episodes while preserving adapter order for equal sort keys."""
+        ordered = sorted(episodes, key=lambda item: item.get("source_order", 0))
+        if order not in {"oldest", "newest"}:
+            return ordered
+
+        def sort_key(item: dict[str, Any]):
+            season, number = item.get("season"), item.get("episode")
+            if isinstance(season, int) and isinstance(number, int):
+                return (0, season, number)
+            return (1, str(item.get("date") or ""))
+
+        # Python's stable reverse sort keeps equal-key items in their input order.
+        ordered.sort(key=sort_key, reverse=order == "newest")
+        return ordered
+
     def add_source(self, kind: str, url: str, name: str | None = None,
                    order: str | None = None) -> str:
         if kind not in {"youtube", "rss", "url", "plugin"}:
@@ -180,22 +198,7 @@ class MediaService:
                       if episode.get("source_id") == source_id and episode.get("status") == "new"]
         source = next((item for item in self.state["sources"]
                        if item.get("id") == source_id), {})
-        order = source.get("order")
-        if order in {"oldest", "newest"}:
-            def sort_key(item):
-                season, number = item.get("season"), item.get("episode")
-                source_index = item.get("source_order", 0)
-                if isinstance(season, int) and isinstance(number, int):
-                    return (0, season, number, source_index)
-                return (1, str(item.get("date") or ""), source_index)
-
-            candidates.sort(key=lambda item: item.get("source_order", 0))
-            # Stable sorting keeps the adapter's order for equal dates/numbers.
-            candidates.sort(key=sort_key, reverse=order == "newest")
-        else:
-            # The adapter's listing order is the default; source_order preserves it
-            # across persisted state and later queue refills.
-            candidates.sort(key=lambda item: item.get("source_order", 0))
+        candidates = self._ordered_episodes(candidates, source.get("order"))
         for episode in candidates[:capacity]:
             episode["status"] = "queued"
             self.state["queue"].append(episode["id"])
@@ -308,17 +311,7 @@ class MediaService:
         episodes = [episode for episode in self.state["episodes"].values()
                     if episode.get("source_id") == source_id]
         unwatched = [episode for episode in episodes if episode.get("status") != "watched"]
-        order = source.get("order")
-        if order in {"oldest", "newest"}:
-            def sort_key(item):
-                season, number = item.get("season"), item.get("episode")
-                if isinstance(season, int) and isinstance(number, int):
-                    return (0, season, number, item.get("source_order", 0))
-                return (1, str(item.get("date") or ""), item.get("source_order", 0))
-            unwatched.sort(key=lambda item: item.get("source_order", 0))
-            unwatched.sort(key=sort_key, reverse=order == "newest")
-        else:
-            unwatched.sort(key=lambda item: item.get("source_order", 0))
+        unwatched = self._ordered_episodes(unwatched, source.get("order"))
         episode = unwatched[0] if unwatched else None
         download = self.state.get("download") or {}
         if source.get("last_error"):
@@ -359,16 +352,7 @@ class MediaService:
             return None
         if source_id is not None:
             order = self._source(source_id).get("order")
-            if order in {"oldest", "newest"}:
-                def sort_key(item):
-                    season, number = item.get("season"), item.get("episode")
-                    if isinstance(season, int) and isinstance(number, int):
-                        return (0, season, number, item.get("source_order", 0))
-                    return (1, str(item.get("date") or ""), item.get("source_order", 0))
-                candidates.sort(key=lambda item: item.get("source_order", 0))
-                candidates.sort(key=sort_key, reverse=order == "newest")
-            else:
-                candidates.sort(key=lambda item: item.get("source_order", 0))
+            candidates = self._ordered_episodes(candidates, order)
         else:
             candidates.sort(key=lambda item: (item.get("season") or 0, item.get("episode") or 0,
                                               item.get("date") or item.get("discovered_at") or ""))
