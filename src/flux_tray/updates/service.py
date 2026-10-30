@@ -47,9 +47,10 @@ class UpdateService:
             return list(argv)
         return [self.sudo, "-n", *argv]
 
-    def _run(self, argv: Sequence[str], *, timeout: float) -> ProcessResult:
+    def _run(self, argv: Sequence[str], *, timeout: float, shutdown_protected: bool = False) -> ProcessResult:
         with self._lock:
-            return self.runner(list(argv), timeout=timeout, env=self._env())
+            return self.runner(list(argv), timeout=timeout, env=self._env(),
+                               shutdown_protected=shutdown_protected)
 
     def scan_updates(self) -> list[PackageChange]:
         result = self._run(["xbps-install", "-Mn", "-u"], timeout=180)
@@ -77,7 +78,7 @@ class UpdateService:
     def apply_updates(self) -> ProcessResult:
         """Run the real system update; callers must only expose this after explicit user action."""
         return self._run(self._privileged(["xbps-install", "-y", "-u"]),
-                         timeout=self.timeout)
+                         timeout=self.timeout, shutdown_protected=True)
 
     def remove_orphans(self) -> ProcessResult:
         """Remove current automatic orphans after an explicit confirmation in the UI."""
