@@ -430,3 +430,72 @@ def test_media_date_order_preserves_adapter_order_for_equal_dates(tmp_path):
 
     service._fill_queue(source_id)
     assert service.state["queue"] == ["first", "second"]
+
+def test_media_source_name_and_order_edits_preserve_catalog_baseline(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/feed.xml", "Original")
+    source = service.state["sources"][0]
+    source["initialized"] = True
+    source["next_check"] = "2099-01-01T00:00:00+00:00"
+    service.state["episodes"] = {
+        "first": {"id": "first", "source_id": source_id, "status": "queued",
+                  "season": 1, "episode": 1, "source_order": 0},
+        "second": {"id": "second", "source_id": source_id, "status": "queued",
+                   "season": 1, "episode": 2, "source_order": 1},
+    }
+    service.state["queue"] = ["first", "second"]
+
+    service.update_source(source_id, "rss", "https://example.test/feed.xml",
+                          "Renamed", order="newest")
+
+    assert source["name"] == "Renamed"
+    assert source["initialized"] is True
+    assert source["next_check"] == "2099-01-01T00:00:00+00:00"
+    assert service.state["queue"] == ["second", "first"]
+    assert set(service.state["episodes"]) == {"first", "second"}
+
+
+def test_changing_media_source_identity_clears_old_catalog(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/old.xml")
+    service.state["episodes"]["old"] = {
+        "id": "old", "source_id": source_id, "status": "watched",
+    }
+    service.state["queue"] = ["old"]
+    service.state["watched"] = ["old"]
+    service.state["sources"][0]["last_watched"] = {"id": "old", "title": "Old episode"}
+
+    service.update_source(source_id, "rss", "https://example.test/new.xml", "New feed")
+
+    source = service.state["sources"][0]
+    assert source["url"] == "https://example.test/new.xml"
+    assert source["initialized"] is False
+    assert source["last_watched"] is None if "last_watched" in source else True
+    assert service.state["episodes"] == {}
+    assert service.state["queue"] == []
+    assert service.state["watched"] == []
+
+
+def test_cannot_change_media_source_while_its_episode_is_downloading(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/old.xml")
+    service.state["episodes"]["active"] = {
+        "id": "active", "source_id": source_id, "status": "queued",
+    }
+    service.state["download"] = {"episode_id": "active", "status": "downloading"}
+
+    try:
+        service.update_source(source_id, "rss", "https://example.test/new.xml", "New feed")
+    except RuntimeError as exc:
+        assert "while one of its episodes is downloading" in str(exc)
+    else:
+        raise AssertionError("Source identity changed during an active download")
+
+    assert service.state["sources"][0]["url"] == "https://example.test/old.xml"
+
