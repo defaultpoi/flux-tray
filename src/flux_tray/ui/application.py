@@ -18,6 +18,7 @@ from flux_tray.ui.tray import TrayController
 from flux_tray.timers.service import CountdownTimer
 from flux_tray.connectivity.service import ConnectivityService
 from flux_tray.updates.service import UpdateService
+from flux_tray.weather.service import WeatherService
 
 
 class FluxTrayApplication(Gtk.Application):
@@ -48,7 +49,19 @@ class FluxTrayApplication(Gtk.Application):
         connectivity = ConnectivityService(connectivity_store)
         update_store = JsonStore(self.paths.data_dir / "updates.json", dict)
         updates = UpdateService(update_store)
-        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates)
+        weather = None
+        latitude = config.get("weather", "lat", "") or ""
+        longitude = config.get("weather", "lon", "") or ""
+        if latitude.strip() and longitude.strip():
+            try:
+                weather_store = JsonStore(self.paths.data_dir / "weather.json", dict)
+                weather = WeatherService(
+                    weather_store, float(latitude), float(longitude),
+                    interval=config.get_int("weather", "interval", 30, minimum=5) * 60,
+                )
+            except ValueError as exc:
+                logger.warning("Weather is disabled: %s", exc)
+        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates, weather)
         self.hold()
         self.connect("shutdown", self._shutdown)
         logger.info("Flux Tray started")
