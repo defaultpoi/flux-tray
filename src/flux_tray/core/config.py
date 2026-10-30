@@ -87,6 +87,7 @@ lon =
 [updates]
 interval = 12
 installer = topgrade
+topgrade_steps =
 orphans = true
 
 [timer]
