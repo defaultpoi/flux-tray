@@ -273,10 +273,16 @@ class TrayController:
                 self._append("Retry media download", lambda _item: self._media_download_next())
             for source in sources:
                 source_label = source.get("name", source.get("url", "Media source"))
-                if source.get("last_error"):
-                    source_label += " · check failed"
+                summary = self.media.source_summary(source["id"])
+                source_label = (f"{source_label} · {summary['episode']} · "
+                                f"{summary['status']} · {summary['new_count']} new")
                 parent_source = Gtk.MenuItem.new_with_label(source_label[:100])
+                parent_source.set_tooltip_text(summary["tooltip"])
                 source_menu = Gtk.Menu()
+                play_next = Gtk.MenuItem.new_with_label("Play next unwatched")
+                play_next.connect("activate", lambda _widget, source_id=source["id"]:
+                                  self._media_play_next(source_id))
+                source_menu.append(play_next)
                 edit_source = Gtk.MenuItem.new_with_label("Edit source…")
                 edit_source.connect("activate", lambda _widget, current=source:
                                     self._edit_media_source_dialog(current))
@@ -945,8 +951,9 @@ class TrayController:
         self._update_icon()
         return GLib.SOURCE_REMOVE
 
-    def _media_play_next(self):
-        future = self.tasks.submit("media-playback", self.media.play_next_unwatched)
+    def _media_play_next(self, source_id=None):
+        future = self.tasks.submit("media-playback", self.media.play_next_unwatched,
+                                   source_id=source_id)
         if future is not None:
             future.add_done_callback(lambda done: GLib.idle_add(self._media_play_complete, done, None))
 
