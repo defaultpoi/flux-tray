@@ -69,6 +69,8 @@ class MpvController:
         if not url.startswith(("http://", "https://")) and not local_file.is_file():
             raise ValueError("mpv source must be an HTTP(S) URL or existing local file")
         with self._lock:
+            if self._closed:
+                raise RuntimeError("mpv controller is shutting down")
             if self.process is not None and self.process.poll() is not None:
                 self.process = None
                 self._owned = False
