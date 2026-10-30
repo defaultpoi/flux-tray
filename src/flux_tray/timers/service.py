@@ -122,6 +122,28 @@ class CountdownTimer:
         self._save()
         return item
 
+    def update_schedule(self, schedule_id: str, weekdays: list[int],
+                        clock: str, label: str) -> dict:
+        import re
+
+        normalized_days = sorted({int(day) for day in weekdays})
+        if not normalized_days or any(day < 0 or day > 6 for day in normalized_days):
+            raise ValueError("Choose at least one weekday")
+        if not re.fullmatch(r"(?:[01]\\d|2[0-3]):[0-5]\\d", clock):
+            raise ValueError("Time must use 24-hour HH:MM format")
+        label = str(label).strip()[:80]
+        if not label:
+            raise ValueError("Alarm label cannot be empty")
+        for item in self.schedules:
+            if item.get("id") == schedule_id:
+                changed = item.get("time") != clock or item.get("weekdays") != normalized_days
+                item.update({"weekdays": normalized_days, "time": clock, "label": label})
+                if changed:
+                    item["last_fired"] = None
+                self._save()
+                return item
+        raise KeyError(schedule_id)
+
     def remove_schedule(self, schedule_id: str) -> None:
         self.state["schedules"] = [
             item for item in self.schedules if item.get("id") != schedule_id
