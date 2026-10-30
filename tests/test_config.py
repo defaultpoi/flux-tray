@@ -24,3 +24,14 @@ def test_default_paths_are_flux_tray_specific():
     assert paths.config_dir.name == "flux-tray"
     assert paths.data_dir.name == "flux-tray"
     assert paths.plugin_dir.name == "media-plugins"
+
+
+
+def test_set_many_persists_settings_and_creates_section(tmp_path):
+    path = tmp_path / "config.conf"
+    config = Config(path)
+    config.set_many("weather", {"location": "Buzau, Romania", "alerts": "true"})
+    reloaded = Config(path)
+    reloaded.load()
+    assert reloaded.get("weather", "location") == "Buzau, Romania"
+    assert reloaded.get_bool("weather", "alerts") is True
