@@ -347,6 +347,8 @@ class TrayController:
 
     def refresh(self):
         def work():
+            if self.connectivity is not None and self.connectivity.state.get("status") in {"offline", "dns-error"}:
+                return 0
             return self.feeds.check_due()
         future = self.tasks.submit("feed-refresh", work)
         if future is not None:
