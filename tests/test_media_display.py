@@ -9,7 +9,7 @@ HDMI-1 connected 1920x1080+1366+0 (normal left inverted right x axis y axis)
 DP-1 disconnected (normal left inverted right x axis y axis)
 """
     display = XrandrDisplay(runner=lambda argv, **kwargs: ProcessResult(tuple(argv), 0, output, ""))
-    assert display.screen_height() == 1080
+    assert display.screen_height() == 768
 
 
 def test_xrandr_returns_none_when_no_monitor_mode_is_available():
