@@ -20,7 +20,7 @@ This document is deliberately conservative. A service existing in the repository
 | Connectivity | DNS/direct-IP diagnostic, offline feed pause, recovery-triggered checks and explicit confirmation for an optional user-configured argv reset command | Broader outage/recovery tests and real reset-command validation |
 | XBPS | Dry-run update scan, orphan listing, explicitly confirmed system update, orphan removal/cache cleanup, optional Topgrade `system` plus configured steps, per-package XBPS fallback, package/version/action/download-size confirmation summary, and persisted maintenance outcomes with view/dismiss UI | Installed-versus-available version comparison and real Void package-manager validation |
 | Timers | Persistent countdown with suspend/restart missed-deadline handling; weekly local-time alarms with weekday selection, add/edit/remove, once-per-date firing, persistent active alert, five-minute snooze and dismiss controls | Richer warning/alert controls and real suspend/restart desktop validation |
-| Launcher | JSON argv commands, managed background spawn | Launcher configuration UI and optional explicitly trusted shell commands |
+| Launcher | JSON argv commands, managed background spawn, add/edit/remove launcher-command dialog with JSON argv validation | Optional explicitly trusted shell commands (intentionally unsupported by default) |
 | Tray | GTK3 status icon, popup, notifications and basic actions | Focus-out rules, theme/icon fallback validation and real XFCE interaction tests |
 
 ## Verification status
