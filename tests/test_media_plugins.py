@@ -85,3 +85,49 @@ def test_plugin_download_must_return_an_existing_file(tmp_path):
         assert "existing file" in str(exc)
     else:
         raise AssertionError("Missing plugin download file was accepted")
+
+def test_plugin_download_rejects_file_outside_output_directory(tmp_path):
+    directory = tmp_path / "plugins"
+    directory.mkdir()
+    outside = tmp_path.parent / "outside-plugin-media.mkv"
+    outside.write_bytes(b"video")
+    (directory / "downloader.py").write_text(
+        "NAME = 'downloader'\\n"
+        "def list_episodes(source):\\n"
+        "    return []\\n"
+        "def download(episode, base, progress, cancelled):\\n"
+        f"    return {str(outside)!r}\\n",
+        encoding="utf-8",
+    )
+    registry = MediaPluginRegistry(directory)
+    registry.reload()
+    try:
+        registry.download_episode("plugin:downloader:source", {}, tmp_path)
+    except ValueError as exc:
+        assert "inside its output directory" in str(exc)
+    else:
+        raise AssertionError("Plugin download outside its output directory was accepted")
+
+
+def test_plugin_download_rejects_empty_file(tmp_path):
+    directory = tmp_path / "plugins"
+    directory.mkdir()
+    (directory / "downloader.py").write_text(
+        "NAME = 'downloader'\\n"
+        "def list_episodes(source):\\n"
+        "    return []\\n"
+        "def download(episode, base, progress, cancelled):\\n"
+        "    path = base / 'empty.mkv'\\n"
+        "    path.write_bytes(b'')\\n"
+        "    return str(path)\\n",
+        encoding="utf-8",
+    )
+    registry = MediaPluginRegistry(directory)
+    registry.reload()
+    try:
+        registry.download_episode("plugin:downloader:source", {}, tmp_path)
+    except ValueError as exc:
+        assert "non-empty regular file" in str(exc)
+    else:
+        raise AssertionError("Empty plugin download was accepted")
+
