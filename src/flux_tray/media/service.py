@@ -10,6 +10,7 @@ from uuid import uuid4
 from flux_tray.core.storage import JsonStore
 from flux_tray.media.plugins import MediaPluginRegistry
 from flux_tray.media.downloader import MediaDownloader
+from flux_tray.media.episodes import is_archive_org
 from flux_tray.media.sources import RssMediaAdapter, YtDlpAdapter
 
 
@@ -49,6 +50,8 @@ class MediaService:
             raise ValueError("Source URL cannot be empty")
         if kind != "plugin" and not url.strip().startswith(("https://", "http://")):
             raise ValueError("Media source must use HTTP or HTTPS")
+        if is_archive_org(url.strip()):
+            raise ValueError("Archive.org media sources are intentionally unsupported")
         source_id = uuid4().hex
         self.state["sources"].append({"id": source_id, "kind": kind, "url": url.strip(),
             "name": name or url.strip(), "initialized": False, "next_check": None,
