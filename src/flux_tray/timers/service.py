@@ -33,7 +33,7 @@ class CountdownTimer:
         self.boottime = boottime
         self.boot_id = boot_id
         self.maximum = max(60, int(maximum))
-        self.step = max(1, int(step))
+        self.step = min(max(1, int(step)), self.maximum)
         self.state = store.load()
         if not isinstance(self.state, dict):
             self.state = {}
@@ -49,6 +49,7 @@ class CountdownTimer:
             raise ValueError(f"Duration must be a multiple of {self.step} between "
                              f"{self.step} and {self.maximum} seconds")
         mono, boot = self.monotonic(), self.boottime()
+        self._recovered = False
         self.state = {"status": "running", "duration": seconds,
                       "monotonic_deadline": mono + seconds,
                       "boottime_deadline": boot + seconds,
@@ -56,6 +57,7 @@ class CountdownTimer:
         self._save()
 
     def cancel(self) -> None:
+        self._recovered = False
         self.state = {"status": "idle"}
         self._save()
 
