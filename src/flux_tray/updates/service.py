@@ -88,7 +88,7 @@ class UpdateService:
     def clean_cache(self) -> ProcessResult:
         """Remove outdated cached packages after an explicit confirmation in the UI."""
         return self._run(self._privileged(["xbps-remove", "-y", "-O"]),
-                           timeout=self.timeout)
+                         timeout=self.timeout, shutdown_protected=True)
 
     def remove_orphans_and_clean_cache(self) -> tuple[ProcessResult, ProcessResult]:
         removed = self.remove_orphans()
