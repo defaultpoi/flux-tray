@@ -173,8 +173,13 @@ class TrayController:
             self._append(f"Media sources: {len(sources)} · queued: {len(queue)}", sensitive=False)
             download_state = self.media.state.get("download") or {}
             download_status = download_state.get("status")
-            if download_status in {"downloading", "failed"}:
-                self._append(f"Download {download_status}: {download_state.get('title', 'Episode')}"[:100],
+            if download_status == "downloading":
+                percent = download_state.get("percent")
+                progress = f"{percent:.0f}%" if isinstance(percent, (int, float)) else "working"
+                self._append(f"Download {progress}: {download_state.get('title', 'Episode')}"[:100],
+                             sensitive=False)
+            elif download_status == "failed":
+                self._append(f"Download failed: {download_state.get('title', 'Episode')}"[:100],
                              sensitive=False)
             elif download_status == "completed":
                 self._append(f"Last download: {download_state.get('title', 'Episode')}"[:100],
@@ -742,11 +747,27 @@ class TrayController:
         self._media_download_next()
 
     def _media_download_next(self):
-        future = self.tasks.submit("media-download", self.media.download_next)
+        future = self.tasks.submit("media-download", self.media.download_next,
+                                   progress_callback=self._queue_media_progress)
         if future is not None:
             if self.menu.get_mapped():
                 self._rebuild_menu(self.menu)
             future.add_done_callback(lambda done: GLib.idle_add(self._media_download_complete, done))
+
+    def _queue_media_progress(self, download_state):
+        GLib.idle_add(self._media_progress_update, download_state)
+
+    def _media_progress_update(self, download_state):
+        current = self.media.state.get("download") or {}
+        if current.get("episode_id") == download_state.get("episode_id"):
+            current.update(download_state)
+            percent = download_state.get("percent")
+            if isinstance(percent, (int, float)):
+                self.icon.set_tooltip_text(
+                    f"Flux Tray — downloading {percent:.0f}%: {download_state.get('title', 'Episode')}")
+            if self.menu.get_mapped():
+                self._rebuild_menu(self.menu)
+        return GLib.SOURCE_REMOVE
 
     def _media_download_complete(self, future):
         try:
