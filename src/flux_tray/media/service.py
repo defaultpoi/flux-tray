@@ -166,6 +166,12 @@ class MediaService:
         self._save()
 
     def remove_source(self, source_id: str) -> None:
+        source = self._source(source_id)
+        download = self.state.get("download") or {}
+        active_episode = self.state["episodes"].get(download.get("episode_id"))
+        if (download.get("status") == "downloading" and active_episode
+                and active_episode.get("source_id") == source_id):
+            raise RuntimeError("Cannot remove a media source while one of its episodes is downloading")
         self.state["sources"] = [s for s in self.state["sources"] if s["id"] != source_id]
         removed = {key for key, episode in self.state["episodes"].items()
                    if episode.get("source_id") == source_id}
