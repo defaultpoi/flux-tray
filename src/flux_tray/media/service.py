@@ -18,7 +18,7 @@ class MediaService:
                  interval: int = 3600, yt_dlp: YtDlpAdapter | None = None,
                  rss: RssMediaAdapter | None = None,
                  downloader: MediaDownloader | None = None,
-                 output_dir: Path | None = None,
+                 output_dir: Path | None = None, player=None,
                  now: Callable[[], datetime] | None = None):
         self.store = store
         self.plugins = MediaPluginRegistry(plugin_dir)
@@ -28,6 +28,8 @@ class MediaService:
         self.rss = rss or RssMediaAdapter()
         self.downloader = downloader or MediaDownloader()
         self.output_dir = Path(output_dir or Path.home() / "Videos").expanduser()
+        self.player = player
+        self.current_episode_id: str | None = None
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.state = store.load()
         if not isinstance(self.state, dict):
@@ -151,6 +153,46 @@ class MediaService:
                 return episode
         return None
 
+    def play_episode(self, episode_id: str) -> dict[str, Any]:
+        if self.player is None:
+            raise RuntimeError("Shared mpv player is not configured")
+        episode = self.state["episodes"][episode_id]
+        path = episode.get("path")
+        if not path or not Path(path).is_file():
+            path = self.downloader.download(episode, self.output_dir)
+            self.mark_downloaded(episode_id, path)
+        self.player.load(path, episode.get("title", "Flux Tray"))
+        self.current_episode_id = episode_id
+        return episode
+
+    def play_next_unwatched(self) -> dict[str, Any] | None:
+        candidates = [episode for episode in self.state["episodes"].values()
+                      if episode.get("status") != "watched" and episode.get("status") != "baseline"]
+        candidates.extend(episode for episode in self.state["episodes"].values()
+                          if episode.get("status") == "baseline")
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item.get("season") or 0, item.get("episode") or 0,
+                                          item.get("date") or item.get("discovered_at") or ""))
+        return self.play_episode(candidates[0]["id"])
+
+    def update_playback_progress(self) -> bool:
+        if self.player is None or self.current_episode_id is None:
+            return False
+        episode = self.state["episodes"].get(self.current_episode_id)
+        if episode is None or not episode.get("path"):
+            return False
+        position = self.player.get_property("time-pos")
+        duration = self.player.get_property("duration")
+        current_path = self.player.get_property("path")
+        if current_path != episode["path"] or not isinstance(position, (int, float)) or not isinstance(duration, (int, float)) or duration <= 0:
+            return False
+        fraction = position / duration
+        if fraction >= 0.90 or (fraction >= 0.50 and duration - position <= 20):
+            self.mark_watched(episode["id"])
+            self.current_episode_id = None
+            return True
+        return False
     def download_next(self, *, cancelled=None) -> dict[str, Any] | None:
         episode = self.next_queued()
         if episode is None:
