@@ -47,6 +47,9 @@ class UpdateService:
             return list(argv)
         return [self.sudo, "-n", *argv]
 
+    def _run(self, argv: Sequence[str], *, timeout: float) -> ProcessResult:
+        with self._lock:
+            return self.runner(list(argv), timeout=timeout, env=self._env())
     def scan_updates(self) -> list[PackageChange]:
         result = self.runner(["xbps-install", "-Mn", "-u"], timeout=180,
                              env=self._env())
