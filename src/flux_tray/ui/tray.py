@@ -498,6 +498,8 @@ class TrayController:
             self.refresh()
             if self.weather is not None:
                 self._weather_tick()
+            if self.media is not None:
+                self._media_tick()
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
         self._update_icon()
