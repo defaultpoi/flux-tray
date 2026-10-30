@@ -550,16 +550,19 @@ class TrayController:
         box.set_margin_bottom(12)
         box.set_margin_start(12)
         box.set_margin_end(12)
-        spin = Gtk.SpinButton.new_with_range(1, max(1, self.timer.maximum // 60),
-                                            max(1, self.timer.step // 60))
-        spin.set_value(5)
+        step_minutes = self.timer.step / 60
+        maximum_minutes = (self.timer.maximum // self.timer.step) * step_minutes
+        spin = Gtk.SpinButton.new_with_range(step_minutes, max(step_minutes, maximum_minutes),
+                                            step_minutes)
+        default_steps = max(1, round(300 / self.timer.step))
+        spin.set_value(default_steps * step_minutes)
         box.pack_start(Gtk.Label(label="Duration (minutes)"), False, False, 0)
         box.pack_start(spin, False, False, 0)
         dialog.show_all()
         response = dialog.run()
         if response == Gtk.ResponseType.OK:
             try:
-                self.timer.start(int(spin.get_value()) * 60)
+                self.timer.start(int(round(spin.get_value() * 60)))
             except ValueError as exc:
                 self.log.warning("Invalid timer duration: %s", exc)
         dialog.destroy()
