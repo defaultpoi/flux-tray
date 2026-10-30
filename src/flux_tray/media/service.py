@@ -52,7 +52,17 @@ class MediaService:
     def _save(self):
         self.store.save(self.state)
 
-    def add_source(self, kind: str, url: str, name: str | None = None) -> str:
+    @staticmethod
+    def _validate_order(order: str | None) -> str | None:
+        if order is None or str(order).strip().lower() in {"", "default"}:
+            return None
+        value = str(order).strip().lower()
+        if value not in {"oldest", "newest"}:
+            raise ValueError("Media source order must be default, oldest or newest")
+        return value
+
+    def add_source(self, kind: str, url: str, name: str | None = None,
+                   order: str | None = None) -> str:
         if kind not in {"youtube", "rss", "url", "plugin"}:
             raise ValueError("Source kind must be youtube, rss, url or plugin")
         if not url.strip():
@@ -63,12 +73,14 @@ class MediaService:
             raise ValueError("Archive.org media sources are intentionally unsupported")
         source_id = uuid4().hex
         self.state["sources"].append({"id": source_id, "kind": kind, "url": url.strip(),
-            "name": name or url.strip(), "initialized": False, "next_check": None,
+            "name": name or url.strip(), "order": self._validate_order(order),
+            "initialized": False, "next_check": None,
             "last_error": None, "last_success": None})
         self._save()
         return source_id
 
-    def update_source(self, source_id: str, kind: str, url: str, name: str) -> None:
+    def update_source(self, source_id: str, kind: str, url: str, name: str,
+                      order: str | None = None) -> None:
         if kind not in {"youtube", "rss", "url", "plugin"}:
             raise ValueError("Source kind must be youtube, rss, url or plugin")
         url = str(url).strip()
@@ -80,6 +92,7 @@ class MediaService:
             raise ValueError("Archive.org media sources are intentionally unsupported")
         source = self._source(source_id)
         source.update({"kind": kind, "url": url, "name": str(name).strip() or url,
+                       "order": self._validate_order(order) if order is not None else source.get("order"),
                        "initialized": False, "next_check": None, "last_error": None})
         self._save()
 
@@ -125,11 +138,12 @@ class MediaService:
             listed = self._list_source(source)
             first_check = not source.get("initialized")
             added = 0
-            for episode in listed:
+            for source_index, episode in enumerate(listed):
                 episode_id = episode["id"]
                 if episode_id in self.state["episodes"]:
                     continue
                 episode["source_id"] = source_id
+                episode["source_order"] = source_index
                 episode["status"] = "baseline" if first_check else "new"
                 episode["discovered_at"] = now.isoformat()
                 self.state["episodes"][episode_id] = episode
@@ -159,8 +173,20 @@ class MediaService:
             return
         candidates = [episode for episode in self.state["episodes"].values()
                       if episode.get("source_id") == source_id and episode.get("status") == "new"]
-        candidates.sort(key=lambda item: (item.get("date") or "", item.get("season") or 0,
-                                          item.get("episode") or 0))
+        order = self._source(source_id).get("order")
+        if order in {"oldest", "newest"}:
+            def sort_key(item):
+                season, number = item.get("season"), item.get("episode")
+                source_index = item.get("source_order", 0)
+                if isinstance(season, int) and isinstance(number, int):
+                    return (0, season, number, source_index)
+                return (1, str(item.get("date") or ""), source_index)
+
+            candidates.sort(key=sort_key, reverse=order == "newest")
+        else:
+            # The adapter's listing order is the default; source_order preserves it
+            # across persisted state and later queue refills.
+            candidates.sort(key=lambda item: item.get("source_order", 0))
         for episode in candidates[:capacity]:
             episode["status"] = "queued"
             self.state["queue"].append(episode["id"])
