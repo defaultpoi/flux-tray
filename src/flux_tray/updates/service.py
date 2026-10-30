@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -58,7 +59,8 @@ class UpdateService:
             return self.runner(list(argv), timeout=timeout, env=self._env(),
                                shutdown_protected=shutdown_protected)
 
-    def _record_action(self, action: str, results: Sequence[ProcessResult]) -> None:
+    def _record_action(self, action: str, results: Sequence[ProcessResult],
+                       version_changes: list[dict] | None = None) -> None:
         records = [{
             "argv": list(result.argv),
             "returncode": int(result.returncode),
@@ -70,6 +72,7 @@ class UpdateService:
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "success": all(item["returncode"] == 0 for item in records),
             "results": records,
+            "version_changes": version_changes,
         }
         self.store.save(self.state)
 
@@ -103,28 +106,60 @@ class UpdateService:
         return sorted({line.strip().split()[0] for line in result.stdout.splitlines()
                        if line.strip()})
 
+    def _installed_versions(self) -> dict[str, str] | None:
+        try:
+            result = self._run(["xbps-query", "-l"], timeout=60)
+        except Exception:
+            return None
+        if result.returncode != 0:
+            return None
+        versions = {}
+        for line in result.stdout.splitlines():
+            match = re.match(r"^\\[\\*\\]\\s+(.+)-([0-9][^\\s]*)", line.strip())
+            if match:
+                versions[match.group(1)] = match.group(2)
+        return versions
+
+    @staticmethod
+    def _version_changes(before: dict[str, str] | None,
+                         after: dict[str, str] | None) -> list[dict] | None:
+        if before is None or after is None:
+            return None
+        return [
+            {"package": name, "old": before.get(name), "new": after.get(name)}
+            for name in sorted(before.keys() | after.keys())
+            if before.get(name) != after.get(name)
+        ]
+
     def apply_updates(self) -> ProcessResult | tuple[ProcessResult, ...]:
         """Run the real system update; callers must only expose this after explicit user action."""
+        before = self._installed_versions()
         if self.installer == "topgrade" and shutil.which(self.topgrade_executable):
             steps = tuple(dict.fromkeys(("system", *self.topgrade_steps)))
             argv = [self.topgrade_executable, "--only", *steps, "--yes", "--no-retry"]
             result = self._run(argv, timeout=self.timeout, shutdown_protected=True)
-            self._record_action("System update (Topgrade)", (result,))
-            return result
-        changes = self.state.get("changes") or []
-        results = []
-        for change in changes:
-            pkgver = str(change.get("pkgver", ""))
-            package = pkgver.rsplit("-", 1)[0] if "-" in pkgver else pkgver
-            if not package:
-                continue
-            result = self._run(self._privileged(["xbps-install", "-y", "-u", package]),
-                               timeout=self.timeout, shutdown_protected=True)
-            results.append(result)
-            if result.returncode != 0:
-                break
-        self._record_action("System update (XBPS)", results)
-        return tuple(results)
+            results = (result,)
+            action = "System update (Topgrade)"
+            return_value = result
+        else:
+            changes = self.state.get("changes") or []
+            completed = []
+            for change in changes:
+                pkgver = str(change.get("pkgver", ""))
+                package = pkgver.rsplit("-", 1)[0] if "-" in pkgver else pkgver
+                if not package:
+                    continue
+                result = self._run(self._privileged(["xbps-install", "-y", "-u", package]),
+                                   timeout=self.timeout, shutdown_protected=True)
+                completed.append(result)
+                if result.returncode != 0:
+                    break
+            results = tuple(completed)
+            action = "System update (XBPS)"
+            return_value = results
+        after = self._installed_versions()
+        self._record_action(action, results, self._version_changes(before, after))
+        return return_value
 
     def remove_orphans(self) -> ProcessResult:
         """Remove current automatic orphans after an explicit confirmation in the UI."""
