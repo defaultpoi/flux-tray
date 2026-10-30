@@ -35,3 +35,14 @@ def test_set_many_persists_settings_and_creates_section(tmp_path):
     reloaded.load()
     assert reloaded.get("weather", "location") == "Buzau, Romania"
     assert reloaded.get_bool("weather", "alerts") is True
+
+
+
+def test_remove_option_persists_launcher_removal(tmp_path):
+    path = tmp_path / "config.conf"
+    config = Config(path)
+    config.set_many("launcher", {"browser": '["firefox"]'})
+    assert config.remove_option("launcher", "browser") is True
+    reloaded = Config(path)
+    reloaded.load()
+    assert reloaded.get("launcher", "browser") is None
