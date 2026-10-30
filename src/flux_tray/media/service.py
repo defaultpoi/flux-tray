@@ -10,6 +10,7 @@ from uuid import uuid4
 from flux_tray.core.storage import JsonStore
 from flux_tray.media.plugins import MediaPluginRegistry
 from flux_tray.media.downloader import MediaDownloader
+from flux_tray.media.hls import HlsDownloader
 from flux_tray.media.episodes import is_archive_org, safe_filename
 from flux_tray.media.sources import RssMediaAdapter, YtDlpAdapter
 
@@ -19,6 +20,7 @@ class MediaService:
                  interval: int = 3600, yt_dlp: YtDlpAdapter | None = None,
                  rss: RssMediaAdapter | None = None,
                  downloader: MediaDownloader | None = None,
+                 hls_downloader: HlsDownloader | None = None,
                  output_dir: Path | None = None, player=None, display=None,
                  screen_height: int | None = None, yt_dlp_sort: str | None = None,
                  now: Callable[[], datetime] | None = None):
@@ -29,6 +31,7 @@ class MediaService:
         self.yt_dlp = yt_dlp or YtDlpAdapter()
         self.rss = rss or RssMediaAdapter()
         self.downloader = downloader or MediaDownloader()
+        self.hls_downloader = hls_downloader or HlsDownloader()
         self.output_dir = Path(output_dir or Path.home() / "Videos").expanduser()
         self.player = player
         self.display = display
@@ -233,10 +236,19 @@ class MediaService:
                                                      source_dir, progress_callback, cancelled)
         if plugin_path is not None:
             return plugin_path
+        source_name = str(source.get("name") or "Media")
+        url = str(resolved.get("url") or "")
+        if url.split("?", 1)[0].lower().endswith(".m3u8"):
+            screen = self.display.screen_size() if self.display is not None and hasattr(
+                self.display, "screen_size") else None
+            return self.hls_downloader.download(
+                resolved, source_dir, source_name=source_name, screen=screen,
+                cancelled=cancelled, progress_callback=progress_callback,
+            )
         return self.downloader.download(resolved, source_dir,
                                         format_sort=self._format_sort(), cancelled=cancelled,
                                         progress_callback=progress_callback,
-                                        source_name=str(source.get("name") or "Media"))
+                                        source_name=source_name)
     def _format_sort(self) -> str | None:
         if self.yt_dlp_sort:
             return self.yt_dlp_sort
