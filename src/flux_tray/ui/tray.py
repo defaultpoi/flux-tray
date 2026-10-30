@@ -55,6 +55,9 @@ class TrayController:
             child.destroy()
         unread = self.feeds.unread_items()
         self._append(f"Flux Tray — {len(unread)} unread", sensitive=False)
+        if self.connectivity is not None:
+            network = self.connectivity.state.get("status", "checking")
+            self._append(f"Network: {network}", sensitive=False)
         self.menu.append(Gtk.SeparatorMenuItem())
         if not self.feeds.state["feeds"]:
             self._append("No feeds configured", sensitive=False)
@@ -100,7 +103,9 @@ class TrayController:
     def _update_icon(self):
         unread = self.feeds.unread_count()
         self.icon.set_from_icon_name("mail-unread-symbolic" if unread else "view-list-symbolic")
-        self.icon.set_tooltip_text(f"Flux Tray — {unread} unread")
+        network = self.connectivity.state.get("status") if self.connectivity is not None else None
+        suffix = f" · {network}" if network else ""
+        self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}")
 
     def _add_feed_dialog(self):
         dialog = Gtk.Dialog(title="Add RSS/Atom feed", flags=Gtk.DialogFlags.MODAL)
