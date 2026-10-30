@@ -177,12 +177,16 @@ class TrayController:
                     source_label += " · check failed"
                 parent_source = Gtk.MenuItem.new_with_label(source_label[:100])
                 source_menu = Gtk.Menu()
+                edit_source = Gtk.MenuItem.new_with_label("Edit source…")
+                edit_source.connect("activate", lambda _widget, current=source:
+                                    self._edit_media_source_dialog(current))
                 rename_source = Gtk.MenuItem.new_with_label("Rename…")
                 rename_source.connect("activate", lambda _widget, current=source:
                                       self._rename_media_source_dialog(current))
                 remove_source = Gtk.MenuItem.new_with_label("Remove source…")
                 remove_source.connect("activate", lambda _widget, current=source:
                                       self._remove_media_source_dialog(current))
+                source_menu.append(edit_source)
                 source_menu.append(rename_source)
                 source_menu.append(remove_source)
                 parent_source.set_submenu(source_menu)
@@ -765,6 +769,44 @@ class TrayController:
             if fallback_url:
                 webbrowser.open(fallback_url)
         return GLib.SOURCE_REMOVE
+
+    def _edit_media_source_dialog(self, source):
+        dialog = Gtk.Dialog(title="Edit media source", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        kind = Gtk.ComboBoxText()
+        labels = (("YouTube", "youtube"), ("RSS/Atom", "rss"),
+                  ("URL (yt-dlp)", "url"), ("Plugin", "plugin"))
+        for label_text, _value in labels:
+            kind.append_text(label_text)
+        selected = next((index for index, pair in enumerate(labels)
+                         if pair[1] == source.get("kind")), 0)
+        kind.set_active(selected)
+        name = Gtk.Entry()
+        name.set_text(source.get("name", ""))
+        name.set_placeholder_text("Source name (optional)")
+        url = Gtk.Entry()
+        url.set_text(source.get("url", ""))
+        url.set_placeholder_text("Channel, playlist, feed or URL")
+        for widget in (kind, name, url):
+            box.pack_start(widget, False, False, 0)
+        dialog.show_all()
+        if dialog.run() == Gtk.ResponseType.OK:
+            try:
+                selected_kind = labels[kind.get_active()][1]
+                self.media.update_source(source["id"], selected_kind, url.get_text(),
+                                         name.get_text())
+                self._media_tick(force=True)
+            except (ValueError, IndexError) as exc:
+                self.log.warning("Could not edit media source: %s", exc)
+        dialog.destroy()
+        self._rebuild_menu(self.menu)
 
     def _rename_media_source_dialog(self, source):
         dialog = Gtk.Dialog(title="Rename media source", flags=Gtk.DialogFlags.MODAL)
