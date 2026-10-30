@@ -10,5 +10,5 @@ A milestone is complete only with behavior, tests and docs. Stubs do not count.
 - [x] M5 Media runtime: sequential ahead queue, resumable downloads/retry and percentage progress, Direct HLS/live URL playback, monitor resolution, subtitles, watched state.
 - [x] M6 Void maintenance: XBPS scan/install, Topgrade orchestration/summary, orphan scan and explicit removal/cache cleanup.
 - [x] M7 Tools: monotonic countdown and missed-deadline handling; weekly recurring alarms with add/edit/remove, snooze/dismiss; launcher command management UI.
-- [ ] M8 Integration: popup/tray polish, CSS/theme/icon fallback, focus, suspend/resume, process cleanup, idle CPU/RAM profile, docs/install.
+- [ ] M8 Integration: tray timer/callback cleanup, duplicate-activation guard, theme-independent icon fallback and manual XFCE validation checklist are implemented; remaining: popup focus rules, actual theme/panel checks, suspend/resume validation, idle CPU/RAM profile, install/autostart polish and target-machine testing.
 Record real-machine checks as unverified until run. No migrations or cross-platform work.
