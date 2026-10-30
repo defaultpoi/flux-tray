@@ -49,7 +49,7 @@ class FluxTrayApplication(Gtk.Application):
         self.process = ProcessSupervisor()
         store = JsonStore(self.paths.data_dir / "feeds.json",
                           lambda: {"feeds": [], "items": {}, "read_later": []})
-        feeds = FeedService(store)
+        feeds = FeedService(store, default_interval=config.get_int("feeds", "interval", 60, minimum=60))
         timer_store = JsonStore(self.paths.data_dir / "timer.json", dict)
         timer = CountdownTimer(
             timer_store,
@@ -93,7 +93,11 @@ class FluxTrayApplication(Gtk.Application):
             downloader=MediaDownloader(process=self.process),
         )
         launcher = LauncherService(config, self.process)
-        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates, weather, live, media, launcher)
+        self.tray = TrayController(
+            self, feeds, self.tasks, timer, connectivity, updates, weather, live, media, launcher,
+            connectivity_interval=config.get_int("connectivity", "interval", 10, minimum=1),
+            update_interval=config.get_int("updates", "interval", 12, minimum=1) * 3600,
+        )
         self.hold()
         self.connect("shutdown", self._shutdown)
         logger.info("Flux Tray started")
