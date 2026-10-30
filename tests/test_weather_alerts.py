@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from flux_tray.weather.alerts import MeteoAlarmClient
 
 
-FEED = b"""<?xml version="1.0"?>
+FEED = """<?xml version="1.0"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:cap="urn:oasis:names:tc:emergency:cap:1.2">
   <entry>
     <id>severe-1</id><title>Heavy rain warning</title>
@@ -25,7 +25,7 @@ FEED = b"""<?xml version="1.0"?>
     <cap:effective>2026-10-30T10:00:00Z</cap:effective>
     <cap:expires>2026-10-30T20:00:00Z</cap:expires>
   </entry>
-</feed>"""
+</feed>""".encode("utf-8")
 
 
 def test_meteoalarm_filters_region_and_active_time_and_maps_severity():
