@@ -5,8 +5,9 @@ from __future__ import annotations
 import socket
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Sequence
 
+from flux_tray.core.process import ProcessResult, ProcessSupervisor
 from flux_tray.core.storage import JsonStore
 
 
@@ -23,16 +24,31 @@ class ConnectivityService:
                  network_target: tuple[str, int] = ("1.1.1.1", 443),
                  resolver: Callable = socket.getaddrinfo,
                  connector: Callable = socket.create_connection,
-                 timeout: float = 3.0):
+                 timeout: float = 3.0, process: ProcessSupervisor | None = None,
+                 reset_command: Sequence[str] | None = None):
         self.store = store
         self.host = host
         self.network_target = network_target
         self.resolver = resolver
         self.connector = connector
         self.timeout = timeout
+        self.process = process or ProcessSupervisor()
+        self.reset_command = tuple(reset_command) if reset_command else None
         self.state = store.load()
         if not isinstance(self.state, dict):
             self.state = {}
+
+    @property
+    def reset_available(self) -> bool:
+        return bool(self.reset_command)
+
+    def reset(self) -> ProcessResult:
+        if not self.reset_command:
+            raise RuntimeError("No connectivity reset command is configured")
+        result = self.process.run(self.reset_command, timeout=60)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "Connectivity reset command failed")
+        return result
 
     def check(self) -> ConnectivityState:
         try:
