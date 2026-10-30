@@ -21,7 +21,7 @@ This document is deliberately conservative. A service existing in the repository
 | XBPS | Dry-run update scan, orphan listing, explicitly confirmed system update, orphan removal/cache cleanup, optional Topgrade `system` plus configured steps, per-package XBPS fallback, package/version/action/download-size confirmation summary, and persisted maintenance outcomes with view/dismiss UI | Installed-versus-available version comparison and real Void package-manager validation |
 | Timers | Persistent countdown with suspend/restart missed-deadline handling; weekly local-time alarms with weekday selection, add/edit/remove, once-per-date firing, persistent active alert, five-minute snooze and dismiss controls | Richer warning/alert controls and real suspend/restart desktop validation |
 | Launcher | JSON argv commands, managed background spawn, add/edit/remove launcher-command dialog with JSON argv validation | Optional explicitly trusted shell commands (intentionally unsupported by default) |
-| Tray | GTK3 status icon, popup, notifications, theme-independent icon fallback, tracked GLib timers, guarded duplicate activation and shutdown cleanup | Focus-out rules, actual theme/panel validation and real XFCE interaction tests |
+| Tray | GTK3 status icon, popup, notifications, theme-independent icon fallback, tracked GLib timers, guarded duplicate activation and shutdown cleanup; popup closes when unread feed items reach zero (read-later/live/media excluded) or the blank gap before the footer is right-clicked | Actual theme/panel validation and real XFCE interaction tests |
 
 ## Verification status
 
