@@ -28,7 +28,7 @@ def test_first_check_is_baseline_and_new_items_are_unread(tmp_path):
 
 
 def test_second_check_discovers_new_item_and_read_later_is_not_unread(tmp_path):
-    bodies = [b'''<rss><channel><item><guid>one</guid><title>First</title></item></channel></rss>''',
+    bodies = [b'''<rss><channel><item><guid>one</guid><title>First</title><pubDate>Mon, 01 Jan 2024 10:00:00 GMT</pubDate></item></channel></rss>''',
               b'''<rss><channel><item><guid>one</guid><title>First</title></item>
               <item><guid>two</guid><title>Second</title></item></channel></rss>''']
     store = JsonStore(tmp_path / "f.json", lambda: {"feeds": [], "items": {}, "read_later": []})
