@@ -285,3 +285,29 @@ def test_media_episode_without_registered_source_can_be_marked_watched(tmp_path)
     }
     service.mark_watched("orphan")
     assert service.state["episodes"]["orphan"]["status"] == "watched"
+
+
+def test_hls_download_uses_source_folder_and_detected_screen(tmp_path):
+    class Hls:
+        def __init__(self):
+            self.call = None
+        def download(self, episode, output_dir, **kwargs):
+            self.call = (episode, output_dir, kwargs)
+            return str(output_dir / "episode.mkv")
+
+    class Display:
+        def screen_size(self):
+            return (1366, 768)
+
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    hls = Hls()
+    service = MediaService(store, tmp_path / "plugins", output_dir=tmp_path / "videos",
+                           hls_downloader=hls, display=Display())
+    source_id = service.add_source("url", "https://example.test/show", "Example Show")
+    episode = {"id": "hls", "source_id": source_id, "title": "Show S01E01 - Pilot",
+               "url": "https://example.test/episode.m3u8"}
+    path = service._download_episode(episode)
+    assert path.endswith("episode.mkv")
+    assert hls.call[1] == tmp_path / "videos" / "Example Show"
+    assert hls.call[2]["screen"] == (1366, 768)
