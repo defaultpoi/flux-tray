@@ -131,11 +131,23 @@ class FeedService:
         self.breaking_words = cleaned
         for item in self.state["items"].values():
             text = " ".join([item.get("title", ""), *item.get("categories", [])])
+            was_breaking = item.get("breaking", False)
             item["breaking"] = _whole_word_match(text, cleaned)
+            if item["breaking"] and not was_breaking:
+                item["breaking_notified"] = False
         self._save()
 
     def breaking_items(self) -> list[dict[str, Any]]:
         return [item for item in self.unread_items() if item.get("breaking")]
+
+    def take_unnotified_breaking_items(self) -> list[dict[str, Any]]:
+        pending = [item for item in self.unread_items()
+                   if item.get("breaking") and not item.get("breaking_notified", False)]
+        if pending:
+            for item in pending:
+                item["breaking_notified"] = True
+            self._save()
+        return pending
 
     def read_later_items(self) -> list[dict[str, Any]]:
         return [self.state["items"][item_id] for item_id in self.state["read_later"]
@@ -219,7 +231,7 @@ class FeedService:
                 "categories": [str(t.get("term", "")) for t in entry.get("tags", [])],
                 "published": _iso(published) if published else None,
                 "seen": bool(old), "read": bool(old),
-                "breaking": False}
+                "breaking": False, "breaking_notified": False}
             text = " ".join([item["title"], *item["categories"]])
             item["breaking"] = _whole_word_match(text, self.breaking_words)
             self.state["items"][item_id] = item
