@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import os
 import re
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from typing import Callable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 from flux_tray.core.process import ProcessResult, ProcessSupervisor
-from flux_tray.media.episodes import media_filename
+from flux_tray.media.episodes import media_filename, safe_filename
 
 
 _ATTRIBUTE = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
@@ -101,6 +102,39 @@ class HlsDownloader:
     def _header_argument(headers: dict[str, str]) -> str:
         return "".join(f"{key}: {value}\r\n" for key, value in headers.items())
 
+    def _download_subtitles(self, episode: dict, output_dir: Path, basename: str,
+                             headers: dict[str, str]) -> None:
+        subtitles = episode.get("subs")
+        if not isinstance(subtitles, dict):
+            return
+        for language, url in subtitles.items():
+            if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+                continue
+            extension = Path(urlsplit(url).path).suffix.lower()
+            if extension not in {".vtt", ".srt", ".ass", ".ssa", ".ttml"}:
+                continue
+            destination = output_dir / f"{basename}.{safe_filename(str(language), 24)}{extension}"
+            partial = Path(str(destination) + ".part")
+            try:
+                request = Request(url, headers={"User-Agent": "FluxTray/0.1", **headers})
+                with urlopen(request, timeout=self.playlist_timeout) as response:
+                    payload = response.read(2_000_001)
+                if len(payload) > 2_000_000:
+                    continue
+                with partial.open("wb") as stream:
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(partial, destination)
+            except Exception:
+                try:
+                    partial.unlink()
+                except FileNotFoundError:
+                    pass
+                logging.getLogger("flux_tray.media.hls").debug(
+                    "Could not download optional subtitle %s", language, exc_info=True
+                )
+
     def download(self, episode: dict, output_dir: Path, *, source_name: str,
                  screen: tuple[int, int] | None = None, cancelled: Event | None = None,
                  progress_callback: Callable[[dict], None] | None = None) -> str:
@@ -152,6 +186,7 @@ class HlsDownloader:
             if not partial.is_file():
                 raise RuntimeError("ffmpeg completed without creating the media file")
             os.replace(partial, destination)
+            self._download_subtitles(episode, output_dir, destination.stem, headers)
             if progress_callback is not None:
                 progress_callback({"percent": 100.0, "duration": playlist.duration})
             return str(destination)
