@@ -95,3 +95,24 @@ def test_breaking_words_can_be_updated_and_reclassified(tmp_path):
     service.set_breaking_words(["urgent"])
     assert item["breaking"]
     assert service.breaking_items() == [item]
+
+def test_category_and_author_rules_route_items_to_read_later(tmp_path):
+    body = b"""<rss><channel><item><guid>x</guid><title>News</title>
+    <author>Jane Doe</author><category>Science</category></item></channel></rss>"""
+    service = make_service(tmp_path, body)
+    service.set_routing_rules([{"kind": "category", "value": "sci"}])
+    fid = service.add_feed("https://example.test/rss")
+    service.check_feed(fid)
+    item_id = next(iter(service.state["items"]))
+    assert service.unread_count() == 0
+    assert item_id in service.state["read_later"]
+
+def test_muting_removes_existing_read_later_items(tmp_path):
+    body = b"""<rss><channel><item><guid>x</guid><title>News</title></item></channel></rss>"""
+    service = make_service(tmp_path, body)
+    fid = service.add_feed("https://example.test/rss")
+    service.check_feed(fid)
+    item_id = next(iter(service.state["items"]))
+    service.save_for_later(item_id)
+    service.set_muted(fid, True)
+    assert item_id not in service.state["read_later"]
