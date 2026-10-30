@@ -339,6 +339,16 @@ class TrayController:
                 if details:
                     title += " · " + " · ".join(details)
                 parent = Gtk.MenuItem.new_with_label(title[:110])
+                parent.set_tooltip_text(
+                    " · ".join(value for value in (
+                        item.get("title", "").strip(),
+                        item.get("author", "").strip(),
+                        ", ".join(item.get("categories", [])),
+                    ) if value)
+                )
+                parent.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+                parent.connect("button-press-event", self._on_unread_item_button_press,
+                               item)
                 submenu = Gtk.Menu()
                 open_item = Gtk.MenuItem.new_with_label("Open")
                 open_item.connect("activate", lambda _widget, current=item: self._open_item(current))
@@ -581,6 +591,14 @@ class TrayController:
             self.launcher.launch(name)
         except Exception:
             self.log.exception("Could not launch configured command: %s", name)
+    def _on_unread_item_button_press(self, _widget, event, item):
+        if event.button == 3:
+            self.feeds.mark_read(item["id"])
+            self._finish_feed_read_action(True)
+            self._rebuild_menu(self.menu)
+            return True
+        return False
+
     def _on_unread_gap_button_press(self, _widget, event):
         if event.button == 3:
             self.menu.popdown()
