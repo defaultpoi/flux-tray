@@ -59,7 +59,7 @@ def test_download_reports_progress_callback(tmp_path):
     def runner(argv, **kwargs):
         assert "--newline" in argv
         assert "--progress-template" in argv
-        kwargs["output_callback"]("stderr", "download:500|1000|1000|10\\n")
+        kwargs["output_callback"]("stderr", "FLUX_PROGRESS|500|1000|1000|10\\n")
         return ProcessResult(tuple(argv), 0, "/tmp/video.mkv\\n", "")
 
     downloader = MediaDownloader(runner=runner)
