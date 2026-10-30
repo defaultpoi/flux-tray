@@ -85,6 +85,8 @@ class TrayController:
         if self.connectivity is not None:
             network = self.connectivity.state.get("status", "checking")
             self._append(f"Network: {network}", sensitive=False)
+            if self.connectivity.reset_available:
+                self._append("Reset network…", lambda _item: self._confirm_network_reset())
         if self.weather is not None:
             weather = self.weather.state
             temperature = weather.get("temperature")
@@ -674,6 +676,27 @@ class TrayController:
         self._scan_updates()
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
+        return GLib.SOURCE_REMOVE
+
+    def _confirm_network_reset(self):
+        dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+            message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.YES_NO,
+            text="Run the configured network reset command?")
+        dialog.format_secondary_text("This executes connectivity.reset_command from your configuration.")
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.YES:
+            future = self.tasks.submit("connectivity-reset", self.connectivity.reset)
+            if future is not None:
+                future.add_done_callback(lambda done: GLib.idle_add(self._network_reset_complete, done))
+
+    def _network_reset_complete(self, future):
+        try:
+            result = future.result()
+            self.log.info("Connectivity reset completed: %s", result.stdout.strip())
+        except Exception:
+            self.log.exception("Configured connectivity reset failed")
+        self._connectivity_tick()
         return GLib.SOURCE_REMOVE
 
     def _connectivity_tick(self):
