@@ -27,15 +27,17 @@ def test_topgrade_runs_system_and_configured_steps(monkeypatch, tmp_path):
     calls = []
     def runner(argv, **kwargs):
         calls.append((argv, kwargs))
+        if argv == ["xbps-query", "-l"]:
+            return ProcessResult(tuple(argv), 0, "[*] bash-5.1_1 (installed)\\n", "")
         return ProcessResult(tuple(argv), 0, "Topgrade completed", "")
     monkeypatch.setattr("flux_tray.updates.service.shutil.which", lambda _name: "/usr/bin/topgrade")
     service = UpdateService(JsonStore(tmp_path / "updates.json", dict), runner=runner,
                             installer="topgrade", topgrade_steps=("cargo", "rustup", "cargo"))
     result = service.apply_updates()
     assert result.returncode == 0
-    assert calls[0][0] == ["topgrade", "--only", "system", "cargo", "rustup", "--yes", "--no-retry"]
-    assert calls[0][1]["env"]["LC_ALL"] == "C.UTF-8"
-    assert calls[0][1]["shutdown_protected"] is True
+    assert calls[1][0] == ["topgrade", "--only", "system", "cargo", "rustup", "--yes", "--no-retry"]
+    assert calls[1][1]["env"]["LC_ALL"] == "C.UTF-8"
+    assert calls[1][1]["shutdown_protected"] is True
 
 
 def test_topgrade_missing_falls_back_to_individual_xbps_updates(monkeypatch, tmp_path):
@@ -52,8 +54,8 @@ def test_topgrade_missing_falls_back_to_individual_xbps_updates(monkeypatch, tmp
     ]
     results = service.apply_updates()
     assert len(results) == 2
-    assert calls[0][-4:] == ["xbps-install", "-y", "-u", "curl"]
-    assert calls[1][-4:] == ["xbps-install", "-y", "-u", "libfoo-devel"]
+    assert calls[1][-4:] == ["xbps-install", "-y", "-u", "curl"]
+    assert calls[2][-4:] == ["xbps-install", "-y", "-u", "libfoo-devel"]
 
 
 
@@ -77,3 +79,37 @@ def test_maintenance_result_persists_across_scans_and_can_be_dismissed(monkeypat
     assert service.state["last_action"]["action"] == "System update (Topgrade)"
     service.dismiss_last_action()
     assert "last_action" not in service.state
+
+
+def test_installed_versions_are_compared_before_and_after_topgrade(monkeypatch, tmp_path):
+    snapshots = iter((
+        "[*] curl-8.1_1 (installed)\\n[*] libfoo-devel-1.0_1 (installed)\\n",
+        "[*] curl-8.2_1 (installed)\\n[*] libfoo-devel-1.0_1 (installed)\\n[*] newpkg-2.0_1 (installed)\\n",
+    ))
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append(list(argv))
+        if argv == ["xbps-query", "-l"]:
+            return ProcessResult(tuple(argv), 0, next(snapshots), "")
+        return ProcessResult(tuple(argv), 0, "Topgrade completed", "")
+
+    monkeypatch.setattr("flux_tray.updates.service.shutil.which", lambda _name: "/usr/bin/topgrade")
+    service = UpdateService(JsonStore(tmp_path / "updates.json", dict), runner=runner,
+                            installer="topgrade")
+    service.apply_updates()
+    changes = service.state["last_action"]["version_changes"]
+    assert changes == [
+        {"package": "curl", "old": "8.1_1", "new": "8.2_1"},
+        {"package": "newpkg", "old": None, "new": "2.0_1"},
+    ]
+
+
+def test_version_change_parser_uses_package_name_before_version(tmp_path):
+    service = UpdateService(JsonStore(tmp_path / "updates.json", dict), runner=lambda *a, **k: None)
+    result = ProcessResult(("xbps-query", "-l"), 0,
+                           "[*] libfoo-devel-1.2_3 (installed)\\n[*] python3.14-3.14.1_1 (installed)\\n", "")
+    service.runner = lambda *args, **kwargs: result
+    assert service._installed_versions() == {
+        "libfoo-devel": "1.2_3", "python3.14": "3.14.1_1",
+    }
