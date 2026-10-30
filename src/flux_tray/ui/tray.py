@@ -620,10 +620,6 @@ class TrayController:
             for x in range(6, 10):
                 offset = (y * 16 + x) * 4
                 pixels[offset:offset + 4] = b"\\xff\\xff\\xff\\xff"
-        return GdkPixbuf.Pixbuf.new_from_bytes(
-            GLib.Bytes.new(bytes(pixels)), GdkPixbuf.Colorspace.RGB, True,
-            8, 16, 16, 16 * 4,
-        )
         network = self.connectivity.state.get("status") if self.connectivity is not None else None
         suffix = f" · {network}" if network else ""
         temperature = self.weather.state.get("temperature") if self.weather is not None else None
@@ -631,6 +627,28 @@ class TrayController:
         alert_suffix = " · severe weather warning" if alert_level >= 3 else ""
         breaking_suffix = " · breaking feed item" if breaking else ""
         self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}{weather_suffix}{alert_suffix}{breaking_suffix}")
+
+    @staticmethod
+    def _fallback_icon_pixbuf(color: str):
+        red, green, blue = (int(color[index:index + 2], 16)
+                            for index in (1, 3, 5))
+        pixels = bytearray(16 * 16 * 4)
+        for y in range(16):
+            for x in range(16):
+                dx, dy = x - 7.5, y - 7.5
+                if dx * dx + dy * dy > 49:
+                    continue
+                offset = (y * 16 + x) * 4
+                pixels[offset:offset + 4] = bytes((red, green, blue, 255))
+        # A small white center mark keeps the fallback recognizable without SVG support.
+        for y in range(6, 10):
+            for x in range(6, 10):
+                offset = (y * 16 + x) * 4
+                pixels[offset:offset + 4] = b"\xff\xff\xff\xff"
+        return GdkPixbuf.Pixbuf.new_from_bytes(
+            GLib.Bytes.new(bytes(pixels)), GdkPixbuf.Colorspace.RGB, True,
+            8, 16, 16, 16 * 4,
+        )
 
     def _reorder_feeds_dialog(self):
         dialog = Gtk.Dialog(title="Reorder feeds", flags=Gtk.DialogFlags.MODAL)
