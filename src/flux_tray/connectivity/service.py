@@ -54,6 +54,8 @@ class ConnectivityService:
             status = "offline"
         result = ConnectivityState(status, dns_ok, network_ok,
                                    datetime.now(timezone.utc).isoformat())
+        previous = self.state.get("status")
         self.state = asdict(result)
-        self.store.save(self.state)
+        if previous != status:
+            self.store.save(self.state)
         return result
