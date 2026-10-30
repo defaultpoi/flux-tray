@@ -29,3 +29,14 @@ def test_download_rejects_missing_url(tmp_path):
         pass
     else:
         raise AssertionError("missing URL accepted")
+
+
+def test_download_passes_resolution_sort_override(tmp_path):
+    calls = []
+    def runner(argv, **kwargs):
+        calls.append(argv)
+        return ProcessResult(tuple(argv), 0, "/tmp/video.mkv\n", "")
+    downloader = MediaDownloader(runner=runner)
+    downloader.download({"url": "https://example.test/video", "title": "Video"},
+                        tmp_path, format_sort="res:653")
+    assert calls[0][calls[0].index("-S") + 1] == "res:653"
