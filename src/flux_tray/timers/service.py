@@ -144,7 +144,7 @@ class CountdownTimer:
             return None
         for item in self.schedules:
             if (item.get("enabled", True) and now.weekday() in item.get("weekdays", [])
-                    and item.get("time") == minute and item.get("last_fired") != date_key):
+                    and item.get("time", "99:99") <= minute and item.get("last_fired") != date_key):
                 item["last_fired"] = date_key
                 alert = {"schedule_id": item["id"], "label": item["label"],
                          "fired_at": now.isoformat()}
