@@ -75,6 +75,15 @@ class TrayController:
             condition = self.weather.state.get("condition", "Weather unavailable")
             weather_text = f"Weather: {temperature}°C · {condition}" if temperature is not None else condition
             self._append(weather_text, sensitive=False)
+        if self.live is not None:
+            channels = self.live.state.get("channels", [])
+            self._append(f"Live channels ({len(channels)})", sensitive=False)
+            for channel in channels:
+                metadata = channel.get("metadata", {})
+                title = metadata.get("title") or channel["status"]
+                label = f"{channel['name']} — {title}"[:100]
+                self._append(label, lambda _item, url=channel["url"]: webbrowser.open(url))
+            self._append("Add live channel…", lambda _item: self._add_live_dialog())
         self.menu.append(Gtk.SeparatorMenuItem())
         if not self.feeds.state["feeds"]:
             self._append("No feeds configured", sensitive=False)
