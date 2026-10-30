@@ -73,6 +73,10 @@ class TrayController:
         source_id = None
 
         def invoke():
+            if self._closing:
+                if source_id in self._timeout_sources:
+                    self._timeout_sources.remove(source_id)
+                return GLib.SOURCE_REMOVE
             keep = callback()
             if keep == GLib.SOURCE_REMOVE and source_id in self._timeout_sources:
                 self._timeout_sources.remove(source_id)
@@ -449,7 +453,7 @@ class TrayController:
         if severe and self.menu.get_mapped() and self._weather_pulse_source is None:
             self._weather_pulse_source = self._add_timeout(600, self._pulse_weather_alerts)
         elif (not severe or not self.menu.get_mapped()) and self._weather_pulse_source is not None:
-            GLib.source_remove(self._weather_pulse_source)
+            self._remove_timeout(self._weather_pulse_source)
             self._weather_pulse_source = None
             self._weather_pulse_phase = False
             for item, label in self._weather_alert_items:
