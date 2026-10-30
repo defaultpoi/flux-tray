@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import configparser
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,6 +53,27 @@ class Config:
             return self.parser.getboolean(section, key, fallback=fallback)
         except ValueError:
             return fallback
+
+    def set_many(self, section: str, values: dict[str, str]) -> None:
+        if not self.parser.has_section(section):
+            self.parser.add_section(section)
+        for key, value in values.items():
+            self.parser.set(section, key, str(value))
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=f".{self.path.name}.",
+                                         suffix=".tmp", dir=self.path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                self.parser.write(stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+        except BaseException:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
 
     def ensure_exists(self) -> None:
         if self.path.exists():
