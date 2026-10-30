@@ -14,8 +14,9 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk
 
 class TrayController:
     def __init__(self, application, feed_service, task_manager, timer_service=None, connectivity_service=None, update_service=None, weather_service=None, live_service=None, media_service=None, launcher_service=None,
-                 connectivity_interval: int = 10, update_interval: int = 43200):
+                 connectivity_interval: int = 10, update_interval: int = 43200, config=None):
         self.application = application
+        self.config = config
         self.feeds = feed_service
         self.tasks = task_manager
         self.timer = timer_service
@@ -98,6 +99,7 @@ class TrayController:
                 weather_text = condition
             self._append(weather_text, sensitive=False)
             self._append("Refresh weather", lambda _item: self._weather_tick(force=True))
+            self._append("Weather settings…", lambda _item: self._weather_settings_dialog())
             for day in weather.get("forecast", []):
                 label = f"{day.get('date')}: {day.get('condition')} · H {day.get('high')}° L {day.get('low')}° · rain {day.get('rain_probability')}%"
                 self._append(label, sensitive=False)
@@ -789,6 +791,86 @@ class TrayController:
             except (ValueError, OSError) as exc:
                 self.log.warning("Could not add live channel: %s", exc)
         dialog.destroy()
+    def _weather_settings_dialog(self):
+        if self.weather is None or self.config is None:
+            return
+        dialog = Gtk.Dialog(title="Weather settings", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(6)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+
+        def add_field(label, value, placeholder):
+            box.pack_start(Gtk.Label(label=label, xalign=0), False, False, 0)
+            entry = Gtk.Entry()
+            entry.set_text(value)
+            entry.set_placeholder_text(placeholder)
+            box.pack_start(entry, False, False, 0)
+            return entry
+
+        location = add_field("Place name (preferred)", self.config.get("weather", "location", "") or "",
+                             "e.g. Buzau, Romania")
+        latitude = add_field("Latitude (optional)", self.config.get("weather", "lat", "") or "",
+                             "e.g. 45.15")
+        longitude = add_field("Longitude (optional)", self.config.get("weather", "lon", "") or "",
+                              "e.g. 26.82")
+        region = add_field("County/region for MeteoAlarm", self.config.get("weather", "region", "") or "",
+                           "e.g. Buzau")
+        alerts = Gtk.CheckButton.new_with_label("Enable MeteoAlarm severe-weather warnings")
+        alerts.set_active(self.config.get_bool("weather", "alerts", False))
+        box.pack_start(alerts, False, False, 4)
+        dialog.show_all()
+        response = dialog.run()
+        error = None
+        if response == Gtk.ResponseType.OK:
+            place = location.get_text().strip()
+            lat_text, lon_text = latitude.get_text().strip(), longitude.get_text().strip()
+            region_text = region.get_text().strip()
+            try:
+                if place:
+                    lat_value = lon_value = None
+                    lat_text = lon_text = ""
+                elif lat_text and lon_text:
+                    lat_value, lon_value = float(lat_text), float(lon_text)
+                    if not -90 <= lat_value <= 90 or not -180 <= lon_value <= 180:
+                        raise ValueError("Latitude must be -90..90 and longitude -180..180")
+                else:
+                    raise ValueError("Enter a place name or both coordinates")
+                if alerts.get_active() and not region_text:
+                    raise ValueError("Enter a county/region before enabling MeteoAlarm")
+                country = self.config.get("weather", "country", "romania") or "romania"
+                self.config.set_many("weather", {
+                    "location": place, "lat": lat_text, "lon": lon_text,
+                    "region": region_text, "alerts": str(alerts.get_active()).lower(),
+                    "country": country,
+                })
+                from flux_tray.weather.alerts import MeteoAlarmClient
+                from flux_tray.weather.geocode import NominatimGeocoder
+                alerts_client = (MeteoAlarmClient(country=country, region=region_text)
+                                 if alerts.get_active() else None)
+                self.weather.configure(
+                    latitude=lat_value, longitude=lon_value, location=place or None,
+                    geocoder=NominatimGeocoder() if place else None,
+                    alerts_client=alerts_client,
+                )
+            except (ValueError, OSError) as exc:
+                error = str(exc)
+        dialog.destroy()
+        if error:
+            message = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+                message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE,
+                text="Weather settings were not saved")
+            message.format_secondary_text(error)
+            message.run()
+            message.destroy()
+        elif response == Gtk.ResponseType.OK:
+            self._weather_tick(force=True)
+            self._rebuild_menu(self.menu)
+
     def _weather_tick(self, *, force: bool = False):
         if self.weather is None:
             return GLib.SOURCE_REMOVE
