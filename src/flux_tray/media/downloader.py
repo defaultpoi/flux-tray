@@ -84,4 +84,18 @@ class MediaDownloader:
         paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         if not paths:
             raise RuntimeError("yt-dlp did not report the downloaded file path")
-        return paths[-1]
+
+        reported_path = Path(paths[-1]).expanduser()
+        if not reported_path.is_absolute():
+            reported_path = output_dir / reported_path
+        try:
+            completed_path = reported_path.resolve(strict=True)
+            completed_path.relative_to(output_dir.resolve())
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(
+                "yt-dlp reported a download outside the configured media directory "
+                "or a file that does not exist"
+            ) from exc
+        if not completed_path.is_file() or completed_path.stat().st_size == 0:
+            raise RuntimeError("yt-dlp reported an invalid or empty media file")
+        return str(completed_path)
