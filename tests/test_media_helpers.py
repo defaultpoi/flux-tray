@@ -132,3 +132,31 @@ def test_plugin_http_helpers_reject_header_line_breaks(tmp_path):
             headers={"X-Test": "value" + chr(13) + chr(10) + "Injected: yes"},
         )
 
+def test_resumable_download_does_not_append_bytes_beyond_range(tmp_path):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b"abcd"
+            self.send_response(206)
+            self.send_header("Content-Range", "bytes 3-5/10")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server, thread = _serve(Handler)
+    try:
+        destination = tmp_path / "episode.bin"
+        partial = destination.with_suffix(".bin.part")
+        partial.write_bytes(b"old")
+        with pytest.raises(RuntimeError, match="exceeded the expected byte count"):
+            download_file(
+                f"http://127.0.0.1:{server.server_port}/episode.bin", destination
+            )
+        assert partial.read_bytes() == b"oldabc"
+        assert not destination.exists()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
