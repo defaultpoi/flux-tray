@@ -78,7 +78,10 @@ class MediaPluginRegistry:
             return episode
         if not isinstance(resolved, dict):
             raise TypeError("Plugin resolve must return a dictionary or None")
-        return {**episode, **resolved}
+        normalized = normalize_episode({**episode, **resolved}, "").to_dict()
+        normalized["id"] = episode.get("id", normalized["id"])
+        normalized["source_id"] = episode.get("source_id")
+        return normalized
 
     def download_episode(self, source: str, episode: dict[str, Any], base: Path,
                          progress=None, cancelled=None) -> str | None:
@@ -92,7 +95,10 @@ class MediaPluginRegistry:
         result = downloader(dict(episode), base, progress, cancelled)
         if result is None:
             return None
-        return str(result)
+        path = Path(str(result)).expanduser()
+        if not path.is_file():
+            raise ValueError("Plugin download must return the path to an existing file")
+        return str(path)
     def list_episodes(self, source: str) -> list[dict[str, Any]] | None:
         selected = self._select(source)
         if selected is None:
