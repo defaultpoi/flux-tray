@@ -78,7 +78,7 @@ terminal = ["xfce4-terminal"]
 firefox_private = ["firefox", "--private-window"]
 ```
 
-Do not write a shell command as a plain string; it will be ignored. The current implementation intentionally supports argv commands only.
+Do not write a shell command as a plain string; it will be ignored. The current implementation intentionally supports argv commands only. You can add, edit or remove these entries from the tray menu under **Launch**; the dialog validates JSON arrays and never invokes a shell.
 
 ## Media plugins
 
