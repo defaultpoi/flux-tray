@@ -25,8 +25,8 @@ class TaskManager:
                 return None
             future = self._executor.submit(function, *args, **kwargs)
             self._active[key] = future
-            future.add_done_callback(lambda done, task_key=key: self._finished(task_key, done))
-            return future
+        future.add_done_callback(lambda done, task_key=key: self._finished(task_key, done))
+        return future
 
     def _finished(self, key: str, future: Future) -> None:
         with self._lock:
