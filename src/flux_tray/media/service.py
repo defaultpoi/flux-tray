@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from flux_tray.core.storage import JsonStore
 from flux_tray.media.plugins import MediaPluginRegistry
+from flux_tray.media.downloader import MediaDownloader
 from flux_tray.media.sources import RssMediaAdapter, YtDlpAdapter
 
 
@@ -16,6 +17,8 @@ class MediaService:
     def __init__(self, store: JsonStore, plugin_dir: Path, *, ahead: int = 2,
                  interval: int = 3600, yt_dlp: YtDlpAdapter | None = None,
                  rss: RssMediaAdapter | None = None,
+                 downloader: MediaDownloader | None = None,
+                 output_dir: Path | None = None,
                  now: Callable[[], datetime] | None = None):
         self.store = store
         self.plugins = MediaPluginRegistry(plugin_dir)
@@ -23,6 +26,8 @@ class MediaService:
         self.interval = max(600, int(interval))
         self.yt_dlp = yt_dlp or YtDlpAdapter()
         self.rss = rss or RssMediaAdapter()
+        self.downloader = downloader or MediaDownloader()
+        self.output_dir = Path(output_dir or Path.home() / "Videos").expanduser()
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.state = store.load()
         if not isinstance(self.state, dict):
@@ -146,6 +151,20 @@ class MediaService:
                 return episode
         return None
 
+    def download_next(self, *, cancelled=None) -> dict[str, Any] | None:
+        episode = self.next_queued()
+        if episode is None:
+            return None
+        try:
+            path = self.downloader.download(episode, self.output_dir, cancelled=cancelled)
+        except Exception as exc:
+            episode["download_error"] = str(exc)
+            episode["last_attempt"] = self.now().isoformat()
+            self._save()
+            raise
+        self.mark_downloaded(episode["id"], path)
+        episode["download_error"] = None
+        return episode
     def mark_downloaded(self, episode_id: str, path: str) -> None:
         episode = self.state["episodes"][episode_id]
         episode["status"] = "downloaded"
