@@ -355,6 +355,13 @@ class TrayController:
             for item in saved[:10]:
                 title = item["title"].replace("\n", " ").strip()[:90]
                 self._append(title, lambda _widget, current=item: self._open_item(current))
+        if unread:
+            gap = Gtk.MenuItem.new()
+            gap.set_size_request(-1, 12)
+            gap.set_can_focus(False)
+            gap.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+            gap.connect("button-press-event", self._on_unread_gap_button_press)
+            self.menu.append(gap)
         self.menu.append(Gtk.SeparatorMenuItem())
         self._append("Add feed…", lambda _item: self._add_feed_dialog())
         self._append("Reorder feeds…", lambda _item: self._reorder_feeds_dialog())
@@ -574,24 +581,43 @@ class TrayController:
             self.launcher.launch(name)
         except Exception:
             self.log.exception("Could not launch configured command: %s", name)
+    def _on_unread_gap_button_press(self, _widget, event):
+        if event.button == 3:
+            self.menu.popdown()
+            return True
+        return False
+
+    def _finish_feed_read_action(self, was_unread):
+        if was_unread and self.feeds.unread_count() == 0 and self.menu.get_mapped():
+            self.menu.popdown()
+
     def _open_item(self, item):
+        was_unread = any(current["id"] == item["id"]
+                         for current in self.feeds.unread_items())
         if item.get("link"):
             try:
                 webbrowser.open(item["link"])
             except Exception:
                 self.log.exception("Could not open feed link")
         self.feeds.mark_read(item["id"])
+        self._finish_feed_read_action(was_unread)
         self._rebuild_menu(self.menu)
 
     def _save_for_later(self, item):
+        was_unread = any(current["id"] == item["id"]
+                         for current in self.feeds.unread_items())
         self.feeds.save_for_later(item["id"])
+        self._finish_feed_read_action(was_unread)
         self._rebuild_menu(self.menu)
     def _set_feed_muted(self, feed_id, muted):
         self.feeds.set_muted(feed_id, muted)
         self._rebuild_menu(self.menu)
 
     def _mark_feed_read(self, feed_id):
+        was_unread = any(item["feed_id"] == feed_id
+                         for item in self.feeds.unread_items())
         self.feeds.mark_feed_read(feed_id)
+        self._finish_feed_read_action(was_unread)
         self._rebuild_menu(self.menu)
 
     def _update_icon(self):
