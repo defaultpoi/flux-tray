@@ -51,8 +51,8 @@ class UpdateService:
         with self._lock:
             return self.runner(list(argv), timeout=timeout, env=self._env())
     def scan_updates(self) -> list[PackageChange]:
-        result = self.runner(["xbps-install", "-Mn", "-u"], timeout=180,
-                             env=self._env())
+        result = self._run(["xbps-install", "-Mn", "-u"], timeout=180)
+
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "XBPS update scan failed")
         changes = []
@@ -67,7 +67,7 @@ class UpdateService:
         return changes
 
     def list_orphans(self) -> list[str]:
-        result = self.runner(["xbps-query", "-O"], timeout=60, env=self._env())
+        result = self._run(["xbps-query", "-O"], timeout=60)
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "Could not list XBPS orphans")
         return sorted({line.strip().split()[0] for line in result.stdout.splitlines()
@@ -75,17 +75,17 @@ class UpdateService:
 
     def apply_updates(self) -> ProcessResult:
         """Run the real system update; callers must only expose this after explicit user action."""
-        return self.runner(self._privileged(["xbps-install", "-y", "-u"]),
-                           timeout=self.timeout, env=self._env())
+        return self._run(self._privileged(["xbps-install", "-y", "-u"]),
+                           timeout=self.timeout)
 
     def remove_orphans(self) -> ProcessResult:
         """Remove current automatic orphans after an explicit confirmation in the UI."""
-        return self.runner(self._privileged(["xbps-remove", "-y", "-o"]),
+        return self._run(self._privileged(["xbps-remove", "-y", "-o"]),
                            timeout=self.timeout, env=self._env())
 
     def clean_cache(self) -> ProcessResult:
         """Remove outdated cached packages after an explicit confirmation in the UI."""
-        return self.runner(self._privileged(["xbps-remove", "-y", "-O"]),
+        return self._run(self._privileged(["xbps-remove", "-y", "-O"]),
                            timeout=self.timeout, env=self._env())
 
     def remove_orphans_and_clean_cache(self) -> tuple[ProcessResult, ProcessResult]:
