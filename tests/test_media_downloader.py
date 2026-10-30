@@ -40,3 +40,14 @@ def test_download_passes_resolution_sort_override(tmp_path):
     downloader.download({"url": "https://example.test/video", "title": "Video"},
                         tmp_path, format_sort="res:653")
     assert calls[0][calls[0].index("-S") + 1] == "res:653"
+
+
+def test_live_hls_episode_is_rejected(tmp_path):
+    downloader = MediaDownloader(runner=lambda *args, **kwargs: None)
+    try:
+        downloader.download({"url": "https://example.test/live.m3u8", "title": "Live",
+                              "metadata": {"live_status": "is_live"}}, tmp_path)
+    except ValueError as exc:
+        assert "Live HLS" in str(exc)
+    else:
+        raise AssertionError("live HLS episode was accepted")
