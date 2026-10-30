@@ -45,7 +45,7 @@ class MediaDownloader:
         else:
             argv.extend([
                 "--newline", "--progress-delta", "1", "--progress-template",
-                "download:%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.eta)s",
+                "download:FLUX_PROGRESS|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.eta)s",
             ])
         if subtitle_languages:
             argv.extend(["--sub-langs", ",".join(subtitle_languages)])
@@ -54,10 +54,10 @@ class MediaDownloader:
         argv.append(str(url))
 
         def on_output(_channel: str, line: str) -> None:
-            if progress_callback is None or not line.startswith("download:"):
+            if progress_callback is None or not line.startswith("FLUX_PROGRESS|"):
                 return
             parts = line.strip().split("|")
-            if len(parts) < 4:
+            if len(parts) < 5:
                 return
 
             def number(value):
@@ -66,9 +66,9 @@ class MediaDownloader:
                 except (TypeError, ValueError):
                     return None
 
-            downloaded = number(parts[0].removeprefix("download:").strip())
-            total = number(parts[1].strip()) or number(parts[2].strip())
-            eta = number(parts[3].strip())
+            downloaded = number(parts[1].strip())
+            total = number(parts[2].strip()) or number(parts[3].strip())
+            eta = number(parts[4].strip())
             percent = (min(100.0, downloaded * 100.0 / total)
                        if downloaded is not None and total else None)
             progress_callback({"downloaded_bytes": downloaded, "total_bytes": total,
