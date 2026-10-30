@@ -83,7 +83,7 @@ class UpdateService:
     def remove_orphans(self) -> ProcessResult:
         """Remove current automatic orphans after an explicit confirmation in the UI."""
         return self._run(self._privileged(["xbps-remove", "-y", "-o"]),
-                         timeout=self.timeout)
+                         timeout=self.timeout, shutdown_protected=True)
 
     def clean_cache(self) -> ProcessResult:
         """Remove outdated cached packages after an explicit confirmation in the UI."""
