@@ -759,8 +759,11 @@ class TrayController:
 
     def _media_progress_update(self, download_state):
         current = self.media.state.get("download") or {}
-        if current.get("episode_id") == download_state.get("episode_id"):
-            current.update(download_state)
+        if (current.get("episode_id") == download_state.get("episode_id")
+                and current.get("status") == "downloading"):
+            for key in ("percent", "downloaded_bytes", "total_bytes", "eta"):
+                if key in download_state:
+                    current[key] = download_state[key]
             percent = download_state.get("percent")
             if isinstance(percent, (int, float)):
                 self.icon.set_tooltip_text(
