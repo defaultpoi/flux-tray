@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
@@ -44,15 +45,17 @@ def parse_playlist(text: str, base_url: str) -> HlsPlaylist:
         if line.startswith("#EXTINF:"):
             value = line[8:].split(",", 1)[0]
             try:
-                duration += max(0.0, float(value))
+                seconds = float(value)
             except ValueError:
-                continue
+                seconds = 0.0
+            total = duration + seconds
+            if math.isfinite(seconds) and seconds > 0 and math.isfinite(total):
+                duration = total
         if not line.startswith("#EXT-X-STREAM-INF:"):
             continue
         attributes = dict(_ATTRIBUTE.findall(line.partition(":")[2]))
-        uri = next((candidate for candidate in lines[index + 1:]
-                    if not candidate.startswith("#")), None)
-        if not uri:
+        uri = lines[index + 1] if index + 1 < len(lines) else None
+        if not uri or uri.startswith("#"):
             continue
         resolution = attributes.get("RESOLUTION", "")
         match = re.fullmatch(r"(\d+)x(\d+)", resolution)
