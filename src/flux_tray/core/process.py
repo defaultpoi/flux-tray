@@ -8,7 +8,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 from typing import Mapping, Sequence
 
 
@@ -72,6 +72,27 @@ class ProcessSupervisor:
             with self._lock:
                 self._processes.pop(process, None)
 
+    def spawn(self, argv: Sequence[str], *, cwd: Path | None = None,
+              env: Mapping[str, str] | None = None) -> subprocess.Popen:
+        if not argv or not all(isinstance(part, str) for part in argv):
+            raise ValueError("argv must be a non-empty sequence of strings")
+        process = subprocess.Popen(
+            list(argv), cwd=cwd, env=dict(os.environ, **(env or {})),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        with self._lock:
+            if self._closed:
+                self._terminate(process)
+                raise ProcessError("process supervisor is shutting down")
+            self._processes[process] = False
+        Thread(target=self._reap, args=(process,), daemon=True).start()
+        return process
+
+    def _reap(self, process: subprocess.Popen) -> None:
+        process.wait()
+        with self._lock:
+            self._processes.pop(process, None)
     def terminate_all(self) -> None:
         """Prevent new work and terminate every child process group currently owned."""
         with self._lock:
