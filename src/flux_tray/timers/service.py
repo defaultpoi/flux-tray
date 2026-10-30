@@ -129,7 +129,7 @@ class CountdownTimer:
         normalized_days = sorted({int(day) for day in weekdays})
         if not normalized_days or any(day < 0 or day > 6 for day in normalized_days):
             raise ValueError("Choose at least one weekday")
-        if not re.fullmatch(r"(?:[01]\\d|2[0-3]):[0-5]\\d", clock):
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", clock):
             raise ValueError("Time must use 24-hour HH:MM format")
         label = str(label).strip()[:80]
         if not label:
