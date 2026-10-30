@@ -161,3 +161,46 @@ finite.ts
     assert parsed.duration == 5.5
     assert parsed.ended is True
 
+def test_hls_download_rejects_empty_output_file(tmp_path):
+    playlist = """#EXTM3U
+#EXTINF:5,
+segment.ts
+#EXT-X-ENDLIST
+"""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = playlist.encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        def runner(argv, **kwargs):
+            Path(argv[-1]).write_bytes(b"")
+            return ProcessResult(tuple(argv), 0, "", "")
+
+        downloader = HlsDownloader(runner=runner)
+        try:
+            downloader.download(
+                {"url": f"http://127.0.0.1:{server.server_port}/video.m3u8",
+                 "title": "Empty video"},
+                tmp_path, source_name="Empty video",
+            )
+        except RuntimeError as exc:
+            assert "non-empty media file" in str(exc)
+        else:
+            raise AssertionError("Empty HLS output was accepted")
+        assert not (tmp_path / "Empty video - Empty video.mkv").exists()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
