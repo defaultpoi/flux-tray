@@ -34,6 +34,11 @@ class TrayController:
         self.icon.connect("activate", self._on_activate)
         self.icon.connect("popup-menu", self._on_popup)
         self.menu = Gtk.Menu()
+        self.menu.connect("map", self._on_menu_map)
+        self.menu.connect("unmap", self._on_menu_unmap)
+        self._weather_alert_items = []
+        self._weather_pulse_source = None
+        self._weather_pulse_phase = False
         GLib.timeout_add_seconds(60, self._periodic_refresh)
         if self.timer is not None:
             self.timer.poll()
@@ -71,6 +76,7 @@ class TrayController:
         self.menu.append(item)
 
     def _rebuild_menu(self, _menu):
+        self._weather_alert_items = []
         for child in self.menu.get_children():
             self.menu.remove(child)
             child.destroy()
@@ -97,7 +103,13 @@ class TrayController:
                 link = alert.get("url")
                 callback = (lambda _item, target=link: webbrowser.open(target)
                             if target and target.startswith(("http://", "https://")) else None)
-                self._append(alert_label[:110], callback, sensitive=bool(link))
+                alert_item = Gtk.MenuItem.new_with_label(alert_label[:110])
+                alert_item.set_sensitive(bool(link))
+                if alert.get("level", 0) >= 3:
+                    self._weather_alert_items.append((alert_item, alert_label[:110]))
+                if link:
+                    alert_item.connect("activate", callback)
+                self.menu.append(alert_item)
             if weather.get("alerts_error"):
                 self._append("MeteoAlarm: warning feed unavailable", sensitive=False)
         if self.live is not None:
@@ -230,7 +242,46 @@ class TrayController:
         self._append("Refresh feeds", lambda _item: self.refresh(force=True))
         self._append("Quit", lambda _item: self.application.quit())
         self.menu.show_all()
+        self._sync_weather_pulse()
         self._update_icon()
+
+    def _on_menu_map(self, _widget):
+        self._sync_weather_pulse()
+
+    def _on_menu_unmap(self, _widget):
+        if self._weather_pulse_source is not None:
+            GLib.source_remove(self._weather_pulse_source)
+            self._weather_pulse_source = None
+        self._weather_pulse_phase = False
+        for item, label in self._weather_alert_items:
+            item.set_label(label)
+
+    def _sync_weather_pulse(self):
+        severe = (self.weather is not None and
+                  self.weather.state.get("alert_level", 0) >= 3)
+        if severe and self.menu.get_mapped() and self._weather_pulse_source is None:
+            self._weather_pulse_source = GLib.timeout_add(600, self._pulse_weather_alerts)
+        elif (not severe or not self.menu.get_mapped()) and self._weather_pulse_source is not None:
+            GLib.source_remove(self._weather_pulse_source)
+            self._weather_pulse_source = None
+            self._weather_pulse_phase = False
+            for item, label in self._weather_alert_items:
+                item.set_label(label)
+
+    def _pulse_weather_alerts(self):
+        severe = (self.weather is not None and
+                  self.weather.state.get("alert_level", 0) >= 3)
+        if not severe or not self.menu.get_mapped():
+            self._weather_pulse_source = None
+            self._weather_pulse_phase = False
+            for item, label in self._weather_alert_items:
+                item.set_label(label)
+            return GLib.SOURCE_REMOVE
+        self._weather_pulse_phase = not self._weather_pulse_phase
+        prefix = "🚨 " if self._weather_pulse_phase else "⚠ "
+        for item, label in self._weather_alert_items:
+            item.set_label(prefix + label.lstrip("⚠🚨 "))
+        return GLib.SOURCE_CONTINUE
 
     def _launch_command(self, name):
         try:
