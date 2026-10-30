@@ -37,3 +37,23 @@ def test_ahead_zero_keeps_new_items_manual(tmp_path):
     service.check_source(source_id)
     service.check_source(source_id, force=True)
     assert service.state["queue"] == []
+
+def test_ahead_queue_downloads_sequentially(tmp_path):
+    class FakeDownloader:
+        def __init__(self):
+            self.calls = []
+        def download(self, episode, output_dir, **kwargs):
+            self.calls.append(episode["id"])
+            return str(tmp_path / (episode["id"].split(":")[-1] + ".mkv"))
+
+    downloader = FakeDownloader()
+    store = JsonStore(tmp_path / "media.json", lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=2, yt_dlp=FakeYtDlp(),
+                           downloader=downloader)
+    source_id = service.add_source("youtube", "https://youtube.com/playlist?list=x")
+    service.check_source(source_id)
+    service.check_source(source_id, force=True)
+    first = service.download_next()
+    assert first["status"] == "downloaded"
+    assert len(downloader.calls) == 1
+    assert len(service.state["queue"]) == 0
