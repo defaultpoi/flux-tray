@@ -115,9 +115,25 @@ class TrayController:
                 label = f"{channel['name']} — {title}"
                 if details:
                     label += " · " + " · ".join(details)
+                schedule = channel.get("schedule", [])
+                weekdays = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+                schedule_text = ", ".join(f"{weekdays[entry['weekday']]} {entry['time']}"
+                                          for entry in schedule)
+                if schedule_text:
+                    label += " · " + schedule_text
                 item = Gtk.MenuItem.new_with_label(label[:110])
                 item.set_tooltip_text(title)
-                item.connect("activate", lambda _widget, current=channel: self._play_live_channel(current))
+                submenu = Gtk.Menu()
+                play = Gtk.MenuItem.new_with_label("Play")
+                play.connect("activate", lambda _widget, current=channel: self._play_live_channel(current))
+                set_schedule = Gtk.MenuItem.new_with_label("Edit schedule…")
+                set_schedule.connect("activate", lambda _widget, current=channel: self._live_schedule_dialog(current))
+                remove = Gtk.MenuItem.new_with_label("Remove channel")
+                remove.connect("activate", lambda _widget, current=channel: self._remove_live_channel(current))
+                submenu.append(play)
+                submenu.append(set_schedule)
+                submenu.append(remove)
+                item.set_submenu(submenu)
                 self.menu.append(item)
             self._append("Add live channel…", lambda _item: self._add_live_dialog())
             self._append("Check live channels", lambda _item: self._live_tick(force=True))
@@ -426,6 +442,44 @@ class TrayController:
         elif self.menu.get_mapped():
             self._rebuild_menu(self.menu)
         return GLib.SOURCE_REMOVE
+
+    def _live_schedule_dialog(self, channel):
+        dialog = Gtk.Dialog(title=f"Schedule — {channel['name']}", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.pack_start(Gtk.Label(label="Weekly schedule (local time), e.g. Mon 19:30, Fri 21:00"), False, False, 0)
+        entry = Gtk.Entry()
+        days = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        current = ", ".join(f"{days[item['weekday']]} {item['time']}" for item in channel.get("schedule", []))
+        entry.set_text(current)
+        box.pack_start(entry, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            try:
+                mapping = {day.casefold(): index for index, day in enumerate(days)}
+                entries = []
+                for token in entry.get_text().split(","):
+                    token = token.strip()
+                    if not token:
+                        continue
+                    day, clock = token.split(None, 1)
+                    entries.append({"weekday": mapping[day[:3].casefold()], "time": clock.strip()})
+                self.live.set_schedule(channel["id"], entries)
+            except (ValueError, KeyError) as exc:
+                self.log.warning("Invalid live schedule: %s", exc)
+        dialog.destroy()
+        self._rebuild_menu(self.menu)
+
+    def _remove_live_channel(self, channel):
+        self.live.remove_channel(channel["id"])
+        self._rebuild_menu(self.menu)
 
     def _add_live_dialog(self):
         dialog = Gtk.Dialog(title="Add live channel", flags=Gtk.DialogFlags.MODAL)
