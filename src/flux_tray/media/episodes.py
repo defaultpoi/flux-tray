@@ -83,3 +83,28 @@ def normalize_episode(raw: dict[str, Any], source_id: str) -> MediaEpisode:
         episode=int(episode) if episode is not None else None,
         metadata=metadata,
     )
+
+
+def media_filename(source_name: str, episode: dict[str, Any]) -> str:
+    """Build a stable source/episode/title basename for video and subtitles."""
+    source = safe_filename(str(source_name or "Media"))
+    title = str(episode.get("title") or "untitled").strip()
+    title = re.sub(rf"^\\s*{re.escape(str(source_name or ''))}\\s*[-–—:|]*\\s*",
+                   "", title, flags=re.IGNORECASE) if source_name else title
+    parsed = parse_season_episode(title)
+    season = episode.get("season")
+    number = episode.get("episode")
+    if season is None or number is None:
+        if parsed:
+            season, number = parsed
+    if season is not None and number is not None:
+        try:
+            season, number = int(season), int(number)
+        except (TypeError, ValueError):
+            season = number = None
+    if season is not None and number is not None:
+        title = re.sub(r"(?i)^\\s*(?:S\\d{1,3}\\s*E\\d{1,4}|\\d{1,3}x\\d{1,4})\\s*[-–—:|]*\\s*",
+                       "", title)
+        prefix = f"{source} - S{season:02d}E{number:02d}"
+        return safe_filename(f"{prefix} - {title}" if title else prefix)
+    return safe_filename(f"{source} - {title}")
