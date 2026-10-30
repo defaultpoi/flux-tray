@@ -92,6 +92,14 @@ class TrayController:
             for day in weather.get("forecast", []):
                 label = f"{day.get('date')}: {day.get('condition')} · H {day.get('high')}° L {day.get('low')}° · rain {day.get('rain_probability')}%"
                 self._append(label, sensitive=False)
+            for alert in weather.get("alerts", []):
+                alert_label = f"⚠ {alert.get('severity', 'warning').title()}: {alert.get('title', 'Weather warning')} · {alert.get('area', '')}"
+                link = alert.get("url")
+                callback = (lambda _item, target=link: webbrowser.open(target)
+                            if target and target.startswith(("http://", "https://")) else None)
+                self._append(alert_label[:110], callback, sensitive=bool(link))
+            if weather.get("alerts_error"):
+                self._append("MeteoAlarm: warning feed unavailable", sensitive=False)
         if self.live is not None:
             channels = self.live.state.get("channels", [])
             self._append(f"Live channels ({len(channels)})", sensitive=False)
@@ -273,7 +281,9 @@ class TrayController:
         suffix = f" · {network}" if network else ""
         temperature = self.weather.state.get("temperature") if self.weather is not None else None
         weather_suffix = f" · {temperature}°C" if temperature is not None else ""
-        self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}{weather_suffix}")
+        alert_level = self.weather.state.get("alert_level", 0) if self.weather is not None else 0
+        alert_suffix = " · severe weather warning" if alert_level >= 3 else ""
+        self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}{weather_suffix}{alert_suffix}")
 
     def _add_feed_dialog(self):
         dialog = Gtk.Dialog(title="Add RSS/Atom feed", flags=Gtk.DialogFlags.MODAL)
