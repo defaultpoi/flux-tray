@@ -162,6 +162,9 @@ class HlsDownloader:
         argv.extend(["-i", url, "-map", "0", "-c", "copy", "-f", "matroska", str(partial)])
 
         progress_state: dict[str, str] = {}
+        if progress_callback is not None:
+            progress_callback({"part_path": str(partial), "duration": playlist.duration,
+                               "percent": 0.0})
 
         def on_output(_channel: str, line: str) -> None:
             key, separator, value = line.strip().partition("=")
