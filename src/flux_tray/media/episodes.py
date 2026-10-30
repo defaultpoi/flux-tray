@@ -49,8 +49,9 @@ class MediaEpisode:
 
 def normalize_episode(raw: dict[str, Any], source_id: str) -> MediaEpisode:
     title = str(raw.get("title") or raw.get("name") or "Untitled")
-    url = raw.get("url") or raw.get("webpage_url")
-    identity = str(raw.get("id") or url or title).strip()
+    candidates = (raw.get("webpage_url"), raw.get("url"))
+    url = next((value for value in candidates if isinstance(value, str) and value.startswith(("http://", "https://"))), None)
+    identity = str(raw.get("id") or url or raw.get("url") or title).strip()
     if not identity:
         raise ValueError("Episode requires a stable id, URL or title")
     parsed = parse_season_episode(title)
