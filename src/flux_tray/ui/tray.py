@@ -72,7 +72,16 @@ class TrayController:
             self.menu.append(Gtk.SeparatorMenuItem())
             for item in unread[:20]:
                 title = item["title"].replace("\n", " ").strip()[:90]
-                self._append(title, lambda _widget, current=item: self._open_item(current))
+                parent = Gtk.MenuItem.new_with_label(title)
+                submenu = Gtk.Menu()
+                open_item = Gtk.MenuItem.new_with_label("Open")
+                open_item.connect("activate", lambda _widget, current=item: self._open_item(current))
+                save_item = Gtk.MenuItem.new_with_label("Save for later")
+                save_item.connect("activate", lambda _widget, current=item: self._save_for_later(current))
+                submenu.append(open_item)
+                submenu.append(save_item)
+                parent.set_submenu(submenu)
+                self.menu.append(parent)
         saved = self.feeds.read_later_items()
         if saved:
             self.menu.append(Gtk.SeparatorMenuItem())
