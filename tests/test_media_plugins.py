@@ -92,11 +92,11 @@ def test_plugin_download_rejects_file_outside_output_directory(tmp_path):
     outside = tmp_path.parent / "outside-plugin-media.mkv"
     outside.write_bytes(b"video")
     (directory / "downloader.py").write_text(
-        "NAME = 'downloader'\\n"
-        "def list_episodes(source):\\n"
-        "    return []\\n"
-        "def download(episode, base, progress, cancelled):\\n"
-        f"    return {str(outside)!r}\\n",
+        "NAME = 'downloader'\n"
+        "def list_episodes(source):\n"
+        "    return []\n"
+        "def download(episode, base, progress, cancelled):\n"
+        f"    return {str(outside)!r}\n",
         encoding="utf-8",
     )
     registry = MediaPluginRegistry(directory)
@@ -113,13 +113,13 @@ def test_plugin_download_rejects_empty_file(tmp_path):
     directory = tmp_path / "plugins"
     directory.mkdir()
     (directory / "downloader.py").write_text(
-        "NAME = 'downloader'\\n"
-        "def list_episodes(source):\\n"
-        "    return []\\n"
-        "def download(episode, base, progress, cancelled):\\n"
-        "    path = base / 'empty.mkv'\\n"
-        "    path.write_bytes(b'')\\n"
-        "    return str(path)\\n",
+        "NAME = 'downloader'\n"
+        "def list_episodes(source):\n"
+        "    return []\n"
+        "def download(episode, base, progress, cancelled):\n"
+        "    path = base / 'empty.mkv'\n"
+        "    path.write_bytes(b'')\n"
+        "    return str(path)\n",
         encoding="utf-8",
     )
     registry = MediaPluginRegistry(directory)
