@@ -54,7 +54,7 @@ def test_muted_feed_cannot_be_saved_for_later(tmp_path):
 
 
 def test_breaking_match_is_case_and_accent_insensitive_whole_word(tmp_path):
-    body = b"<rss><channel><item><guid>x</guid><title>BREÁKING: Alert</title></item></channel></rss>"
+    body = "<rss><channel><item><guid>x</guid><title>BREÁKING: Alert</title></item></channel></rss>".encode("utf-8")
     service = make_service(tmp_path, body)
     fid = service.add_feed("https://example.test/rss")
     service.check_feed(fid)
