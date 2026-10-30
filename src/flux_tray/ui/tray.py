@@ -1013,6 +1013,11 @@ class TrayController:
                 self._media_tick(force=True)
             except (ValueError, IndexError, RuntimeError) as exc:
                 self.log.warning("Could not edit media source: %s", exc)
+                warning = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+                    message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.OK,
+                    text=str(exc))
+                warning.run()
+                warning.destroy()
         dialog.destroy()
         self._rebuild_menu(self.menu)
 
