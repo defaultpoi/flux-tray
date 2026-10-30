@@ -70,17 +70,17 @@ class UpdateService:
 
     def apply_updates(self) -> ProcessResult:
         """Run the real system update; callers must only expose this after explicit user action."""
-        return self.runner(self._privileged(["xbps-install", "-u"]),
+        return self.runner(self._privileged(["xbps-install", "-y", "-u"]),
                            timeout=self.timeout, env=self._env())
 
     def remove_orphans(self) -> ProcessResult:
         """Remove current automatic orphans after an explicit confirmation in the UI."""
-        return self.runner(self._privileged(["xbps-remove", "-o"]),
+        return self.runner(self._privileged(["xbps-remove", "-y", "-o"]),
                            timeout=self.timeout, env=self._env())
 
     def clean_cache(self) -> ProcessResult:
         """Remove outdated cached packages after an explicit confirmation in the UI."""
-        return self.runner(self._privileged(["xbps-remove", "-O"]),
+        return self.runner(self._privileged(["xbps-remove", "-y", "-O"]),
                            timeout=self.timeout, env=self._env())
 
     def remove_orphans_and_clean_cache(self) -> tuple[ProcessResult, ProcessResult]:
