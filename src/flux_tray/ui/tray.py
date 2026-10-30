@@ -66,6 +66,11 @@ class TrayController:
         if self.connectivity is not None:
             network = self.connectivity.state.get("status", "checking")
             self._append(f"Network: {network}", sensitive=False)
+        if self.weather is not None:
+            temperature = self.weather.state.get("temperature")
+            condition = self.weather.state.get("condition", "Weather unavailable")
+            weather_text = f"Weather: {temperature}°C · {condition}" if temperature is not None else condition
+            self._append(weather_text, sensitive=False)
         self.menu.append(Gtk.SeparatorMenuItem())
         if not self.feeds.state["feeds"]:
             self._append("No feeds configured", sensitive=False)
@@ -139,7 +144,9 @@ class TrayController:
         self.icon.set_from_icon_name("mail-unread-symbolic" if unread else "view-list-symbolic")
         network = self.connectivity.state.get("status") if self.connectivity is not None else None
         suffix = f" · {network}" if network else ""
-        self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}")
+        temperature = self.weather.state.get("temperature") if self.weather is not None else None
+        weather_suffix = f" · {temperature}°C" if temperature is not None else ""
+        self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}{weather_suffix}")
 
     def _add_feed_dialog(self):
         dialog = Gtk.Dialog(title="Add RSS/Atom feed", flags=Gtk.DialogFlags.MODAL)
