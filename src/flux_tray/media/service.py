@@ -290,11 +290,58 @@ class MediaService:
         self.current_episode_id = episode_id
         return episode
 
-    def play_next_unwatched(self) -> dict[str, Any] | None:
+    def source_summary(self, source_id: str) -> dict[str, Any]:
+        source = self._source(source_id)
+        episodes = [episode for episode in self.state["episodes"].values()
+                    if episode.get("source_id") == source_id]
+        unwatched = [episode for episode in episodes if episode.get("status") != "watched"]
+        order = source.get("order")
+        if order in {"oldest", "newest"}:
+            def sort_key(item):
+                season, number = item.get("season"), item.get("episode")
+                if isinstance(season, int) and isinstance(number, int):
+                    return (0, season, number, item.get("source_order", 0))
+                return (1, str(item.get("date") or ""), item.get("source_order", 0))
+            unwatched.sort(key=lambda item: item.get("source_order", 0))
+            unwatched.sort(key=sort_key, reverse=order == "newest")
+        else:
+            unwatched.sort(key=lambda item: item.get("source_order", 0))
+        episode = unwatched[0] if unwatched else None
+        download = self.state.get("download") or {}
+        if source.get("last_error"):
+            status = "cannot be read"
+        elif episode and episode.get("download_error"):
+            status = "failed"
+        elif episode and download.get("episode_id") == episode.get("id") and download.get("status") == "downloading":
+            percent = download.get("percent")
+            status = f"{percent:.0f}%" if isinstance(percent, (int, float)) else "downloading"
+        elif episode and episode.get("status") == "downloaded":
+            status = "ready"
+        elif episode and episode.get("status") == "queued":
+            status = "queued"
+        else:
+            status = "not downloaded" if episode else "caught up"
+        title = episode.get("title", "Untitled") if episode else "No unwatched episodes"
+        last_watched = source.get("last_watched") or {}
+        details = [f"Unwatched: {len(unwatched)}"]
+        if last_watched.get("title"):
+            details.append(f"Last watched: {last_watched['title']}")
+        failure = source.get("last_error") or (episode or {}).get("download_error")
+        if failure:
+            details.append(f"Failure: {failure}")
+        return {
+            "episode": title, "status": status,
+            "new_count": sum(1 for item in episodes if item.get("status") in {"new", "queued"}),
+            "unwatched_count": len(unwatched), "tooltip": "\n".join(details),
+        }
+
+    def play_next_unwatched(self, source_id: str | None = None) -> dict[str, Any] | None:
         candidates = [episode for episode in self.state["episodes"].values()
-                      if episode.get("status") != "watched" and episode.get("status") != "baseline"]
+                      if episode.get("status") != "watched" and episode.get("status") != "baseline"
+                      and (source_id is None or episode.get("source_id") == source_id)]
         candidates.extend(episode for episode in self.state["episodes"].values()
-                          if episode.get("status") == "baseline")
+                          if episode.get("status") == "baseline"
+                          and (source_id is None or episode.get("source_id") == source_id))
         if not candidates:
             return None
         candidates.sort(key=lambda item: (item.get("season") or 0, item.get("episode") or 0,
@@ -374,6 +421,12 @@ class MediaService:
     def mark_watched(self, episode_id: str) -> None:
         episode = self.state["episodes"][episode_id]
         episode["status"] = "watched"
+        episode["watched_at"] = self.now().isoformat()
+        source = next((item for item in self.state["sources"]
+                       if item.get("id") == episode.get("source_id")), None)
+        if source is not None:
+            source["last_watched"] = {"id": episode_id, "title": episode.get("title"),
+                                      "at": episode["watched_at"]}
         if episode_id not in self.state["watched"]:
             self.state["watched"].append(episode_id)
         self.state["queue"] = [key for key in self.state["queue"] if key != episode_id]
