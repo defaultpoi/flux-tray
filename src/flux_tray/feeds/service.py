@@ -194,10 +194,10 @@ class FeedService:
             self._save()
             return 0
 
-    def check_due(self) -> int:
+    def check_due(self, *, force: bool = False) -> int:
         total = 0
         for feed in list(self.state["feeds"]):
-            total += self.check_feed(feed["id"])
+            total += self.check_feed(feed["id"], force=force)
         return total
 
     def _ingest(self, feed: dict[str, Any], entries: list[Any], now: datetime) -> int:
