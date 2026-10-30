@@ -531,6 +531,11 @@ class TrayController:
         if self.timer is None:
             return GLib.SOURCE_REMOVE
         result = self.timer.poll()
+        if self.media is not None:
+            try:
+                self.media.update_playback_progress()
+            except Exception:
+                self.log.exception("Could not update media playback progress")
         if result == "ring":
             display = Gdk.Display.get_default()
             if display is not None:
