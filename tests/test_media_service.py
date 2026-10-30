@@ -393,3 +393,40 @@ def test_play_episode_uses_large_hls_partial_and_playlist_duration(tmp_path):
     assert player.loaded == (str(partial), "HLS episode")
     assert service.update_playback_progress() is True
     assert service.state["episodes"]["hls"]["status"] == "watched"
+
+
+
+def test_media_newest_order_preserves_adapter_order_for_equal_episode_numbers(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=3)
+    source_id = service.add_source("rss", "https://example.test/feed.xml", order="newest")
+    service.state["episodes"] = {
+        "first": {"id": "first", "source_id": source_id, "status": "new",
+                  "season": 1, "episode": 5, "source_order": 0},
+        "second": {"id": "second", "source_id": source_id, "status": "new",
+                   "season": 1, "episode": 5, "source_order": 1},
+    }
+
+    service._fill_queue(source_id)
+    assert service.state["queue"] == ["first", "second"]
+    assert service.source_summary(source_id)["episode"] == "first"
+
+    service.play_episode = lambda episode_id: {"id": episode_id}
+    assert service.play_next_unwatched(source_id)["id"] == "first"
+
+
+def test_media_date_order_preserves_adapter_order_for_equal_dates(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=3)
+    source_id = service.add_source("rss", "https://example.test/feed.xml", order="oldest")
+    service.state["episodes"] = {
+        "first": {"id": "first", "source_id": source_id, "status": "new",
+                  "date": "2026-10-01", "source_order": 0},
+        "second": {"id": "second", "source_id": source_id, "status": "new",
+                   "date": "2026-10-01", "source_order": 1},
+    }
+
+    service._fill_queue(source_id)
+    assert service.state["queue"] == ["first", "second"]
