@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import gi
 
@@ -21,6 +22,7 @@ from flux_tray.updates.service import UpdateService
 from flux_tray.weather.service import WeatherService
 from flux_tray.live.service import LiveService
 from flux_tray.media.player import MpvController
+from flux_tray.media.service import MediaService
 
 
 class FluxTrayApplication(Gtk.Application):
@@ -72,7 +74,16 @@ class FluxTrayApplication(Gtk.Application):
             player=self.player,
             quality=config.get("live", "quality", "best") or "best",
         )
-        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates, weather, live)
+        media_store = JsonStore(self.paths.data_dir / "media.json",
+                                lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+        media = MediaService(
+            media_store, self.paths.plugin_dir,
+            ahead=config.get_int("media", "ahead", 2, minimum=0),
+            interval=config.get_int("media", "interval", 60, minimum=10) * 60,
+            output_dir=Path(config.get("media", "path", "~/Videos") or "~/Videos"),
+            player=self.player,
+        )
+        self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates, weather, live, media)
         self.hold()
         self.connect("shutdown", self._shutdown)
         logger.info("Flux Tray started")
