@@ -283,10 +283,12 @@ class TrayController:
         self._append("Quit", lambda _item: self.application.quit())
         self.menu.show_all()
         self._sync_weather_pulse()
+        self._sync_breaking_pulse()
         self._update_icon()
 
     def _on_menu_map(self, _widget):
         self._sync_weather_pulse()
+        self._sync_breaking_pulse()
 
     def _on_menu_unmap(self, _widget):
         if self._weather_pulse_source is not None:
@@ -324,6 +326,25 @@ class TrayController:
             self._update_icon()
             return GLib.SOURCE_REMOVE
         self._weather_tray_pulse_phase = not self._weather_tray_pulse_phase
+        self._update_icon()
+        return GLib.SOURCE_CONTINUE
+
+    def _sync_breaking_pulse(self):
+        active = bool(self.feeds.breaking_items())
+        if active and self._breaking_pulse_source is None:
+            self._breaking_pulse_source = GLib.timeout_add(600, self._pulse_breaking_items)
+        elif not active and self._breaking_pulse_source is not None:
+            GLib.source_remove(self._breaking_pulse_source)
+            self._breaking_pulse_source = None
+            self._breaking_pulse_phase = False
+
+    def _pulse_breaking_items(self):
+        if not self.feeds.breaking_items():
+            self._breaking_pulse_source = None
+            self._breaking_pulse_phase = False
+            self._update_icon()
+            return GLib.SOURCE_REMOVE
+        self._breaking_pulse_phase = not self._breaking_pulse_phase
         self._update_icon()
         return GLib.SOURCE_CONTINUE
 
@@ -371,6 +392,7 @@ class TrayController:
         unread = self.feeds.unread_count()
         updates = len(self.updates.state.get("changes", [])) if self.updates is not None else 0
         alert_level = self.weather.state.get("alert_level", 0) if self.weather is not None else 0
+        breaking = bool(self.feeds.breaking_items())
         if alert_level >= 3:
             color = "#d83b3b" if self._weather_tray_pulse_phase else "#e69a24"
             fallback = "dialog-warning-symbolic"
@@ -378,6 +400,10 @@ class TrayController:
         elif updates:
             color, fallback = "#d83b3b", "software-update-urgent-symbolic"
             mark = '<path d="M8 3v7m-3-3 3 3 3-3M4 13h8" stroke="white" stroke-width="1.7" fill="none"/>'
+        elif breaking:
+            color = "#d83b3b" if self._breaking_pulse_phase else "#e69a24"
+            fallback = "dialog-warning-symbolic"
+            mark = '<path d="M8 3v5m0 2v.2" stroke="white" stroke-width="1.8" stroke-linecap="round" fill="none"/>'
         elif unread:
             color, fallback = "#e69a24", "mail-unread-symbolic"
             mark = '<circle cx="8" cy="8" r="2.2" fill="white"/>'
@@ -397,7 +423,8 @@ class TrayController:
         temperature = self.weather.state.get("temperature") if self.weather is not None else None
         weather_suffix = f" · {temperature}°C" if temperature is not None else ""
         alert_suffix = " · severe weather warning" if alert_level >= 3 else ""
-        self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}{weather_suffix}{alert_suffix}")
+        breaking_suffix = " · breaking feed item" if breaking else ""
+        self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}{weather_suffix}{alert_suffix}{breaking_suffix}")
 
     def _reorder_feeds_dialog(self):
         dialog = Gtk.Dialog(title="Reorder feeds", flags=Gtk.DialogFlags.MODAL)
