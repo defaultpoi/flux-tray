@@ -36,3 +36,36 @@ See [CONFIGURATION.md](docs/CONFIGURATION.md) for the current settings and [CONT
 ## Scope
 
 The full feature inventory is mandatory. A milestone may be incomplete while implementation is in progress, but a feature must not be silently dropped, replaced with a stub, or marked complete until its behavior and tests exist.
+
+## Media plugins
+
+Trusted Python plugins live in `~/.config/flux-tray/media-plugins/*.py`. They are reloaded when a source check begins and are tried before the built-in RSS/yt-dlp adapters. A source can select a plugin explicitly with `plugin:NAME:SOURCE`; otherwise its optional `matches(source)` function can claim a URL.
+
+A plugin must provide:
+
+```python
+NAME = "example"
+ORDER = 100
+
+def list_episodes(source):
+    return [
+        {
+            "id": "stable-id",
+            "title": "Example S01E01 - Pilot",
+            "date": "2026-10-30",
+            "url": "https://media.example.test/video.mp4",
+            "ext": "mp4",
+            "season": 1,
+            "episode": 1,
+            "headers": {},
+            "subs": {"en": "https://media.example.test/subtitle.vtt"},
+            "metadata": {},
+        }
+    ]
+```
+
+Optional hooks are `matches(source)`, `resolve(episode)`, and `download(episode, base, progress, cancelled)`. A resolver returns a dictionary of replacement episode fields or `None`. A downloader returns the path to a completed file inside the caller-provided output area, or `None` to use the built-in downloader. Report progress through `progress(downloaded_bytes, total_bytes)`; check the cancellation event while doing long work.
+
+Each plugin receives `flux_tray_helpers` with `fetch_json(url, timeout=10, max_bytes=1000000, headers=None)`, resumable `download_file(url, destination, timeout=30, headers=None, progress=None, cancelled=None)`, and `parse_season_episode(title)`. Returned records, resolver fields, headers, subtitle URLs and downloaded file paths are validated before the app uses them.
+
+Plugins execute arbitrary Python with the user's permissions. Install only plugins whose source you trust. They must use bounded network operations and must not block the GTK thread.
