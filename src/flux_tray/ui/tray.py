@@ -70,14 +70,40 @@ class TrayController:
             self._media_tick()
 
     def _add_timeout_seconds(self, seconds, callback):
-        source_id = GLib.timeout_add_seconds(seconds, callback)
+        source_id = None
+
+        def invoke():
+            keep = callback()
+            if keep == GLib.SOURCE_REMOVE and source_id in self._timeout_sources:
+                self._timeout_sources.remove(source_id)
+            return keep
+
+        source_id = GLib.timeout_add_seconds(seconds, invoke)
         self._timeout_sources.append(source_id)
         return source_id
 
     def _add_timeout(self, milliseconds, callback):
-        source_id = GLib.timeout_add(milliseconds, callback)
+        source_id = None
+
+        def invoke():
+            keep = callback()
+            if keep == GLib.SOURCE_REMOVE and source_id in self._timeout_sources:
+                self._timeout_sources.remove(source_id)
+            return keep
+
+        source_id = GLib.timeout_add(milliseconds, invoke)
         self._timeout_sources.append(source_id)
         return source_id
+
+    def _remove_timeout(self, source_id):
+        if source_id is None:
+            return
+        try:
+            GLib.source_remove(source_id)
+        except GLib.Error:
+            pass
+        if source_id in self._timeout_sources:
+            self._timeout_sources.remove(source_id)
 
     def _idle_add(self, callback, *args):
         if self._closing:
@@ -95,12 +121,8 @@ class TrayController:
         if self._closing:
             return
         self._closing = True
-        for source_id in self._timeout_sources:
-            try:
-                GLib.source_remove(source_id)
-            except GLib.Error:
-                pass
-        self._timeout_sources.clear()
+        for source_id in tuple(self._timeout_sources):
+            self._remove_timeout(source_id)
         for source_id in (self._weather_pulse_source,
                           self._weather_tray_pulse_source,
                           self._breaking_pulse_source):
@@ -412,7 +434,7 @@ class TrayController:
 
     def _on_menu_unmap(self, _widget):
         if self._weather_pulse_source is not None:
-            GLib.source_remove(self._weather_pulse_source)
+            self._remove_timeout(self._weather_pulse_source)
             self._weather_pulse_source = None
         self._weather_pulse_phase = False
         for item, label in self._weather_alert_items:
@@ -424,7 +446,7 @@ class TrayController:
         if severe and self._weather_tray_pulse_source is None:
             self._weather_tray_pulse_source = self._add_timeout(600, self._pulse_weather_tray)
         elif not severe and self._weather_tray_pulse_source is not None:
-            GLib.source_remove(self._weather_tray_pulse_source)
+            self._remove_timeout(self._weather_tray_pulse_source)
             self._weather_tray_pulse_source = None
             self._weather_tray_pulse_phase = False
             self._update_icon()
@@ -454,7 +476,7 @@ class TrayController:
         if active and self._breaking_pulse_source is None:
             self._breaking_pulse_source = self._add_timeout(600, self._pulse_breaking_items)
         elif not active and self._breaking_pulse_source is not None:
-            GLib.source_remove(self._breaking_pulse_source)
+            self._remove_timeout(self._breaking_pulse_source)
             self._breaking_pulse_source = None
             self._breaking_pulse_phase = False
 
