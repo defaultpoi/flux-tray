@@ -80,6 +80,7 @@ interval = 30
 alerts = false
 country = romania
 region =
+location =
 lat =
 lon =
 
