@@ -44,7 +44,7 @@ def test_play_channel_resolves_url_and_reuses_injected_player(tmp_path):
             self.loaded = (url, title)
 
     player = Player()
-    runner = lambda argv, **kwargs: ProcessResult(tuple(argv), 0, "https://cdn.example/live.m3u8\\n", "")
+    runner = lambda argv, **kwargs: ProcessResult(tuple(argv), 0, "https://cdn.example/live.m3u8\n", "")
     probe = StreamlinkProbe(runner=runner)
     store = JsonStore(tmp_path / "live.json", lambda: {"channels": []})
     service = LiveService(store, probe, player=player)
