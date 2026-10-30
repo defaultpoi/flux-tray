@@ -10,6 +10,7 @@ from types import ModuleType
 from typing import Any
 
 from flux_tray.media.episodes import normalize_episode
+from flux_tray.media import helpers
 
 
 class MediaPluginRegistry:
@@ -28,6 +29,7 @@ class MediaPluginRegistry:
                     if spec is None or spec.loader is None:
                         raise ImportError("No module loader available")
                     module = importlib.util.module_from_spec(spec)
+                    module.flux_tray_helpers = helpers
                     sys.modules[module_name] = module
                     spec.loader.exec_module(module)
                     if not callable(getattr(module, "list_episodes", None)):
