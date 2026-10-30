@@ -22,7 +22,7 @@ def _safe_headers(headers: dict[str, str] | None) -> dict[str, str]:
     for name, value in headers.items():
         if not isinstance(name, str) or not name.strip() or not isinstance(value, str):
             raise ValueError("HTTP headers must contain non-empty string names and values")
-        if any(char in name + value for char in "\\r\\n"):
+        if any(char in name + value for char in (chr(10), chr(13))):
             raise ValueError("HTTP headers cannot contain line breaks")
         result[name.strip()] = value.strip()
     return result
