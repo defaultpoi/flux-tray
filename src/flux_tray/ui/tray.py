@@ -273,8 +273,11 @@ class TrayController:
                 day_text = ",".join(days[index] for index in alarm.get("weekdays", []) if 0 <= index < 7)
                 parent = Gtk.MenuItem.new_with_label(f"{day_text} {alarm.get('time')} — {alarm.get('label')}"[:100])
                 submenu = Gtk.Menu()
+                edit = Gtk.MenuItem.new_with_label("Edit alarm…")
+                edit.connect("activate", lambda _item, current=alarm: self._recurring_alarm_dialog(current))
                 remove = Gtk.MenuItem.new_with_label("Remove alarm")
                 remove.connect("activate", lambda _item, current=alarm: self._remove_recurring_alarm(current))
+                submenu.append(edit)
                 submenu.append(remove)
                 parent.set_submenu(submenu)
                 self.menu.append(parent)
@@ -1147,8 +1150,9 @@ class TrayController:
         self.timer.cancel()
         self._rebuild_menu(self.menu)
 
-    def _recurring_alarm_dialog(self):
-        dialog = Gtk.Dialog(title="Add recurring alarm", flags=Gtk.DialogFlags.MODAL)
+    def _recurring_alarm_dialog(self, alarm=None):
+        dialog = Gtk.Dialog(title="Edit recurring alarm" if alarm else "Add recurring alarm",
+                            flags=Gtk.DialogFlags.MODAL)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
         dialog.add_button("Save", Gtk.ResponseType.OK)
         box = dialog.get_content_area()
@@ -1159,13 +1163,18 @@ class TrayController:
         box.set_margin_end(12)
         days = Gtk.Entry()
         days.set_placeholder_text("Days: Mon,Tue,Wed,Thu,Fri,Sat,Sun")
-        days.set_text("Mon,Tue,Wed,Thu,Fri")
+        weekdays = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        if alarm:
+            days.set_text(",".join(weekdays[index] for index in alarm.get("weekdays", [])
+                                   if 0 <= index < 7))
+        else:
+            days.set_text("Mon,Tue,Wed,Thu,Fri")
         clock = Gtk.Entry()
         clock.set_placeholder_text("Time: 07:30 (24-hour local time)")
-        clock.set_text("07:30")
+        clock.set_text(alarm.get("time", "07:30") if alarm else "07:30")
         label = Gtk.Entry()
         label.set_placeholder_text("Alarm label")
-        label.set_text("Reminder")
+        label.set_text(alarm.get("label", "Reminder") if alarm else "Reminder")
         for widget in (days, clock, label):
             box.pack_start(widget, False, False, 0)
         dialog.show_all()
@@ -1176,7 +1185,11 @@ class TrayController:
             try:
                 weekdays = [names[token.strip().lower()[:3]]
                             for token in days.get_text().split(",") if token.strip()]
-                self.timer.add_schedule(weekdays, clock.get_text().strip(), label.get_text())
+                if alarm:
+                    self.timer.update_schedule(alarm["id"], weekdays,
+                                               clock.get_text().strip(), label.get_text())
+                else:
+                    self.timer.add_schedule(weekdays, clock.get_text().strip(), label.get_text())
             except (KeyError, ValueError) as exc:
                 self.log.warning("Could not save recurring alarm: %s", exc)
         dialog.destroy()
