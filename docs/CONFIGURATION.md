@@ -59,7 +59,7 @@ file_manager = ["thunar"]
 - `weather.location`: optional place name (for example `Buzau, Romania`); if coordinates are absent, Nominatim resolves it once and the coordinates are cached in weather state.
 - `weather.alerts`: enable optional MeteoAlarm warnings.
 - `weather.country`: MeteoAlarm country-feed slug (default `romania`).
-- `weather.region`: required region/county text used to filter active warnings, accent-insensitively. Example: `Buzau`.
+- `weather.region`: required region/county text used to filter active warnings, accent-insensitively. Example: `Buzau`. The tray menu's **Weather settings…** dialog can configure the place or coordinates and MeteoAlarm region without editing the INI manually.
 - `updates.interval`: hours; default 12.
 - `updates.installer`: `topgrade` (default) or `xbps`; if Topgrade is unavailable, Flux Tray falls back to XBPS directly.
 - `updates.topgrade_steps`: optional comma-separated Topgrade step names to run in addition to `system`. Use only step names accepted by your installed Topgrade version.
