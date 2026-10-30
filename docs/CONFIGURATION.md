@@ -20,6 +20,8 @@ yt_dlp_sort =
 [weather]
 interval = 30
 alerts = false
+country = romania
+region =
 lat =
 lon =
 
@@ -51,6 +53,9 @@ file_manager = ["thunar"]
 - `media.yt_dlp_sort`: optional yt-dlp `-S` value. When set, it overrides automatic monitor-aware resolution selection.
 - `weather.interval`: minutes; default 30, minimum 5.
 - `weather.lat` and `weather.lon`: decimal coordinates. Weather is disabled until both are set.
+- `weather.alerts`: enable optional MeteoAlarm warnings.
+- `weather.country`: MeteoAlarm country-feed slug (default `romania`).
+- `weather.region`: required region/county text used to filter active warnings, accent-insensitively. Example: `Buzau`.
 - `updates.interval`: hours; default 12.
 - `timer.max`: maximum countdown in minutes.
 - `timer.step`: countdown step in seconds.
