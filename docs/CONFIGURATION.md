@@ -38,6 +38,7 @@ step = 60
 
 [connectivity]
 interval = 10
+reset_command =
 
 [launcher]
 terminal = ["xfce4-terminal"]
@@ -65,6 +66,7 @@ file_manager = ["thunar"]
 - `timer.max`: maximum countdown in minutes.
 - `timer.step`: countdown step in seconds.
 - `connectivity.interval`: seconds; default 10.
+- `connectivity.reset_command`: optional JSON argv array for a manual network-reset action. It is never run automatically; configure only a command you trust.
 
 ## Launcher commands
 
