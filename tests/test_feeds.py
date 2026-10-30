@@ -19,11 +19,12 @@ def test_first_check_is_baseline_and_new_items_are_unread(tmp_path):
     </channel></rss>'''
     service = make_service(tmp_path, body)
     feed_id = service.add_feed("https://example.test/rss")
-    assert service.check_feed(feed_id) == 0
-    assert service.unread_count() == 0
-    service.state["feeds"][0]["last_success"] = None
-    service.check_feed(feed_id, force=True)
-    assert service.unread_count() == 0
+    assert service.check_feed(feed_id) == 1
+    assert service.unread_count() == 1
+    unread = service.unread_items()[0]
+    assert unread["title"] == "Breaking: New item"
+    old_item = next(item for item in service.state["items"].values() if item["title"] == "Old item")
+    assert old_item["read"] is True
 
 
 def test_second_check_discovers_new_item_and_read_later_is_not_unread(tmp_path):
@@ -59,3 +60,38 @@ def test_breaking_match_is_case_and_accent_insensitive_whole_word(tmp_path):
     service.check_feed(fid)
     item = next(iter(service.state["items"].values()))
     assert item["breaking"] is True
+
+
+def test_feed_settings_and_order_are_persisted(tmp_path):
+    service = make_service(tmp_path, b"<rss><channel/></rss>")
+    first = service.add_feed("https://one.test/rss", "One")
+    second = service.add_feed("https://two.test/rss", "Two")
+    service.rename_feed(first, "Primary")
+    service.set_interval(first, 30)
+    service.reorder_feeds([second, first])
+    assert [f["id"] for f in service.state["feeds"]] == [second, first]
+    assert service.state["feeds"][1]["name"] == "Primary"
+    assert service.state["feeds"][1]["interval"] == 60
+
+
+def test_invalid_feed_order_is_rejected(tmp_path):
+    service = make_service(tmp_path, b"<rss><channel/></rss>")
+    feed_id = service.add_feed("https://one.test/rss")
+    try:
+        service.reorder_feeds([])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid order accepted")
+
+
+def test_breaking_words_can_be_updated_and_reclassified(tmp_path):
+    body = b"<rss><channel><item><guid>x</guid><title>Urgent alert</title></item></channel></rss>"
+    service = make_service(tmp_path, body)
+    feed_id = service.add_feed("https://example.test/rss")
+    service.check_feed(feed_id)
+    item = next(iter(service.state["items"].values()))
+    assert not item["breaking"]
+    service.set_breaking_words(["urgent"])
+    assert item["breaking"]
+    assert service.breaking_items() == [item]
