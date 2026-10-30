@@ -171,6 +171,16 @@ class TrayController:
             sources = self.media.state.get("sources", [])
             queue = self.media.state.get("queue", [])
             self._append(f"Media sources: {len(sources)} · queued: {len(queue)}", sensitive=False)
+            download_state = self.media.state.get("download") or {}
+            download_status = download_state.get("status")
+            if download_status in {"downloading", "failed"}:
+                self._append(f"Download {download_status}: {download_state.get('title', 'Episode')}"[:100],
+                             sensitive=False)
+            elif download_status == "completed":
+                self._append(f"Last download: {download_state.get('title', 'Episode')}"[:100],
+                             sensitive=False)
+            if download_status == "failed" and queue:
+                self._append("Retry media download", lambda _item: self._media_download_next())
             for source in sources:
                 source_label = source.get("name", source.get("url", "Media source"))
                 if source.get("last_error"):
@@ -741,8 +751,11 @@ class TrayController:
             episode = future.result()
             if episode:
                 self.log.info("Downloaded media episode: %s", episode.get("title"))
-        except Exception:
+        except Exception as exc:
             self.log.exception("Media download failed")
+            notification = Gio.Notification.new("Media download failed")
+            notification.set_body(str(exc)[:180])
+            self.application.send_notification(None, notification)
         else:
             if self.media.state.get("queue"):
                 self._media_download_next()
