@@ -225,4 +225,5 @@ class MediaService:
         if episode_id not in self.state["watched"]:
             self.state["watched"].append(episode_id)
         self.state["queue"] = [key for key in self.state["queue"] if key != episode_id]
+        self._fill_queue(episode["source_id"])
         self._save()
