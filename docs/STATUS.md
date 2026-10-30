@@ -19,7 +19,7 @@ This document is deliberately conservative. A service existing in the repository
 | Weather | Open-Meteo current conditions and five-day forecast; optional MeteoAlarm country Atom feed with active-time and accent-insensitive region filtering, severity mapping and alert display | Tray-badge pulse, guided setup UI and real-provider testing (place-name geocoding is configured in INI; severe alerts pulse in the open popup only) |
 | Connectivity | DNS/direct-IP diagnostic, offline feed pause, recovery-triggered checks and explicit confirmation for an optional user-configured argv reset command | Broader outage/recovery tests and real reset-command validation |
 | XBPS | Dry-run update scan, orphan listing, explicitly confirmed system update, orphan removal/cache cleanup, optional Topgrade `system` plus configured steps, and per-package XBPS fallback | Detailed version-change summaries, failure persistence/dismissal polish and real Void package-manager validation |
-| Timers | Persistent countdown, suspend/restart missed-deadline handling, one-shot alert | Recurring schedules, snooze/warn/fire-once workflow and alert UI polish |
+| Timers | Persistent countdown with suspend/restart missed-deadline handling; weekly local-time alarms with weekday selection, once-per-date firing, persistent active alert, five-minute snooze and dismiss controls | Alarm editing, richer warning/alert controls and real suspend/restart desktop validation |
 | Launcher | JSON argv commands, managed background spawn | Launcher configuration UI and optional explicitly trusted shell commands |
 | Tray | GTK3 status icon, popup, notifications and basic actions | Breaking/severe-weather pulse behavior, focus-out rules, theme/icon fallback validation and real XFCE interaction tests |
 
