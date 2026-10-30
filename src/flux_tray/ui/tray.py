@@ -148,6 +148,87 @@ class TrayController:
                 error.destroy()
         dialog.destroy()
 
+    def _update_scan_tick(self):
+        if self.updates is None:
+            return GLib.SOURCE_REMOVE
+        self._scan_updates()
+        return GLib.SOURCE_CONTINUE
+
+    def _scan_updates(self):
+        future = self.tasks.submit("xbps-scan", self.updates.scan_updates)
+        if future is not None:
+            future.add_done_callback(lambda done: GLib.idle_add(self._update_scan_complete, done))
+
+    def _update_scan_complete(self, future):
+        try:
+            changes = future.result()
+            self.log.info("XBPS scan found %d package changes", len(changes))
+        except Exception:
+            self.log.exception("XBPS update scan failed")
+        if self.menu.get_mapped():
+            self._rebuild_menu(self.menu)
+        return GLib.SOURCE_REMOVE
+
+    def _confirm_updates(self):
+        dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+            message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.YES_NO,
+            text="Apply all available system updates?")
+        dialog.format_secondary_text("This runs the real XBPS system upgrade. It is not a dry run.")
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.YES:
+            future = self.tasks.submit("xbps-update", self.updates.apply_updates)
+            if future is not None:
+                future.add_done_callback(lambda done: GLib.idle_add(self._update_action_complete, done))
+
+    def _list_orphans(self):
+        future = self.tasks.submit("xbps-orphans", self.updates.list_orphans)
+        if future is not None:
+            future.add_done_callback(lambda done: GLib.idle_add(self._orphan_list_complete, done))
+
+    def _orphan_list_complete(self, future):
+        try:
+            packages = future.result()
+        except Exception as exc:
+            self.log.exception("Could not list XBPS orphans")
+            packages = []
+            message = str(exc)
+        else:
+            message = "\\n".join(packages) if packages else "No orphan packages found."
+        dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+            message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.CLOSE,
+            text="Orphan packages")
+        dialog.format_secondary_text(message)
+        if packages:
+            dialog.add_button("Remove", 1)
+            dialog.add_button("Remove + clean cache", 2)
+        response = dialog.run()
+        dialog.destroy()
+        if response in (1, 2):
+            action = self.updates.remove_orphans_and_clean_cache if response == 2 else self.updates.remove_orphans
+            future = self.tasks.submit("xbps-remove-orphans", action)
+            if future is not None:
+                future.add_done_callback(lambda done: GLib.idle_add(self._update_action_complete, done))
+        return GLib.SOURCE_REMOVE
+
+    def _update_action_complete(self, future):
+        try:
+            result = future.result()
+            if isinstance(result, tuple):
+                results = result
+            else:
+                results = (result,)
+            for item in results:
+                if item.returncode != 0:
+                    self.log.error("XBPS action failed: %s", item.stderr.strip())
+                else:
+                    self.log.info("XBPS action completed: %s", item.stdout.strip())
+        except Exception:
+            self.log.exception("XBPS action failed")
+        self._scan_updates()
+        if self.menu.get_mapped():
+            self._rebuild_menu(self.menu)
+        return GLib.SOURCE_REMOVE
     def _connectivity_tick(self):
         if self.connectivity is None:
             return GLib.SOURCE_REMOVE
