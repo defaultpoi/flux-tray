@@ -12,7 +12,8 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 
 
 class TrayController:
-    def __init__(self, application, feed_service, task_manager, timer_service=None, connectivity_service=None, update_service=None, weather_service=None, live_service=None, media_service=None, launcher_service=None):
+    def __init__(self, application, feed_service, task_manager, timer_service=None, connectivity_service=None, update_service=None, weather_service=None, live_service=None, media_service=None, launcher_service=None,
+                 connectivity_interval: int = 10, update_interval: int = 43200):
         self.application = application
         self.feeds = feed_service
         self.tasks = task_manager
@@ -23,6 +24,8 @@ class TrayController:
         self.live = live_service
         self.media = media_service
         self.launcher = launcher_service
+        self.connectivity_interval = max(1, int(connectivity_interval))
+        self.update_interval = max(60, int(update_interval))
         self.log = logging.getLogger("flux_tray.ui")
         self.icon = Gtk.StatusIcon.new_from_icon_name("view-list-symbolic")
         self.icon.set_visible(True)
@@ -35,10 +38,10 @@ class TrayController:
             self.timer.poll()
             GLib.timeout_add_seconds(1, self._timer_tick)
         if self.connectivity is not None:
-            GLib.timeout_add_seconds(10, self._connectivity_tick)
+            GLib.timeout_add_seconds(self.connectivity_interval, self._connectivity_tick)
             self._connectivity_tick()
         if self.updates is not None:
-            GLib.timeout_add_seconds(43200, self._update_scan_tick)
+            GLib.timeout_add_seconds(self.update_interval, self._update_scan_tick)
             self._update_scan_tick()
         if self.weather is not None:
             GLib.timeout_add_seconds(1800, self._weather_tick)
