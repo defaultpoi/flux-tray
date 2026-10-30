@@ -104,6 +104,14 @@ class FeedService:
                 raise ValueError("Routing rules require kind=category|author and a value")
             validated.append({"kind": kind, "value": value})
         self.state["routing_rules"] = validated
+        for item_id, item in self.state["items"].items():
+            feed = next((f for f in self.state["feeds"] if f["id"] == item["feed_id"]), None)
+            if feed is None or feed.get("muted"):
+                continue
+            if self._matches_routing_rule(item):
+                item["read"] = item["seen"] = True
+                if item_id not in self.state["read_later"]:
+                    self.state["read_later"].append(item_id)
         self._save()
 
     def _matches_routing_rule(self, item: dict[str, Any]) -> bool:
