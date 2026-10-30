@@ -88,7 +88,15 @@ def download_file(url: str, destination: Path, *, timeout: float = 30,
             while True:
                 if cancelled is not None and cancelled.is_set():
                     raise RuntimeError("Download cancelled")
-                chunk = response.read(65536)
+                if expected_response_length is None:
+                    chunk = response.read(65536)
+                else:
+                    remaining_bytes = expected_response_length - received
+                    if remaining_bytes <= 0:
+                        if response.read(1):
+                            raise RuntimeError("Download response exceeded the expected byte count")
+                        break
+                    chunk = response.read(min(65536, remaining_bytes))
                 if not chunk:
                     break
                 output.write(chunk)
