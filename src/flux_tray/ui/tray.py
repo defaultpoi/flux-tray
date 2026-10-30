@@ -191,6 +191,62 @@ class TrayController:
                 error.destroy()
         dialog.destroy()
 
+    def _live_tick(self):
+        if self.live is None:
+            return GLib.SOURCE_REMOVE
+        future = self.tasks.submit("live-check", self.live.check_due)
+        if future is not None:
+            future.add_done_callback(lambda done: GLib.idle_add(self._live_complete, done))
+        return GLib.SOURCE_CONTINUE
+
+    def _live_complete(self, future):
+        try:
+            transitions = future.result()
+        except Exception:
+            self.log.exception("Live channel check failed")
+            transitions = 0
+        if transitions:
+            notification = Gio.Notification.new(f"{transitions} channel(s) went live")
+            notification.set_body("Open Flux Tray to view live channels.")
+            self.application.send_notification(None, notification)
+            if not self.menu.get_mapped():
+                self._rebuild_menu(self.menu)
+                self.menu.popup_at_pointer(None)
+        elif self.menu.get_mapped():
+            self._rebuild_menu(self.menu)
+        return GLib.SOURCE_REMOVE
+
+    def _add_live_dialog(self):
+        dialog = Gtk.Dialog(title="Add live channel", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Add", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        platform = Gtk.ComboBoxText()
+        platform.append_text("Twitch")
+        platform.append_text("YouTube")
+        platform.set_active(0)
+        name = Gtk.Entry()
+        name.set_placeholder_text("Channel name")
+        url = Gtk.Entry()
+        url.set_placeholder_text("https://twitch.tv/channel or YouTube live URL")
+        box.pack_start(platform, False, False, 0)
+        box.pack_start(name, False, False, 0)
+        box.pack_start(url, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            try:
+                selected = (platform.get_active_text() or "Twitch").lower()
+                self.live.add_channel(selected, name.get_text(), url.get_text())
+                self._live_tick()
+            except (ValueError, OSError) as exc:
+                self.log.warning("Could not add live channel: %s", exc)
+        dialog.destroy()
     def _weather_tick(self):
         if self.weather is None:
             return GLib.SOURCE_REMOVE
