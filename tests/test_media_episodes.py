@@ -26,3 +26,16 @@ def test_archive_org_urls_are_rejected():
         assert "Archive.org" in str(exc)
     else:
         raise AssertionError("Archive.org source accepted")
+
+def test_media_filename_includes_source_episode_and_clean_title():
+    from flux_tray.media.episodes import media_filename
+
+    assert media_filename("Example Show", {
+        "title": "Example Show S01E05 - The Arrival",
+    }) == "Example Show - S01E05 - The Arrival"
+    assert media_filename("Example Show", {
+        "title": "The Arrival", "season": 2, "episode": 3,
+    }) == "Example Show - S02E03 - The Arrival"
+    assert media_filename("Daily Podcast", {"title": "Morning News"}) == (
+        "Daily Podcast - Morning News"
+    )
