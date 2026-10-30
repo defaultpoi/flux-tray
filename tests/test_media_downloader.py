@@ -74,7 +74,8 @@ def test_download_reports_progress_callback(tmp_path):
         assert "--newline" in argv
         assert "--progress-template" in argv
         kwargs["output_callback"]("stderr", "FLUX_PROGRESS|500|1000|1000|10\n")
-        return ProcessResult(tuple(argv), 0, "/tmp/video.mkv\n", "")
+        path = _create_download(argv)
+        return ProcessResult(tuple(argv), 0, f"{path}\n", "")
 
     downloader = MediaDownloader(runner=runner)
     downloader.download({"url": "https://example.test/video", "title": "Video"},
@@ -91,7 +92,7 @@ def test_download_uses_source_directory_and_episode_filename(tmp_path):
     def runner(argv, **kwargs):
         calls.append(argv)
         path = _create_download(argv)
-        return ProcessResult(tuple(argv), 0, f"{path}\\n", "")
+        return ProcessResult(tuple(argv), 0, f"{path}\n", "")
 
     downloader = MediaDownloader(runner=runner)
     downloader.download(
@@ -109,7 +110,7 @@ def test_download_rejects_reported_path_outside_output_directory(tmp_path):
     outside.write_bytes(b"video")
 
     def runner(argv, **kwargs):
-        return ProcessResult(tuple(argv), 0, f"{outside}\\n", "")
+        return ProcessResult(tuple(argv), 0, f"{outside}\n", "")
 
     downloader = MediaDownloader(runner=runner)
     try:
@@ -123,7 +124,7 @@ def test_download_rejects_reported_path_outside_output_directory(tmp_path):
 
 def test_download_rejects_missing_reported_file(tmp_path):
     def runner(argv, **kwargs):
-        return ProcessResult(tuple(argv), 0, f"{tmp_path / 'missing.mkv'}\\n", "")
+        return ProcessResult(tuple(argv), 0, f"{tmp_path / 'missing.mkv'}\n", "")
 
     downloader = MediaDownloader(runner=runner)
     try:
