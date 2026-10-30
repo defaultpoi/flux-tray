@@ -63,3 +63,25 @@ def test_duration_must_match_configured_step(tmp_path):
         pass
     else:
         raise AssertionError("invalid duration accepted")
+
+def test_restart_after_deadline_marks_timer_missed(tmp_path):
+    clock = Clock()
+    timer = make_timer(tmp_path, clock)
+    timer.start(60)
+    clock.mono += 60
+    clock.boot += 60
+    restored = make_timer(tmp_path, clock)
+    assert restored.poll() == "missed"
+
+def test_restart_before_deadline_resumes_countdown(tmp_path):
+    clock = Clock()
+    timer = make_timer(tmp_path, clock)
+    timer.start(120)
+    clock.mono += 30
+    clock.boot += 30
+    restored = make_timer(tmp_path, clock)
+    assert restored.poll() == "running"
+    assert restored.remaining() == 90
+    clock.mono += 90
+    clock.boot += 90
+    assert restored.poll() == "ring"
