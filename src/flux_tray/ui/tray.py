@@ -274,6 +274,15 @@ class TrayController:
             self._append("Check for updates", lambda _item: self._scan_updates())
             if changes:
                 self._append("Apply system updates…", lambda _item: self._confirm_updates())
+            last_action = self.updates.state.get("last_action")
+            if last_action:
+                outcome = "success" if last_action.get("success") else "FAILED"
+                self._append(f"Last maintenance: {last_action.get('action', 'Action')} — {outcome}",
+                             sensitive=False)
+                self._append("View maintenance details…",
+                             lambda _item: self._show_update_action_dialog())
+                self._append("Dismiss maintenance result",
+                             lambda _item: self._dismiss_update_action())
             self._append("List orphan packages…", lambda _item: self._list_orphans())
         if self.launcher is not None:
             commands = self.launcher.commands()
@@ -912,16 +921,47 @@ class TrayController:
         return GLib.SOURCE_REMOVE
 
     def _confirm_updates(self):
+        changes = self.updates.state.get("changes", [])
+        lines = []
+        for change in changes[:18]:
+            lines.append(f"{change.get('action', 'update')}: {change.get('pkgver', 'unknown')} "
+                         f"({change.get('architecture', '?')}) · download {change.get('download_size', '?')} "
+                         f"· installed {change.get('installed_size', '?')}")
+        if len(changes) > 18:
+            lines.append(f"…and {len(changes) - 18} more package(s)")
+        summary = "\n".join(lines) or "No package details available."
         dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
             message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.YES_NO,
             text="Apply all available system updates?")
-        dialog.format_secondary_text("This runs the real XBPS system upgrade. It is not a dry run.")
+        dialog.format_secondary_text("This runs the real system upgrade. It is not a dry run.\n\n" + summary)
         response = dialog.run()
         dialog.destroy()
         if response == Gtk.ResponseType.YES:
             future = self.tasks.submit("xbps-update", self.updates.apply_updates)
             if future is not None:
                 future.add_done_callback(lambda done: GLib.idle_add(self._update_action_complete, done))
+
+    def _show_update_action_dialog(self):
+        action = self.updates.state.get("last_action") or {}
+        results = action.get("results", [])
+        lines = [f"{action.get('action', 'Maintenance action')} — "
+                 f"{'success' if action.get('success') else 'FAILED'}"]
+        for result in results:
+            argv = " ".join(result.get("argv", []))
+            lines.append(f"\n$ {argv}\nExit code: {result.get('returncode')}")
+            output = result.get("stderr") or result.get("stdout") or ""
+            if output:
+                lines.append(output[-2500:])
+        dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+            message_type=(Gtk.MessageType.INFO if action.get("success") else Gtk.MessageType.ERROR),
+            buttons=Gtk.ButtonsType.CLOSE, text="Maintenance result")
+        dialog.format_secondary_text("\n".join(lines)[:7000])
+        dialog.run()
+        dialog.destroy()
+
+    def _dismiss_update_action(self):
+        self.updates.dismiss_last_action()
+        self._rebuild_menu(self.menu)
 
     def _list_orphans(self):
         future = self.tasks.submit("xbps-orphans", self.updates.list_orphans)
@@ -967,6 +1007,13 @@ class TrayController:
                     self.log.info("XBPS action completed: %s", item.stdout.strip())
         except Exception:
             self.log.exception("XBPS action failed")
+        else:
+            action = self.updates.state.get("last_action")
+            if action:
+                title = "Maintenance completed" if action.get("success") else "Maintenance failed"
+                notification = Gio.Notification.new(title)
+                notification.set_body(action.get("action", "System maintenance"))
+                self.application.send_notification(None, notification)
         self._scan_updates()
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
