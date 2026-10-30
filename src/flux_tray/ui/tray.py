@@ -190,16 +190,34 @@ class TrayController:
             self._append("No feeds configured", sensitive=False)
         for feed in self.feeds.state["feeds"]:
             count = sum(1 for item in unread if item["feed_id"] == feed["id"])
-            self._append(f"{feed['name']} ({count})",
-                         lambda _item, fid=feed["id"]: self._mark_feed_read(fid))
+            parent = Gtk.MenuItem.new_with_label(f"{feed['name']} ({count})")
+            submenu = Gtk.Menu()
+            mark = Gtk.MenuItem.new_with_label("Mark all read")
+            mark.connect("activate", lambda _widget, current=feed: self._mark_feed_read(current["id"]))
             muted = bool(feed.get("muted"))
-            self._append(("Unmute " if muted else "Mute ") + feed["name"],
-                         lambda _item, fid=feed["id"], value=not muted: self._set_feed_muted(fid, value))
+            mute = Gtk.MenuItem.new_with_label("Unmute" if muted else "Mute")
+            mute.connect("activate", lambda _widget, current=feed, value=not muted:
+                         self._set_feed_muted(current["id"], value))
+            rename = Gtk.MenuItem.new_with_label("Rename…")
+            rename.connect("activate", lambda _widget, current=feed: self._rename_feed_dialog(current))
+            interval = Gtk.MenuItem.new_with_label("Polling interval…")
+            interval.connect("activate", lambda _widget, current=feed: self._feed_interval_dialog(current))
+            remove = Gtk.MenuItem.new_with_label("Remove feed…")
+            remove.connect("activate", lambda _widget, current=feed: self._remove_feed_dialog(current))
+            for action in (mark, mute, rename, interval, remove):
+                submenu.append(action)
+            parent.set_submenu(submenu)
+            self.menu.append(parent)
         if unread:
             self.menu.append(Gtk.SeparatorMenuItem())
             for item in unread[:20]:
-                title = item["title"].replace("\n", " ").strip()[:90]
-                parent = Gtk.MenuItem.new_with_label(title)
+                title = item["title"].replace("\n", " ").strip()[:70]
+                details = [item.get("author", "").strip(),
+                           ", ".join(item.get("categories", [])[:2])]
+                details = [value for value in details if value]
+                if details:
+                    title += " · " + " · ".join(details)
+                parent = Gtk.MenuItem.new_with_label(title[:110])
                 submenu = Gtk.Menu()
                 open_item = Gtk.MenuItem.new_with_label("Open")
                 open_item.connect("activate", lambda _widget, current=item: self._open_item(current))
@@ -218,6 +236,7 @@ class TrayController:
                 self._append(title, lambda _widget, current=item: self._open_item(current))
         self.menu.append(Gtk.SeparatorMenuItem())
         self._append("Add feed…", lambda _item: self._add_feed_dialog())
+        self._append("Feed rules…", lambda _item: self._feed_rules_dialog())
         if self.timer is not None:
             status = self.timer.state.get("status", "idle")
             if status == "running":
@@ -378,6 +397,97 @@ class TrayController:
         weather_suffix = f" · {temperature}°C" if temperature is not None else ""
         alert_suffix = " · severe weather warning" if alert_level >= 3 else ""
         self.icon.set_tooltip_text(f"Flux Tray — {unread} unread{suffix}{weather_suffix}{alert_suffix}")
+
+    def _rename_feed_dialog(self, feed):
+        dialog = Gtk.Dialog(title="Rename feed", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.OK)
+        entry = Gtk.Entry()
+        entry.set_text(feed.get("name", ""))
+        entry.set_activates_default(True)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        dialog.get_content_area().pack_start(entry, True, True, 12)
+        dialog.show_all()
+        if dialog.run() == Gtk.ResponseType.OK:
+            try:
+                self.feeds.rename_feed(feed["id"], entry.get_text())
+            except ValueError as exc:
+                self.log.warning("Could not rename feed: %s", exc)
+        dialog.destroy()
+        self._rebuild_menu(self.menu)
+
+    def _feed_interval_dialog(self, feed):
+        dialog = Gtk.Dialog(title="Feed polling interval", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        spin = Gtk.SpinButton.new_with_range(1, 1440, 1)
+        spin.set_value(max(1, round(feed.get("interval", 60) / 60)))
+        box.pack_start(Gtk.Label(label="Minutes between checks"), False, False, 8)
+        box.pack_start(spin, False, False, 8)
+        dialog.show_all()
+        if dialog.run() == Gtk.ResponseType.OK:
+            self.feeds.set_interval(feed["id"], int(spin.get_value()) * 60)
+        dialog.destroy()
+        self._rebuild_menu(self.menu)
+
+    def _remove_feed_dialog(self, feed):
+        dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+            message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.YES_NO,
+            text=f"Remove feed ‘{feed.get('name', 'Feed')}’?") 
+        dialog.format_secondary_text("This also removes its stored items and read-later entries.")
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.YES:
+            self.feeds.remove_feed(feed["id"])
+        self._rebuild_menu(self.menu)
+
+    def _feed_rules_dialog(self):
+        dialog = Gtk.Dialog(title="Feed rules", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(6)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        box.pack_start(Gtk.Label(label="Breaking words (one per line)"), False, False, 0)
+        breaking_view = Gtk.TextView()
+        breaking_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        breaking_view.set_size_request(320, 90)
+        breaking_view.get_buffer().set_text("\n".join(self.feeds.breaking_words))
+        box.pack_start(breaking_view, False, False, 0)
+        box.pack_start(Gtk.Label(label="Route matching items to Read later (category: value / author: value)"),
+                       False, False, 0)
+        rules_view = Gtk.TextView()
+        rules_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        rules_view.set_size_request(320, 110)
+        rules = self.feeds.state.get("routing_rules", [])
+        rules_view.get_buffer().set_text("\n".join(
+            f"{rule.get('kind', 'category')}: {rule.get('value', '')}" for rule in rules))
+        box.pack_start(rules_view, False, False, 0)
+        dialog.show_all()
+        if dialog.run() == Gtk.ResponseType.OK:
+            try:
+                start, end = breaking_view.get_buffer().get_bounds()
+                words_text = breaking_view.get_buffer().get_text(start, end, True)
+                start, end = rules_view.get_buffer().get_bounds()
+                rules_text = rules_view.get_buffer().get_text(start, end, True)
+                parsed_rules = []
+                for line in rules_text.splitlines():
+                    if not line.strip():
+                        continue
+                    kind, separator, value = line.partition(":")
+                    if not separator:
+                        raise ValueError("Routing rules must use ‘category: value’ or ‘author: value’")
+                    parsed_rules.append({"kind": kind.strip(), "value": value.strip()})
+                self.feeds.set_breaking_words(words_text.splitlines())
+                self.feeds.set_routing_rules(parsed_rules)
+            except ValueError as exc:
+                self.log.warning("Invalid feed rules: %s", exc)
+        dialog.destroy()
+        self._rebuild_menu(self.menu)
 
     def _add_feed_dialog(self):
         dialog = Gtk.Dialog(title="Add RSS/Atom feed", flags=Gtk.DialogFlags.MODAL)
@@ -903,8 +1013,16 @@ class TrayController:
         if self.menu.get_mapped() or fresh:
             self._rebuild_menu(self.menu)
         if fresh:
-            notification = Gio.Notification.new(f"{fresh} new feed items")
-            notification.set_body("New items are ready in Flux Tray.")
+            breaking = self.feeds.take_unnotified_breaking_items()
+            if breaking:
+                display = Gdk.Display.get_default()
+                if display is not None:
+                    display.beep()
+                notification = Gio.Notification.new(f"{len(breaking)} breaking feed item(s)")
+                notification.set_body(breaking[0].get("title", "A matching feed item is available")[:180])
+            else:
+                notification = Gio.Notification.new(f"{fresh} new feed items")
+                notification.set_body("New items are ready in Flux Tray.")
             self.application.send_notification(None, notification)
             if not self.menu.get_mapped():
                 self.menu.popup_at_pointer(None)
