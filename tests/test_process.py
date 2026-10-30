@@ -72,3 +72,13 @@ def test_shutdown_leaves_protected_transaction_running():
     worker.join(timeout=3)
     assert completed.is_set()
     assert not worker.is_alive()
+
+
+def test_output_callback_receives_process_output():
+    observed = []
+    result = ProcessSupervisor().run(
+        [sys.executable, "-c", "print('callback works')"],
+        output_callback=lambda channel, line: observed.append((channel, line.strip())),
+    )
+    assert result.stdout.strip() == "callback works"
+    assert ("stdout", "callback works") in observed
