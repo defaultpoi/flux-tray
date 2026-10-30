@@ -1,17 +1,15 @@
-"""A compact, notification-style window for unread feed items."""
+"""A compact popup listing unread feed-item titles."""
 
 from __future__ import annotations
-
-import webbrowser
 
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, Gtk, Pango
 
 
 class FeedPopup:
-    """Displays unread feed items without menu navigation."""
+    """Displays unread feed titles as a simple, one-line-per-item list."""
 
     def __init__(self, feeds, *, width: int = 440, max_height: int = 620):
         self.feeds = feeds
@@ -25,6 +23,7 @@ class FeedPopup:
         self.window.set_skip_taskbar_hint(True)
         self.window.set_skip_pager_hint(True)
         self.window.connect("delete-event", self._on_delete)
+
         self.root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.root.set_border_width(12)
         self.window.add(self.root)
@@ -43,8 +42,8 @@ class FeedPopup:
         self.rebuild()
         if self._visible:
             return
-        self._position()
         self.window.show_all()
+        self._position()
         self._visible = True
         self.window.present()
 
@@ -83,25 +82,32 @@ class FeedPopup:
 
         items = self.feeds.unread_items()
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        title = Gtk.Label()
-        title.set_markup(f"<b>New items</b>  <span foreground='#888888'>{len(items)} unread</span>")
-        title.set_xalign(0)
-        header.pack_start(title, True, True, 0)
-        close = Gtk.Button.new_from_icon_name("window-close-symbolic", Gtk.IconSize.BUTTON)
+        heading = Gtk.Label()
+        heading.set_markup(
+            f"<b>New items</b>  <span foreground='#888888'>{len(items)} unread</span>"
+        )
+        heading.set_xalign(0)
+        header.pack_start(heading, True, True, 0)
+
+        close = Gtk.Button.new_from_icon_name(
+            "window-close-symbolic", Gtk.IconSize.BUTTON
+        )
         close.set_relief(Gtk.ReliefStyle.NONE)
         close.connect("clicked", lambda *_: self.hide())
         header.pack_end(close, False, False, 0)
         self.root.pack_start(header, False, False, 0)
-
-        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        self.root.pack_start(separator, False, False, 0)
+        self.root.pack_start(
+            Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 0
+        )
 
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroller.set_min_content_height(120)
         scroller.set_max_content_height(500)
         self.root.pack_start(scroller, True, True, 0)
-        listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+
+        listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        listing.set_border_width(2)
         scroller.add(listing)
 
         if not items:
@@ -111,81 +117,17 @@ class FeedPopup:
             listing.pack_start(empty, False, False, 0)
 
         for item in items[:100]:
-            self._append_item(listing, item)
+            title = (item.get("title") or "(untitled)").strip()
+            row = Gtk.Label(label=title)
+            row.set_xalign(0)
+            row.set_single_line_mode(True)
+            row.set_ellipsize(Pango.EllipsizeMode.END)
+            row.set_tooltip_text(title)
+            row.set_selectable(True)
+            row.set_hexpand(True)
+            listing.pack_start(row, False, True, 0)
 
-        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        mark_all = Gtk.Button(label="Mark all read")
-        mark_all.connect("clicked", self._mark_all_read)
-        footer.pack_start(mark_all, False, False, 0)
-        done = Gtk.Button(label="Dismiss")
-        done.connect("clicked", lambda *_: self.hide())
-        footer.pack_end(done, False, False, 0)
-        self.root.pack_start(footer, False, False, 0)
-
-    def _append_item(self, listing, item):
-        card = Gtk.Frame()
-        card.set_shadow_type(Gtk.ShadowType.IN)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        body.set_border_width(9)
-        card.add(body)
-
-        source = next((feed.get("name", "Feed") for feed in self.feeds.state["feeds"]
-                       if feed["id"] == item.get("feed_id")), "Feed")
-        metadata = [source]
-        if item.get("author"):
-            metadata.append(item["author"])
-        if item.get("published"):
-            metadata.append(item["published"][:16].replace("T", " "))
-        meta = Gtk.Label(label=" · ".join(metadata))
-        meta.set_xalign(0)
-        meta.set_line_wrap(True)
-        meta.get_style_context().add_class("dim-label")
-        body.pack_start(meta, False, False, 0)
-
-        headline = Gtk.Label()
-        headline.set_markup("<b>" + GLibMarkup.escape(item.get("title", "(untitled)")) + "</b>")
-        headline.set_xalign(0)
-        headline.set_line_wrap(True)
-        headline.set_selectable(True)
-        body.pack_start(headline, False, False, 0)
-
-        summary = item.get("summary", "").strip()
-        if summary:
-            text = Gtk.Label(label=summary[:500])
-            text.set_xalign(0)
-            text.set_line_wrap(True)
-            text.set_max_width_chars(62)
-            body.pack_start(text, False, False, 0)
-
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        link = item.get("link", "")
-        if link.startswith(("https://", "http://")):
-            open_button = Gtk.Button(label="Open")
-            open_button.connect("clicked", lambda *_args, url=link: webbrowser.open(url))
-            actions.pack_start(open_button, False, False, 0)
-        read_button = Gtk.Button(label="Mark read")
-        read_button.connect("clicked", lambda *_args, item_id=item["id"]: self._mark_read(item_id))
-        actions.pack_end(read_button, False, False, 0)
-        body.pack_start(actions, False, False, 0)
-        listing.pack_start(card, False, False, 0)
-
-    def _mark_read(self, item_id):
-        self.feeds.mark_read(item_id)
-        self.rebuild()
-        if not self.feeds.unread_items():
-            self.hide()
-        else:
-            self.window.show_all()
-
-    def _mark_all_read(self, *_args):
-        for item in self.feeds.unread_items():
-            self.feeds.mark_read(item["id"])
-        self.rebuild()
-        self.hide()
-
-
-class GLibMarkup:
-    @staticmethod
-    def escape(value: str) -> str:
-        from html import escape
-        return escape(value, quote=False)
+        dismiss = Gtk.Button(label="Dismiss")
+        dismiss.set_halign(Gtk.Align.END)
+        dismiss.connect("clicked", lambda *_: self.hide())
+        self.root.pack_end(dismiss, False, False, 0)
