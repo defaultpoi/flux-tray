@@ -27,12 +27,13 @@ class ProcessError(RuntimeError):
 class ProcessSupervisor:
     def __init__(self):
         self._lock = Lock()
-        self._processes: set[subprocess.Popen] = set()
+        self._processes: dict[subprocess.Popen, bool] = {}
         self._closed = False
 
     def run(
         self, argv: Sequence[str], *, timeout: float = 30, cwd: Path | None = None,
         env: Mapping[str, str] | None = None, cancelled: Event | None = None,
+        shutdown_protected: bool = False,
     ) -> ProcessResult:
         if not argv or not all(isinstance(part, str) for part in argv):
             raise ValueError("argv must be a non-empty sequence of strings")
@@ -47,7 +48,7 @@ class ProcessSupervisor:
             if self._closed:
                 self._terminate(process)
                 raise ProcessError("process supervisor is shutting down")
-            self._processes.add(process)
+            self._processes[process] = shutdown_protected
         deadline = time.monotonic() + timeout
         try:
             while True:
@@ -65,13 +66,13 @@ class ProcessSupervisor:
                     continue
         finally:
             with self._lock:
-                self._processes.discard(process)
+                self._processes.pop(process, None)
 
     def terminate_all(self) -> None:
         """Prevent new work and terminate every child process group currently owned."""
         with self._lock:
             self._closed = True
-            processes = tuple(self._processes)
+            processes = tuple(process for process, protected in self._processes.items() if not protected)
         for process in processes:
             self._terminate(process)
 
