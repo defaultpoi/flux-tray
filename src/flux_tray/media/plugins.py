@@ -96,9 +96,16 @@ class MediaPluginRegistry:
         if result is None:
             return None
         path = Path(str(result)).expanduser()
-        if not path.is_file():
-            raise ValueError("Plugin download must return the path to an existing file")
-        return str(path)
+        try:
+            completed_path = path.resolve(strict=True)
+            completed_path.relative_to(Path(base).expanduser().resolve())
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                "Plugin download must return an existing file inside its output directory"
+            ) from exc
+        if not completed_path.is_file() or completed_path.stat().st_size == 0:
+            raise ValueError("Plugin download must return a non-empty regular file")
+        return str(completed_path)
     def list_episodes(self, source: str) -> list[dict[str, Any]] | None:
         selected = self._select(source)
         if selected is None:
