@@ -25,7 +25,7 @@ This document is deliberately conservative. A service existing in the repository
 
 ## Verification status
 
-- GitHub Actions compiles `src` and `tests`, then runs the pytest suite successfully on Python 3.11, 3.12, 3.13 and 3.14 (latest verified run: recurring alarm editing and the full service test suite).
+- GitHub Actions compiles `src` and `tests`, then runs the pytest suite successfully on Python 3.11, 3.12, 3.13 and 3.14 (latest verified run: media download failure/retry state plus the full service test suite).
 - CI does not exercise GTK interactions, real network providers, mpv, XBPS/Topgrade or the target desktop.
 - The code has **not** been run on the target Void Linux desktop in this development session; real XFCE/X11 integration remains unverified.
 - Do not treat this branch as a release until the missing behavior is implemented, the test suite passes, and the application has been exercised on the target machine over an extended run.
