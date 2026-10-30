@@ -37,13 +37,14 @@ def _fetch_json(url: str, timeout: float = 10.0) -> dict[str, Any]:
 class WeatherService:
     def __init__(self, store: JsonStore, latitude: float, longitude: float,
                  *, fetcher: Callable[[str], dict[str, Any]] = _fetch_json,
-                 interval: int = 1800):
+                 interval: int = 1800, alerts_client=None):
         if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
             raise ValueError("Invalid latitude or longitude")
         self.store = store
         self.latitude = latitude
         self.longitude = longitude
         self.fetcher = fetcher
+        self.alerts_client = alerts_client
         self.interval = max(300, int(interval))
         self.state = store.load()
         if not isinstance(self.state, dict):
@@ -79,6 +80,12 @@ class WeatherService:
                 "condition": _WMO.get(code, "Unknown"),
             })
         code = current.get("weather_code")
+        alerts, alerts_error = [], None
+        if self.alerts_client is not None:
+            try:
+                alerts = self.alerts_client.active_alerts()
+            except Exception as exc:
+                alerts_error = str(exc)
         self.state = {
             "fetched_at": now.isoformat(),
             "temperature": current.get("temperature_2m"),
@@ -88,6 +95,9 @@ class WeatherService:
             "wind_speed": current.get("wind_speed_10m"),
             "condition": _WMO.get(code, "Unknown"),
             "forecast": days,
+            "alerts": alerts,
+            "alert_level": max((item.get("level", 0) for item in alerts), default=0),
+            "alerts_error": alerts_error,
             "latitude": self.latitude,
             "longitude": self.longitude,
             "error": None,
