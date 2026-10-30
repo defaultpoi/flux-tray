@@ -35,20 +35,32 @@ def _fetch_json(url: str, timeout: float = 10.0) -> dict[str, Any]:
 
 
 class WeatherService:
-    def __init__(self, store: JsonStore, latitude: float, longitude: float,
-                 *, fetcher: Callable[[str], dict[str, Any]] = _fetch_json,
+    def __init__(self, store: JsonStore, latitude: float | None = None,
+                 longitude: float | None = None, *, location: str | None = None,
+                 geocoder=None, fetcher: Callable[[str], dict[str, Any]] = _fetch_json,
                  interval: int = 1800, alerts_client=None):
-        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
-            raise ValueError("Invalid latitude or longitude")
         self.store = store
-        self.latitude = latitude
-        self.longitude = longitude
-        self.fetcher = fetcher
-        self.alerts_client = alerts_client
-        self.interval = max(300, int(interval))
         self.state = store.load()
         if not isinstance(self.state, dict):
             self.state = {}
+        self.location = location.strip() if location and location.strip() else None
+        self.geocoder = geocoder
+        if latitude is None and longitude is None and self.location:
+            if self.state.get("location") == self.location:
+                latitude = self.state.get("latitude")
+                longitude = self.state.get("longitude")
+        if (latitude is None) != (longitude is None):
+            raise ValueError("Latitude and longitude must be configured together")
+        if latitude is not None and (not -90 <= float(latitude) <= 90 or
+                                     not -180 <= float(longitude) <= 180):
+            raise ValueError("Invalid latitude or longitude")
+        if latitude is None and not self.location:
+            raise ValueError("Configure coordinates or a weather location")
+        self.latitude = float(latitude) if latitude is not None else None
+        self.longitude = float(longitude) if longitude is not None else None
+        self.fetcher = fetcher
+        self.alerts_client = alerts_client
+        self.interval = max(300, int(interval))
 
     def refresh(self, *, force: bool = False) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
@@ -59,6 +71,11 @@ class WeatherService:
                     return self.state
             except ValueError:
                 pass
+        if self.latitude is None or self.longitude is None:
+            if self.geocoder is None:
+                raise RuntimeError("Weather location needs Nominatim geocoding")
+            coordinates = self.geocoder.lookup(self.location)
+            self.latitude, self.longitude = float(coordinates[0]), float(coordinates[1])
         params = urlencode({
             "latitude": self.latitude, "longitude": self.longitude,
             "current": "temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m",
@@ -100,6 +117,7 @@ class WeatherService:
             "alerts_error": alerts_error,
             "latitude": self.latitude,
             "longitude": self.longitude,
+            "location": self.location,
             "error": None,
         }
         self.store.save(self.state)
