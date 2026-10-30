@@ -27,6 +27,7 @@ from flux_tray.media.player import MpvController
 from flux_tray.media.service import MediaService
 from flux_tray.media.sources import YtDlpAdapter
 from flux_tray.media.downloader import MediaDownloader
+from flux_tray.media.display import XrandrDisplay
 from flux_tray.launcher.service import LauncherService
 
 
@@ -93,6 +94,9 @@ class FluxTrayApplication(Gtk.Application):
             player=self.player,
             yt_dlp=YtDlpAdapter(process=self.process),
             downloader=MediaDownloader(process=self.process),
+            display=XrandrDisplay(process=self.process),
+            screen_height=config.get_int("media", "screen_height", 0, minimum=0) or None,
+            yt_dlp_sort=config.get("media", "yt_dlp_sort", "") or None,
         )
         launcher = LauncherService(config, self.process)
         self.tray = TrayController(
