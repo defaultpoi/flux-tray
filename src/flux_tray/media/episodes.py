@@ -6,7 +6,14 @@ import re
 import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
+
+def is_archive_org(url: str | None) -> bool:
+    if not url:
+        return False
+    host = (urlsplit(url).hostname or "").casefold().rstrip(".")
+    return host == "archive.org" or host.endswith(".archive.org")
 
 _PATTERNS = (
     re.compile(r"(?i)(?:^|\b)S(\d{1,3})\s*E(\d{1,4})(?:\b|$)"),
@@ -52,6 +59,8 @@ def normalize_episode(raw: dict[str, Any], source_id: str) -> MediaEpisode:
     title = str(raw.get("title") or raw.get("name") or "Untitled")
     candidates = (raw.get("webpage_url"), raw.get("url"))
     url = next((value for value in candidates if isinstance(value, str) and value.startswith(("http://", "https://"))), None)
+    if is_archive_org(url):
+        raise ValueError("Archive.org sources are intentionally unsupported")
     identity = str(raw.get("id") or url or raw.get("url") or title).strip()
     if not identity:
         raise ValueError("Episode requires a stable id, URL or title")
