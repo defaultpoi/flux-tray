@@ -274,3 +274,14 @@ def test_media_source_order_can_be_updated_and_invalid_values_rejected(tmp_path)
         assert "oldest or newest" in str(exc)
     else:
         raise AssertionError("Invalid source order was accepted")
+
+
+def test_media_episode_without_registered_source_can_be_marked_watched(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    service.state["episodes"]["orphan"] = {
+        "id": "orphan", "source_id": "removed-source", "status": "new",
+    }
+    service.mark_watched("orphan")
+    assert service.state["episodes"]["orphan"]["status"] == "watched"
