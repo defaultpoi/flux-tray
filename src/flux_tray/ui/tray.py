@@ -126,11 +126,7 @@ class TrayController:
         for source_id in (self._weather_pulse_source,
                           self._weather_tray_pulse_source,
                           self._breaking_pulse_source):
-            if source_id is not None:
-                try:
-                    GLib.source_remove(source_id)
-                except GLib.Error:
-                    pass
+            self._remove_timeout(source_id)
         self._weather_pulse_source = None
         self._weather_tray_pulse_source = None
         self._breaking_pulse_source = None
