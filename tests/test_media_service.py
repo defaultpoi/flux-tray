@@ -474,7 +474,7 @@ def test_changing_media_source_identity_clears_old_catalog(tmp_path):
     source = service.state["sources"][0]
     assert source["url"] == "https://example.test/new.xml"
     assert source["initialized"] is False
-    assert source["last_watched"] is None if "last_watched" in source else True
+    assert "last_watched" not in source
     assert service.state["episodes"] == {}
     assert service.state["queue"] == []
     assert service.state["watched"] == []
