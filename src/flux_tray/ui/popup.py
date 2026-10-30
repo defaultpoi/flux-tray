@@ -15,8 +15,10 @@ from gi.repository import Gdk, Gtk, Pango
 class FeedPopup:
     """Displays unread feed items grouped under their configured feed names."""
 
-    def __init__(self, feeds, *, width: int = 440, max_height: int = 620):
+    def __init__(self, feeds, *, width: int = 440, max_height: int = 620,
+                 on_feed_rules=None):
         self.feeds = feeds
+        self.on_feed_rules = on_feed_rules
         self.window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
         self.window.set_title("Flux Tray")
         self.window.set_default_size(width, max_height)
@@ -129,7 +131,7 @@ class FeedPopup:
         title.set_margin_top(5)
         title.set_tooltip_text(feed.get("url", ""))
         title.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
-        title.connect("button-press-event", self._on_feed_title_click, feed["id"])
+        title.connect("button-press-event", self._on_feed_title_click, feed)
         listing.pack_start(title, False, False, 0)
 
     def _append_item(self, listing, item):
@@ -169,14 +171,74 @@ class FeedPopup:
         row.pack_end(bookmark, False, False, 0)
         listing.pack_start(row, False, True, 0)
 
-    def _on_feed_title_click(self, _widget, event, feed_id):
+    def _on_feed_title_click(self, _widget, event, feed):
         if event.button == Gdk.BUTTON_PRIMARY:
-            self.feeds.mark_feed_read(feed_id)
+            self.feeds.mark_feed_read(feed["id"])
             self.rebuild()
             if not self.feeds.unread_items():
                 self.hide()
             return True
+        if event.button == Gdk.BUTTON_SECONDARY:
+            self._show_feed_menu(feed, event)
+            return True
         return False
+
+    def _show_feed_menu(self, feed, event):
+        menu = Gtk.Menu()
+        feed_id = feed["id"]
+        unread = [item for item in self.feeds.unread_items()
+                  if item.get("feed_id") == feed_id]
+
+        def add(label, callback, sensitive=True):
+            item = Gtk.MenuItem.new_with_label(label)
+            item.set_sensitive(sensitive)
+            item.connect("activate", callback)
+            menu.append(item)
+
+        add("Mark all read", lambda *_: self._mark_feed_read(feed_id), bool(unread))
+        add("Open all unread items", lambda *_: self._open_feed_items(unread),
+            any(self._valid_web_url(item.get("link", "")) for item in unread))
+        menu.append(Gtk.SeparatorMenuItem())
+        website = feed.get("site_url") or ""
+        add("Open feed website", lambda *_: webbrowser.open(website),
+            self._valid_web_url(website))
+        feed_url = feed.get("url", "")
+        add("Open feed XML", lambda *_: webbrowser.open(feed_url),
+            self._valid_web_url(feed_url))
+        menu.append(Gtk.SeparatorMenuItem())
+        muted = bool(feed.get("muted"))
+        add("Unmute feed" if muted else "Mute feed",
+            lambda *_: self._set_feed_muted(feed_id, not muted))
+        add("Manage category/author rules…",
+            lambda *_: self.on_feed_rules() if self.on_feed_rules else None,
+            self.on_feed_rules is not None)
+        menu.show_all()
+        menu.popup_at_pointer(event)
+
+    @staticmethod
+    def _valid_web_url(url):
+        parsed = urlsplit(str(url or ""))
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+    def _open_feed_items(self, items):
+        for item in items:
+            link = item.get("link", "")
+            if self._valid_web_url(link):
+                webbrowser.open(link)
+            self.feeds.mark_read(item["id"])
+        self.rebuild()
+        if not self.feeds.unread_items():
+            self.hide()
+
+    def _mark_feed_read(self, feed_id):
+        self.feeds.mark_feed_read(feed_id)
+        self.rebuild()
+        if not self.feeds.unread_items():
+            self.hide()
+
+    def _set_feed_muted(self, feed_id, muted):
+        self.feeds.set_muted(feed_id, muted)
+        self.rebuild()
 
     def _on_item_click(self, _widget, event, item):
         if event.button == Gdk.BUTTON_PRIMARY:

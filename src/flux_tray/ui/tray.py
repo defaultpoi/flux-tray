@@ -44,6 +44,7 @@ class TrayController:
             self.feeds,
             width=config.get_int("popup", "width", 440, minimum=320) if config else 440,
             max_height=config.get_int("popup", "height", 620, minimum=240) if config else 620,
+            on_feed_rules=self._feed_rules_dialog,
         )
         self._weather_alert_items = []
         self._weather_pulse_source = None

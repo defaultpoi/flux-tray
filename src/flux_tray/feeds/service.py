@@ -73,7 +73,7 @@ class FeedService:
         if any(feed["url"] == url for feed in self.state["feeds"]):
             raise ValueError("Feed already exists")
         feed_id = uuid4().hex
-        self.state["feeds"].append({"id": feed_id, "url": url, "name": name or url,
+        self.state["feeds"].append({"id": feed_id, "url": url, "site_url": None, "name": name or url,
             "interval": max(60, int(interval if interval is not None else self.default_interval)), "next_check": None, "etag": None,
             "modified": None, "muted": False, "last_error": None, "last_success": None})
         self._save()
@@ -191,6 +191,9 @@ class FeedService:
                 parsed = feedparser.parse(result.body)
                 if parsed.bozo and not parsed.entries:
                     raise ValueError(f"Invalid feed: {parsed.bozo_exception}")
+                site_url = str(parsed.feed.get("link") or "").strip()
+                if site_url.startswith(("https://", "http://")):
+                    feed["site_url"] = site_url
                 fresh = self._ingest(feed, parsed.entries, now)
             else:
                 fresh = 0

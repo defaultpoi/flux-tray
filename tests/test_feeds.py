@@ -135,3 +135,15 @@ def test_breaking_item_notification_is_consumed_once(tmp_path):
     assert len(pending) == 1
     assert pending[0]["breaking_notified"] is True
     assert service.take_unnotified_breaking_items() == []
+
+
+def test_feed_website_url_is_saved_from_feed_metadata(tmp_path):
+    body = b'''<rss version="2.0"><channel><title>Example</title>
+    <link>https://example.test/</link>
+    <item><guid>one</guid><title>One</title></item>
+    </channel></rss>'''
+    service = make_service(tmp_path, body)
+    feed_id = service.add_feed("https://example.test/feed.xml")
+    service.check_feed(feed_id)
+    feed = next(feed for feed in service.state["feeds"] if feed["id"] == feed_id)
+    assert feed["site_url"] == "https://example.test/"
