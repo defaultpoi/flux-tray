@@ -499,3 +499,23 @@ def test_cannot_change_media_source_while_its_episode_is_downloading(tmp_path):
 
     assert service.state["sources"][0]["url"] == "https://example.test/old.xml"
 
+def test_cannot_remove_media_source_while_its_episode_is_downloading(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/feed.xml")
+    service.state["episodes"]["active"] = {
+        "id": "active", "source_id": source_id, "status": "queued",
+    }
+    service.state["download"] = {"episode_id": "active", "status": "downloading"}
+
+    try:
+        service.remove_source(source_id)
+    except RuntimeError as exc:
+        assert "while one of its episodes is downloading" in str(exc)
+    else:
+        raise AssertionError("Source was removed during an active download")
+
+    assert service.state["sources"][0]["id"] == source_id
+    assert "active" in service.state["episodes"]
+
