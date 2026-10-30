@@ -136,8 +136,10 @@ class FeedService:
 
     def remove_feed(self, feed_id: str) -> None:
         self.state["feeds"] = [f for f in self.state["feeds"] if f["id"] != feed_id]
-        self.state["items"] = {k: v for k, v in self.state["items"].items()
-                                if v.get("feed_id") != feed_id}
+        removed_ids = {k for k, v in self.state["items"].items() if v.get("feed_id") == feed_id}
+        self.state["items"] = {k: v for k, v in self.state["items"].items() if k not in removed_ids}
+        self.state["read_later"] = [item_id for item_id in self.state["read_later"]
+                                    if item_id not in removed_ids]
         self._save()
 
     def set_muted(self, feed_id: str, muted: bool) -> None:
