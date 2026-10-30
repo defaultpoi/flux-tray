@@ -26,6 +26,10 @@ class MediaDownloader:
             raise ValueError("Episode has no playable HTTP(S) URL")
         if is_archive_org(str(url)):
             raise ValueError("Archive.org media downloads are intentionally unsupported")
+        metadata = episode.get("metadata") or {}
+        live_status = metadata.get("live_status", episode.get("live_status"))
+        if metadata.get("is_live") or episode.get("is_live") or live_status == "is_live":
+            raise ValueError("Live HLS streams cannot be queued as media downloads")
         output_dir = Path(output_dir).expanduser()
         output_dir.mkdir(parents=True, exist_ok=True)
         title = safe_filename(str(episode.get("title") or "untitled"))
