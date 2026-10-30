@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -21,43 +22,53 @@ class MediaPluginRegistry:
         loaded = []
         if self.directory.exists():
             for path in sorted(self.directory.glob("*.py")):
+                module_name = f"flux_tray_user_plugin_{path.stem}"
                 try:
-                    spec = importlib.util.spec_from_file_location(
-                        f"flux_tray_user_plugin_{path.stem}", path
-                    )
+                    spec = importlib.util.spec_from_file_location(module_name, path)
                     if spec is None or spec.loader is None:
                         raise ImportError("No module loader available")
                     module = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = module
                     spec.loader.exec_module(module)
                     if not callable(getattr(module, "list_episodes", None)):
                         raise TypeError("Plugin must define list_episodes(source)")
                     loaded.append(module)
                 except Exception:
+                    sys.modules.pop(module_name, None)
                     self.log.exception("Could not load media plugin %s", path)
-        self.plugins = sorted(loaded, key=lambda plugin: int(getattr(plugin, "ORDER", 100)))
+        def order(plugin):
+            try:
+                return int(getattr(plugin, "ORDER", 100))
+            except (TypeError, ValueError):
+                return 100
+        self.plugins = sorted(loaded, key=order)
 
-    def _select(self, source: str) -> ModuleType | None:
+    def _select(self, source: str) -> tuple[ModuleType, str] | None:
         if source.startswith("plugin:"):
-            _, name, _, remainder = source.split(":", 3) if source.count(":") >= 3 else (None, None, None, None)
+            parts = source.split(":", 2)
+            if len(parts) != 3 or not parts[1] or not parts[2]:
+                raise ValueError("Plugin source must use plugin:NAME:SOURCE syntax")
             for plugin in self.plugins:
-                if str(getattr(plugin, "NAME", plugin.__name__)) == name:
-                    return plugin
-            raise KeyError(f"Media plugin not found: {name}")
+                if str(getattr(plugin, "NAME", plugin.__name__)) == parts[1]:
+                    return plugin, parts[2]
+            raise KeyError(f"Media plugin not found: {parts[1]}")
         for plugin in self.plugins:
             matches = getattr(plugin, "matches", None)
             if callable(matches):
                 try:
                     if matches(source):
-                        return plugin
+                        return plugin, source
                 except Exception:
-                    self.log.exception("Plugin matcher failed: %s", getattr(plugin, "NAME", plugin.__name__))
+                    self.log.exception("Plugin matcher failed: %s",
+                                       getattr(plugin, "NAME", plugin.__name__))
         return None
 
     def list_episodes(self, source: str) -> list[dict[str, Any]] | None:
-        plugin = self._select(source)
-        if plugin is None:
+        selected = self._select(source)
+        if selected is None:
             return None
-        records = plugin.list_episodes(source)
+        plugin, plugin_source = selected
+        records = plugin.list_episodes(plugin_source)
         if not isinstance(records, (list, tuple)):
             raise TypeError("Plugin list_episodes must return a list")
         source_id = f"plugin:{getattr(plugin, 'NAME', plugin.__name__)}"
