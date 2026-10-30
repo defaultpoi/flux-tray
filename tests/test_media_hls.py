@@ -95,7 +95,9 @@ seg.ts
         assert not Path(result).with_name("Example Show - S01E02 - Pilot.ro.srt").exists()
         assert not Path(result + ".part").exists()
         assert calls[0][0][calls[0][0].index("-i") + 1].endswith("/vod.m3u8")
-        assert progress[0]["percent"] == 50.0
+        assert progress[0]["part_path"].endswith(".mkv.part")
+        assert progress[0]["duration"] == 10.0
+        assert progress[1]["percent"] == 50.0
         assert progress[-1]["percent"] == 100.0
     finally:
         server.shutdown()
