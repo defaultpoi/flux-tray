@@ -31,7 +31,7 @@ Optional integrations are detected at runtime: mpv, Streamlink, yt-dlp, ffmpeg, 
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and test commands. The application is designed to be developed and tested on the target Void machine; CI should cover pure Python tests and static checks without pretending to validate XFCE tray behavior.
+See [CONFIGURATION.md](docs/CONFIGURATION.md) for the current settings and [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and test commands. The application is designed to be developed and tested on the target Void machine; CI should cover pure Python tests and static checks without pretending to validate XFCE tray behavior.
 
 ## Scope
 
