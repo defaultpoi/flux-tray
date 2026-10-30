@@ -39,7 +39,12 @@ class TrayController:
         self.icon.connect("activate", self._on_activate)
         self.icon.connect("popup-menu", self._on_popup)
         self.menu = Gtk.Menu()  # Legacy action helpers; this menu is no longer shown.
-        self.popup = FeedPopup(self.feeds)
+        self.auto_open_popup = config.get_bool("popup", "auto_open", True) if config else True
+        self.popup = FeedPopup(
+            self.feeds,
+            width=config.get_int("popup", "width", 440, minimum=320) if config else 440,
+            max_height=config.get_int("popup", "height", 620, minimum=240) if config else 620,
+        )
         self._weather_alert_items = []
         self._weather_pulse_source = None
         self._weather_pulse_phase = False
@@ -1576,7 +1581,8 @@ class TrayController:
                 notification = Gio.Notification.new(f"{fresh} new feed items")
                 notification.set_body("New items are ready in Flux Tray.")
             self.application.send_notification(None, notification)
-            self.popup.show()
+            if self.auto_open_popup:
+                self.popup.show()
         return GLib.SOURCE_REMOVE
 
     def _periodic_refresh(self):
