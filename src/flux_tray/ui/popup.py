@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import webbrowser
+from urllib.parse import urlsplit
+
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -106,7 +109,7 @@ class FeedPopup:
         scroller.set_max_content_height(500)
         self.root.pack_start(scroller, True, True, 0)
 
-        listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         listing.set_border_width(2)
         scroller.add(listing)
 
@@ -117,17 +120,68 @@ class FeedPopup:
             listing.pack_start(empty, False, False, 0)
 
         for item in items[:100]:
-            title = (item.get("title") or "(untitled)").strip()
-            row = Gtk.Label(label=title)
-            row.set_xalign(0)
-            row.set_single_line_mode(True)
-            row.set_ellipsize(Pango.EllipsizeMode.END)
-            row.set_tooltip_text(title)
-            row.set_selectable(True)
-            row.set_hexpand(True)
-            listing.pack_start(row, False, True, 0)
+            self._append_item(listing, item)
 
         dismiss = Gtk.Button(label="Dismiss")
         dismiss.set_halign(Gtk.Align.END)
         dismiss.connect("clicked", lambda *_: self.hide())
         self.root.pack_end(dismiss, False, False, 0)
+
+    def _append_item(self, listing, item):
+        title = (item.get("title") or "(untitled)").strip()
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+
+        clickable = Gtk.EventBox()
+        clickable.set_visible_window(False)
+        clickable.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        clickable.connect("button-press-event", self._on_item_click, item)
+        clickable.set_tooltip_text(title)
+
+        label = Gtk.Label(label=title)
+        label.set_xalign(0)
+        label.set_single_line_mode(True)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        label.set_tooltip_text(title)
+        label.set_hexpand(True)
+        clickable.add(label)
+        row.pack_start(clickable, True, True, 0)
+
+        bookmark = Gtk.Button.new_from_icon_name(
+            "bookmark-new-symbolic", Gtk.IconSize.BUTTON
+        )
+        bookmark.set_relief(Gtk.ReliefStyle.NONE)
+        bookmark.set_tooltip_text("Save for later")
+        bookmark.connect(
+            "clicked", lambda *_args, item_id=item["id"]: self._save_for_later(item_id)
+        )
+        row.pack_end(bookmark, False, False, 0)
+        listing.pack_start(row, False, True, 0)
+
+    def _on_item_click(self, _widget, event, item):
+        if event.button == Gdk.BUTTON_PRIMARY:
+            link = item.get("link", "")
+            parsed = urlsplit(link)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                webbrowser.open(link)
+            self._mark_read(item["id"])
+            return True
+        if event.button == Gdk.BUTTON_SECONDARY:
+            self._mark_read(item["id"])
+            return True
+        return False
+
+    def _mark_read(self, item_id):
+        self.feeds.mark_read(item_id)
+        self.rebuild()
+        if not self.feeds.unread_items():
+            self.hide()
+        else:
+            self.window.show_all()
+
+    def _save_for_later(self, item_id):
+        self.feeds.save_for_later(item_id)
+        self.rebuild()
+        if not self.feeds.unread_items():
+            self.hide()
+        else:
+            self.window.show_all()
