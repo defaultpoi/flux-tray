@@ -48,7 +48,7 @@ class TrayController:
             GLib.timeout_add_seconds(1800, self._weather_tick)
             self._weather_tick()
         if self.live is not None:
-            GLib.timeout_add_seconds(900, self._live_tick)
+            GLib.timeout_add_seconds(max(60, self.live.interval), self._live_tick)
             self._live_tick()
         if self.media is not None:
             GLib.timeout_add_seconds(3600, self._media_tick)
