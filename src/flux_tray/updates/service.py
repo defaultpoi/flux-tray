@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from threading import Lock
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Callable, Sequence
@@ -32,6 +33,7 @@ class UpdateService:
         self.runner = runner or self.process.run
         self.sudo = sudo
         self.timeout = timeout
+        self._lock = Lock()
         self.state = store.load()
         if not isinstance(self.state, dict):
             self.state = {}
