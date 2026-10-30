@@ -113,7 +113,7 @@ class MediaService:
             raise ValueError("Archive.org media sources are intentionally unsupported")
         source = self._source(source_id)
         identity_changed = source.get("kind") != kind or source.get("url") != url
-        new_order = self._validate_order(order) if order is not None else source.get("order")
+        new_order = self._validate_order(order)
 
         if identity_changed:
             download = self.state.get("download") or {}
