@@ -82,3 +82,15 @@ def test_countdown_start_and_cancel_preserve_weekly_alarms(tmp_path):
     restored = make_timer(tmp_path)
     assert [item["id"] for item in restored.schedules] == [alarm["id"]]
     assert restored.state["status"] == "idle"
+
+
+
+def test_weekly_alarm_can_be_edited_without_changing_its_identity(tmp_path):
+    timer = make_timer(tmp_path)
+    alarm = timer.add_schedule([0], "07:30", "Old label")
+    updated = timer.update_schedule(alarm["id"], [1, 3], "08:15", "New label")
+    assert updated["id"] == alarm["id"]
+    assert updated["weekdays"] == [1, 3]
+    assert updated["time"] == "08:15"
+    assert updated["label"] == "New label"
+    assert updated["last_fired"] is None
