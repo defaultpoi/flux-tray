@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +34,7 @@ class ProcessSupervisor:
         self, argv: Sequence[str], *, timeout: float = 30, cwd: Path | None = None,
         env: Mapping[str, str] | None = None, cancelled: Event | None = None,
         shutdown_protected: bool = False,
+        output_callback: Callable[[str, str], None] | None = None,
     ) -> ProcessResult:
         if not argv or not all(isinstance(part, str) for part in argv):
             raise ValueError("argv must be a non-empty sequence of strings")
@@ -45,12 +46,34 @@ class ProcessSupervisor:
             process = subprocess.Popen(
                 list(argv), cwd=cwd, env=dict(os.environ, **(env or {})),
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, start_new_session=True,
+                text=True, bufsize=1, start_new_session=True,
             )
             self._processes[process] = shutdown_protected
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+
+        def drain(stream, chunks, channel):
+            try:
+                for line in iter(stream.readline, ""):
+                    chunks.append(line)
+                    if output_callback is not None:
+                        try:
+                            output_callback(channel, line)
+                        except Exception:
+                            # A progress observer must never interrupt pipe draining.
+                            pass
+            finally:
+                stream.close()
+
+        readers = [
+            Thread(target=drain, args=(process.stdout, stdout_chunks, "stdout"), daemon=True),
+            Thread(target=drain, args=(process.stderr, stderr_chunks, "stderr"), daemon=True),
+        ]
+        for reader in readers:
+            reader.start()
         deadline = time.monotonic() + timeout
         try:
-            while True:
+            while process.poll() is None:
                 if cancelled is not None and cancelled.is_set():
                     self._terminate(process)
                     raise ProcessError(f"command cancelled: {argv[0]}")
@@ -58,16 +81,21 @@ class ProcessSupervisor:
                 if remaining <= 0:
                     self._terminate(process)
                     raise ProcessError(f"command timed out after {timeout:g}s: {argv[0]}")
-                try:
-                    stdout, stderr = process.communicate(timeout=min(0.1, remaining))
-                    with self._lock:
-                        shutting_down = self._closed and not shutdown_protected
-                    if shutting_down:
-                        raise ProcessError(f"command terminated during shutdown: {argv[0]}")
-                    return ProcessResult(tuple(argv), process.returncode, stdout, stderr)
-                except subprocess.TimeoutExpired:
-                    continue
+                time.sleep(min(0.05, remaining))
+            process.wait()
+            for reader in readers:
+                reader.join(timeout=2)
+            with self._lock:
+                shutting_down = self._closed and not shutdown_protected
+            if shutting_down:
+                raise ProcessError(f"command terminated during shutdown: {argv[0]}")
+            return ProcessResult(tuple(argv), process.returncode,
+                                 "".join(stdout_chunks), "".join(stderr_chunks))
         finally:
+            if process.poll() is None:
+                self._terminate(process)
+            for reader in readers:
+                reader.join(timeout=1)
             with self._lock:
                 self._processes.pop(process, None)
 
