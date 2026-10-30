@@ -42,26 +42,82 @@ class TrayController:
         self._weather_alert_items = []
         self._weather_pulse_source = None
         self._weather_pulse_phase = False
+        self._weather_tray_pulse_source = None
+        self._weather_tray_pulse_phase = False
+        self._breaking_pulse_source = None
+        self._breaking_pulse_phase = False
         self._last_schedule_alert_token = None
-        GLib.timeout_add_seconds(60, self._periodic_refresh)
+        self._closing = False
+        self._timeout_sources = []
+        self._add_timeout_seconds(60, self._periodic_refresh)
         if self.timer is not None:
             self.timer.poll()
-            GLib.timeout_add_seconds(1, self._timer_tick)
+            self._add_timeout_seconds(1, self._timer_tick)
         if self.connectivity is not None:
-            GLib.timeout_add_seconds(self.connectivity_interval, self._connectivity_tick)
+            self._add_timeout_seconds(self.connectivity_interval, self._connectivity_tick)
             self._connectivity_tick()
         if self.updates is not None:
-            GLib.timeout_add_seconds(self.update_interval, self._update_scan_tick)
+            self._add_timeout_seconds(self.update_interval, self._update_scan_tick)
             self._update_scan_tick()
         if self.weather is not None:
-            GLib.timeout_add_seconds(max(300, self.weather.interval), self._weather_tick)
+            self._add_timeout_seconds(max(300, self.weather.interval), self._weather_tick)
             self._weather_tick()
         if self.live is not None:
-            GLib.timeout_add_seconds(max(60, self.live.interval), self._live_tick)
+            self._add_timeout_seconds(max(60, self.live.interval), self._live_tick)
             self._live_tick()
         if self.media is not None:
-            GLib.timeout_add_seconds(max(600, self.media.interval), self._media_tick)
+            self._add_timeout_seconds(max(600, self.media.interval), self._media_tick)
             self._media_tick()
+
+    def _add_timeout_seconds(self, seconds, callback):
+        source_id = GLib.timeout_add_seconds(seconds, callback)
+        self._timeout_sources.append(source_id)
+        return source_id
+
+    def _add_timeout(self, milliseconds, callback):
+        source_id = GLib.timeout_add(milliseconds, callback)
+        self._timeout_sources.append(source_id)
+        return source_id
+
+    def _idle_add(self, callback, *args):
+        if self._closing:
+            return 0
+
+        def invoke():
+            if self._closing:
+                return GLib.SOURCE_REMOVE
+            return callback(*args)
+
+        return GLib.idle_add(invoke)
+
+    def close(self):
+        """Stop UI timers and detach GTK objects before application shutdown."""
+        if self._closing:
+            return
+        self._closing = True
+        for source_id in self._timeout_sources:
+            try:
+                GLib.source_remove(source_id)
+            except GLib.Error:
+                pass
+        self._timeout_sources.clear()
+        for source_id in (self._weather_pulse_source,
+                          self._weather_tray_pulse_source,
+                          self._breaking_pulse_source):
+            if source_id is not None:
+                try:
+                    GLib.source_remove(source_id)
+                except GLib.Error:
+                    pass
+        self._weather_pulse_source = None
+        self._weather_tray_pulse_source = None
+        self._breaking_pulse_source = None
+        try:
+            self.menu.popdown()
+            self.menu.destroy()
+            self.icon.set_visible(False)
+        except (RuntimeError, TypeError):
+            self.log.debug("GTK tray objects were already disposed", exc_info=True)
 
     def _on_activate(self, _icon):
         self._rebuild_menu(self.menu)
@@ -366,14 +422,14 @@ class TrayController:
         severe = (self.weather is not None and
                   self.weather.state.get("alert_level", 0) >= 3)
         if severe and self._weather_tray_pulse_source is None:
-            self._weather_tray_pulse_source = GLib.timeout_add(600, self._pulse_weather_tray)
+            self._weather_tray_pulse_source = self._add_timeout(600, self._pulse_weather_tray)
         elif not severe and self._weather_tray_pulse_source is not None:
             GLib.source_remove(self._weather_tray_pulse_source)
             self._weather_tray_pulse_source = None
             self._weather_tray_pulse_phase = False
             self._update_icon()
         if severe and self.menu.get_mapped() and self._weather_pulse_source is None:
-            self._weather_pulse_source = GLib.timeout_add(600, self._pulse_weather_alerts)
+            self._weather_pulse_source = self._add_timeout(600, self._pulse_weather_alerts)
         elif (not severe or not self.menu.get_mapped()) and self._weather_pulse_source is not None:
             GLib.source_remove(self._weather_pulse_source)
             self._weather_pulse_source = None
@@ -396,7 +452,7 @@ class TrayController:
     def _sync_breaking_pulse(self):
         active = bool(self.feeds.breaking_items())
         if active and self._breaking_pulse_source is None:
-            self._breaking_pulse_source = GLib.timeout_add(600, self._pulse_breaking_items)
+            self._breaking_pulse_source = self._add_timeout(600, self._pulse_breaking_items)
         elif not active and self._breaking_pulse_source is not None:
             GLib.source_remove(self._breaking_pulse_source)
             self._breaking_pulse_source = None
@@ -706,7 +762,7 @@ class TrayController:
     def _play_live_channel(self, channel):
         future = self.tasks.submit("live-playback", self.live.play_channel, channel["id"])
         if future is not None:
-            future.add_done_callback(lambda done: GLib.idle_add(self._live_play_complete, done, channel["url"]))
+            future.add_done_callback(lambda done: self._idle_add(self._live_play_complete, done, channel["url"]))
 
     def _live_play_complete(self, future, fallback_url):
         try:
