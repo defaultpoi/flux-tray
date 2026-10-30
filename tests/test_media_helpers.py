@@ -100,3 +100,27 @@ def test_resumable_download_restarts_when_server_ignores_range(tmp_path):
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+def test_resumable_download_rejects_empty_response(tmp_path):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *_args):
+            pass
+
+    server, thread = _serve(Handler)
+    try:
+        destination = tmp_path / "empty.bin"
+        with pytest.raises(RuntimeError, match="without receiving any data"):
+            download_file(
+                f"http://127.0.0.1:{server.server_port}/empty.bin", destination
+            )
+        assert not destination.exists()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
