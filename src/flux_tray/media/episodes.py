@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import date, datetime
 from dataclasses import asdict, dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -55,35 +56,91 @@ class MediaEpisode:
         return asdict(self)
 
 
+def _normalize_date(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    try:
+        if re.fullmatch(r"\\d{8}", text):
+            return datetime.strptime(text, "%Y%m%d").date().isoformat()
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
+    except ValueError as exc:
+        raise ValueError(f"Invalid episode date: {text!r}") from exc
+
+
+def _normalize_number(value: Any, field: str) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or not re.fullmatch(r"\\d+", str(value).strip()):
+        raise ValueError(f"Episode {field} must be a non-negative whole number")
+    return int(value)
+
+
+def _normalize_headers(value: Any) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("Episode headers must be a dictionary")
+    result = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not isinstance(item, str) or not key.strip():
+            raise ValueError("Episode headers must contain string names and values")
+        if any(char in key + item for char in "\\r\\n"):
+            raise ValueError("Episode headers cannot contain line breaks")
+        result[key.strip()] = item.strip()
+    return result
+
+
+def _normalize_subtitles(value: Any) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("Episode subtitles must be a language-to-URL dictionary")
+    result = {}
+    for language, url in value.items():
+        if not isinstance(language, str) or not language.strip():
+            raise ValueError("Subtitle language cannot be empty")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            raise ValueError(f"Subtitle {language!r} requires an HTTP(S) URL")
+        result[language.strip()] = url
+    return result
+
+
 def normalize_episode(raw: dict[str, Any], source_id: str) -> MediaEpisode:
-    title = str(raw.get("title") or raw.get("name") or "Untitled")
+    if not isinstance(raw, dict):
+        raise TypeError("Episode record must be a dictionary")
+    title = str(raw.get("title") or raw.get("name") or "Untitled").strip() or "Untitled"
     candidates = (raw.get("webpage_url"), raw.get("url"))
-    url = next((value for value in candidates if isinstance(value, str) and value.startswith(("http://", "https://"))), None)
+    url = next((value for value in candidates if isinstance(value, str)
+                and value.startswith(("http://", "https://"))), None)
     if is_archive_org(url):
         raise ValueError("Archive.org sources are intentionally unsupported")
     identity = str(raw.get("id") or url or raw.get("url") or title).strip()
     if not identity:
         raise ValueError("Episode requires a stable id, URL or title")
     parsed = parse_season_episode(title)
-    season = raw.get("season", raw.get("season_number"))
-    episode = raw.get("episode", raw.get("episode_number"))
-    if parsed and (season is None or episode is None):
-        season, episode = parsed
+    season = _normalize_number(raw.get("season", raw.get("season_number")), "season")
+    number = _normalize_number(raw.get("episode", raw.get("episode_number")), "episode")
+    if parsed:
+        season = parsed[0] if season is None else season
+        number = parsed[1] if number is None else number
+    ext = raw.get("ext")
+    if ext is not None:
+        ext = str(ext).strip().lower().lstrip(".")
+        if not re.fullmatch(r"[a-z0-9]{1,10}", ext):
+            raise ValueError(f"Invalid media extension: {ext!r}")
     metadata = dict(raw.get("metadata")) if isinstance(raw.get("metadata"), dict) else {}
     for key in ("live_status", "is_live", "was_live", "duration"):
         if key in raw:
             metadata[key] = raw[key]
+    prefix = f"{source_id}:" if source_id else ""
+    normalized_id = identity if not prefix or identity.startswith(prefix) else prefix + identity
     return MediaEpisode(
-        id=f"{source_id}:{identity}", title=title, date=raw.get("date") or raw.get("upload_date"),
-        url=str(url) if isinstance(url, str) and url.startswith(("http://", "https://")) else None,
-        ext=raw.get("ext"),
-        subs=raw.get("subs") if isinstance(raw.get("subs"), dict) else {},
-        headers=raw.get("headers") if isinstance(raw.get("headers"), dict) else {},
-        season=int(season) if season is not None else None,
-        episode=int(episode) if episode is not None else None,
+        id=normalized_id, title=title, date=_normalize_date(raw.get("date") or raw.get("upload_date")),
+        url=url, ext=ext, subs=_normalize_subtitles(raw.get("subs")),
+        headers=_normalize_headers(raw.get("headers")), season=season, episode=number,
         metadata=metadata,
     )
-
 
 def media_filename(source_name: str, episode: dict[str, Any]) -> str:
     """Build a stable source/episode/title basename for video and subtitles."""
