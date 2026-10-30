@@ -688,6 +688,33 @@ class TrayController:
                 webbrowser.open(fallback_url)
         return GLib.SOURCE_REMOVE
 
+    def _rename_media_source_dialog(self, source):
+        dialog = Gtk.Dialog(title="Rename media source", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.OK)
+        entry = Gtk.Entry()
+        entry.set_text(source.get("name", ""))
+        dialog.get_content_area().pack_start(entry, True, True, 12)
+        dialog.show_all()
+        if dialog.run() == Gtk.ResponseType.OK:
+            try:
+                self.media.rename_source(source["id"], entry.get_text())
+            except ValueError as exc:
+                self.log.warning("Could not rename media source: %s", exc)
+        dialog.destroy()
+        self._rebuild_menu(self.menu)
+
+    def _remove_media_source_dialog(self, source):
+        dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
+            message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.YES_NO,
+            text=f"Remove media source ‘{source.get('name', 'Source')}’?") 
+        dialog.format_secondary_text("Its episode history, queue entries and watched state will also be cleared.")
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.YES:
+            self.media.remove_source(source["id"])
+        self._rebuild_menu(self.menu)
+
     def _add_media_dialog(self):
         dialog = Gtk.Dialog(title="Add media source", flags=Gtk.DialogFlags.MODAL)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
