@@ -173,7 +173,9 @@ class MediaService:
             return
         candidates = [episode for episode in self.state["episodes"].values()
                       if episode.get("source_id") == source_id and episode.get("status") == "new"]
-        order = self._source(source_id).get("order")
+        source = next((item for item in self.state["sources"]
+                       if item.get("id") == source_id), {})
+        order = source.get("order")
         if order in {"oldest", "newest"}:
             def sort_key(item):
                 season, number = item.get("season"), item.get("episode")
