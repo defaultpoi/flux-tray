@@ -20,6 +20,7 @@ from flux_tray.connectivity.service import ConnectivityService
 from flux_tray.updates.service import UpdateService
 from flux_tray.weather.service import WeatherService
 from flux_tray.live.service import LiveService
+from flux_tray.media.player import MpvController
 
 
 class FluxTrayApplication(Gtk.Application):
@@ -28,6 +29,7 @@ class FluxTrayApplication(Gtk.Application):
         self.paths = Paths.user_default()
         self.tasks = None
         self.tray = None
+        self.player = None
 
     def do_activate(self) -> None:
         self.paths.config_dir.mkdir(parents=True, exist_ok=True)
@@ -63,7 +65,13 @@ class FluxTrayApplication(Gtk.Application):
             except ValueError as exc:
                 logger.warning("Weather is disabled: %s", exc)
         live_store = JsonStore(self.paths.data_dir / "live.json", lambda: {"channels": []})
-        live = LiveService(live_store, interval=config.get_int("live", "interval", 15, minimum=1) * 60)
+        self.player = MpvController(self.paths.state_dir / "mpv.sock")
+        live = LiveService(
+            live_store,
+            interval=config.get_int("live", "interval", 15, minimum=1) * 60,
+            player=self.player,
+            quality=config.get("live", "quality", "best") or "best",
+        )
         self.tray = TrayController(self, feeds, self.tasks, timer, connectivity, updates, weather, live)
         self.hold()
         self.connect("shutdown", self._shutdown)
