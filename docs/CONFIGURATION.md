@@ -6,6 +6,11 @@ The application creates a fresh INI file at `~/.config/flux-tray/config.conf` on
 [feeds]
 interval = 60
 
+[popup]
+auto_open = true
+width = 440
+height = 620
+
 [live]
 interval = 15
 quality = best
@@ -45,6 +50,12 @@ terminal = ["xfce4-terminal"]
 file_manager = ["thunar"]
 ```
 
+## Popup
+
+- `popup.auto_open`: open the feed window automatically when new unread items arrive; default `true`.
+- `popup.width`: initial popup width in pixels; default 440, minimum 320.
+- `popup.height`: initial popup height in pixels; default 620, minimum 240.
+
 ## Units
 
 - `feeds.interval`: seconds; minimum 60. Default for newly added feeds.
@@ -59,7 +70,7 @@ file_manager = ["thunar"]
 - `weather.location`: optional place name (for example `Buzau, Romania`); if coordinates are absent, Nominatim resolves it once and the coordinates are cached in weather state.
 - `weather.alerts`: enable optional MeteoAlarm warnings.
 - `weather.country`: MeteoAlarm country-feed slug (default `romania`).
-- `weather.region`: required region/county text used to filter active warnings, accent-insensitively. Example: `Buzau`. The tray menu's **Weather settings…** dialog can configure the place or coordinates and MeteoAlarm region without editing the INI manually.
+- `weather.region`: required region/county text used to filter active warnings, accent-insensitively. Example: `Buzau`. Configure the place or coordinates and MeteoAlarm region in this file.
 - `updates.interval`: hours; default 12.
 - `updates.installer`: `topgrade` (default) or `xbps`; if Topgrade is unavailable, Flux Tray falls back to XBPS directly.
 - `updates.topgrade_steps`: optional comma-separated Topgrade step names to run in addition to `system`. Use only step names accepted by your installed Topgrade version.
@@ -78,7 +89,7 @@ terminal = ["xfce4-terminal"]
 firefox_private = ["firefox", "--private-window"]
 ```
 
-Do not write a shell command as a plain string; it will be ignored. The current implementation intentionally supports argv commands only. You can add, edit or remove these entries from the tray menu under **Launch**; the dialog validates JSON arrays and never invokes a shell.
+Do not write a shell command as a plain string; it will be ignored. The current implementation intentionally supports argv commands only. The configuration is read from this file at startup; Flux Tray never invokes a shell for launcher entries.
 
 ## Media plugins
 
