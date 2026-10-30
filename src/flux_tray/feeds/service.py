@@ -48,10 +48,12 @@ class FeedService:
     """Owns feed definitions, item state, unread/read-later and mute rules."""
 
     def __init__(self, store: JsonStore, fetcher: Callable[..., FetchResult] = fetch_feed,
-                 *, breaking_words: list[str] | None = None, now: Callable[[], datetime] = _now):
+                 *, breaking_words: list[str] | None = None, default_interval: int = 60,
+                 now: Callable[[], datetime] = _now):
         self.store = store
         self.fetcher = fetcher
         self.breaking_words = breaking_words or ["breaking"]
+        self.default_interval = max(60, int(default_interval))
         self.now = now
         self.state = store.load()
         if not isinstance(self.state, dict):
@@ -64,7 +66,7 @@ class FeedService:
     def _save(self) -> None:
         self.store.save(self.state)
 
-    def add_feed(self, url: str, name: str | None = None, interval: int = 60) -> str:
+    def add_feed(self, url: str, name: str | None = None, interval: int | None = None) -> str:
         url = url.strip()
         if not url.startswith(("https://", "http://")):
             raise ValueError("Feed URL must use HTTP or HTTPS")
@@ -72,7 +74,7 @@ class FeedService:
             raise ValueError("Feed already exists")
         feed_id = uuid4().hex
         self.state["feeds"].append({"id": feed_id, "url": url, "name": name or url,
-            "interval": max(60, int(interval)), "next_check": None, "etag": None,
+            "interval": max(60, int(interval if interval is not None else self.default_interval)), "next_check": None, "etag": None,
             "modified": None, "muted": False, "last_error": None, "last_success": None})
         self._save()
         return feed_id
