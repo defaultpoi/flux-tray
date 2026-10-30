@@ -519,3 +519,22 @@ def test_cannot_remove_media_source_while_its_episode_is_downloading(tmp_path):
     assert service.state["sources"][0]["id"] == source_id
     assert "active" in service.state["episodes"]
 
+def test_media_source_order_can_be_reset_to_driver_default(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/feed.xml", order="newest")
+    service.state["episodes"] = {
+        "first": {"id": "first", "source_id": source_id, "status": "queued",
+                  "source_order": 0, "episode": 1},
+        "second": {"id": "second", "source_id": source_id, "status": "queued",
+                   "source_order": 1, "episode": 2},
+    }
+    service.state["queue"] = ["second", "first"]
+
+    service.update_source(source_id, "rss", "https://example.test/feed.xml",
+                          "Feed", order=None)
+
+    assert service.state["sources"][0]["order"] is None
+    assert service.state["queue"] == ["first", "second"]
+
