@@ -41,6 +41,8 @@ class FeedPopup:
 
     def show(self):
         self.rebuild()
+        if self._visible:
+            return
         self._position()
         self.window.show_all()
         self._visible = True
