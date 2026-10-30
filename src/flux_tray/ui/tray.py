@@ -121,9 +121,9 @@ class TrayController:
                                           for entry in schedule)
                 if schedule_text:
                     label += " · " + schedule_text
-                item = Gtk.MenuItem.new_with_label(label[:110])
                 if channel.get("last_error"):
                     label += " · check failed"
+                item = Gtk.MenuItem.new_with_label(label[:110])
                 item.set_tooltip_text(title + (" (last check failed)" if channel.get("last_error") else ""))
                 submenu = Gtk.Menu()
                 play = Gtk.MenuItem.new_with_label("Play")
