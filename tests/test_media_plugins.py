@@ -33,3 +33,16 @@ def test_plugin_matcher_precedes_builtin_fallback(tmp_path):
     registry = MediaPluginRegistry(directory)
     registry.reload()
     assert registry.list_episodes("custom:feed")[0]["title"] == "custom:feed"
+def test_plugins_receive_bounded_helper_api(tmp_path):
+    directory = tmp_path / "plugins"
+    directory.mkdir()
+    (directory / "helpers.py").write_text(
+        "def list_episodes(source):\n"
+        "    return []\n"
+    , encoding="utf-8")
+    registry = MediaPluginRegistry(directory)
+    registry.reload()
+    plugin = registry.plugins[0]
+    assert callable(plugin.flux_tray_helpers.fetch_json)
+    assert callable(plugin.flux_tray_helpers.download_file)
+    assert callable(plugin.flux_tray_helpers.parse_season_episode)
