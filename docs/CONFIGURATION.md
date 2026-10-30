@@ -14,6 +14,8 @@ quality = best
 interval = 60
 ahead = 2
 path = ~/Videos
+screen_height =
+yt_dlp_sort =
 
 [weather]
 interval = 30
@@ -45,6 +47,8 @@ file_manager = ["thunar"]
 - `media.interval`: minutes; default 60, minimum 10.
 - `media.ahead`: number of episodes to keep queued for automatic sequential download; `0` disables automatic ahead downloads.
 - `media.path`: download directory.
+- `media.screen_height`: optional manual display-height override in pixels; empty uses the active X11 display detected by `xrandr`.
+- `media.yt_dlp_sort`: optional yt-dlp `-S` value. When set, it overrides automatic monitor-aware resolution selection.
 - `weather.interval`: minutes; default 30, minimum 5.
 - `weather.lat` and `weather.lon`: decimal coordinates. Weather is disabled until both are set.
 - `updates.interval`: hours; default 12.
