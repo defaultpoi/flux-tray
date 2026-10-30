@@ -9,8 +9,8 @@ from typing import Any
 
 
 _PATTERNS = (
-    re.compile(r"(?i)(?:^|\\b)S(\\d{1,3})\\s*E(\\d{1,4})(?:\\b|$)"),
-    re.compile(r"(?i)(?:^|\\b)(\\d{1,3})x(\\d{1,4})(?:\\b|$)"),
+    re.compile(r"(?i)(?:^|\b)S(\d{1,3})\s*E(\d{1,4})(?:\b|$)"),
+    re.compile(r"(?i)(?:^|\b)(\d{1,3})x(\d{1,4})(?:\b|$)"),
 )
 
 
@@ -24,9 +24,9 @@ def parse_season_episode(title: str) -> tuple[int, int] | None:
 
 def safe_filename(value: str, limit: int = 160) -> str:
     normalized = unicodedata.normalize("NFKC", value)
-    cleaned = "".join("_" if char in '/\\\\\\0' or ord(char) < 32 else char
+    cleaned = "".join("_" if char in {"/", "\\"} or ord(char) < 32 else char
                       for char in normalized).strip(" .")
-    cleaned = re.sub(r"\\s+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
     return (cleaned or "untitled")[:limit]
 
 
