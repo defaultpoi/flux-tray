@@ -82,7 +82,7 @@ class TrayController:
                 metadata = channel.get("metadata", {})
                 title = metadata.get("title") or channel["status"]
                 label = f"{channel['name']} — {title}"[:100]
-                self._append(label, lambda _item, url=channel["url"]: webbrowser.open(url))
+                self._append(label, lambda _item, current=channel: self._play_live_channel(current))
             self._append("Add live channel…", lambda _item: self._add_live_dialog())
         self.menu.append(Gtk.SeparatorMenuItem())
         if not self.feeds.state["feeds"]:
@@ -191,6 +191,18 @@ class TrayController:
                 error.destroy()
         dialog.destroy()
 
+    def _play_live_channel(self, channel):
+        future = self.tasks.submit("live-playback", self.live.play_channel, channel["id"])
+        if future is not None:
+            future.add_done_callback(lambda done: GLib.idle_add(self._live_play_complete, done, channel["url"]))
+
+    def _live_play_complete(self, future, fallback_url):
+        try:
+            future.result()
+        except Exception:
+            self.log.exception("Streamlink/mpv playback failed; opening browser fallback")
+            webbrowser.open(fallback_url)
+        return GLib.SOURCE_REMOVE
     def _live_tick(self):
         if self.live is None:
             return GLib.SOURCE_REMOVE
