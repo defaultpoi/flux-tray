@@ -87,5 +87,7 @@ def download_file(url: str, destination: Path, *, timeout: float = 30,
             raise RuntimeError("Download response ended before the expected byte count")
         if total is not None and downloaded != total:
             raise RuntimeError("Download ended before the expected total size")
+        if downloaded == 0:
+            raise RuntimeError("Download completed without receiving any data")
     os.replace(partial, destination)
     return str(destination)
