@@ -52,15 +52,17 @@ class CountdownTimer:
                              f"{self.step} and {self.maximum} seconds")
         mono, boot = self.monotonic(), self.boottime()
         self._recovered = False
-        self.state = {"status": "running", "duration": seconds,
-                      "monotonic_deadline": mono + seconds,
-                      "boottime_deadline": boot + seconds,
-                      "boot_id": self.boot_id()}
+        self.state.update({"status": "running", "duration": seconds,
+                           "monotonic_deadline": mono + seconds,
+                           "boottime_deadline": boot + seconds,
+                           "boot_id": self.boot_id()})
         self._save()
 
     def cancel(self) -> None:
         self._recovered = False
-        self.state = {"status": "idle"}
+        self.state["status"] = "idle"
+        for key in ("duration", "monotonic_deadline", "boottime_deadline", "boot_id"):
+            self.state.pop(key, None)
         self._save()
 
     def remaining(self) -> int:
