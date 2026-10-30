@@ -1,0 +1,161 @@
+"""Persistent media source catalog and bounded ahead-download queue state."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Callable
+from uuid import uuid4
+
+from flux_tray.core.storage import JsonStore
+from flux_tray.media.plugins import MediaPluginRegistry
+from flux_tray.media.sources import RssMediaAdapter, YtDlpAdapter
+
+
+class MediaService:
+    def __init__(self, store: JsonStore, plugin_dir: Path, *, ahead: int = 2,
+                 interval: int = 3600, yt_dlp: YtDlpAdapter | None = None,
+                 rss: RssMediaAdapter | None = None,
+                 now: Callable[[], datetime] | None = None):
+        self.store = store
+        self.plugins = MediaPluginRegistry(plugin_dir)
+        self.ahead = max(0, int(ahead))
+        self.interval = max(600, int(interval))
+        self.yt_dlp = yt_dlp or YtDlpAdapter()
+        self.rss = rss or RssMediaAdapter()
+        self.now = now or (lambda: datetime.now(timezone.utc))
+        self.state = store.load()
+        if not isinstance(self.state, dict):
+            self.state = {}
+        self.state.setdefault("sources", [])
+        self.state.setdefault("episodes", {})
+        self.state.setdefault("queue", [])
+        self.state.setdefault("watched", [])
+
+    def _save(self):
+        self.store.save(self.state)
+
+    def add_source(self, kind: str, url: str, name: str | None = None) -> str:
+        if kind not in {"youtube", "rss", "url", "plugin"}:
+            raise ValueError("Source kind must be youtube, rss, url or plugin")
+        if not url.strip():
+            raise ValueError("Source URL cannot be empty")
+        source_id = uuid4().hex
+        self.state["sources"].append({"id": source_id, "kind": kind, "url": url.strip(),
+            "name": name or url.strip(), "initialized": False, "next_check": None,
+            "last_error": None, "last_success": None})
+        self._save()
+        return source_id
+
+    def remove_source(self, source_id: str) -> None:
+        self.state["sources"] = [s for s in self.state["sources"] if s["id"] != source_id]
+        removed = {key for key, episode in self.state["episodes"].items()
+                   if episode.get("source_id") == source_id}
+        self.state["episodes"] = {key: value for key, value in self.state["episodes"].items()
+                                  if key not in removed}
+        self.state["queue"] = [key for key in self.state["queue"] if key not in removed]
+        self.state["watched"] = [key for key in self.state["watched"] if key not in removed]
+        self._save()
+
+    def _source(self, source_id: str) -> dict[str, Any]:
+        for source in self.state["sources"]:
+            if source["id"] == source_id:
+                return source
+        raise KeyError(source_id)
+
+    def _list_source(self, source: dict[str, Any]) -> list[dict[str, Any]]:
+        self.plugins.reload()
+        plugin_items = self.plugins.list_episodes(source["url"])
+        if plugin_items is not None:
+            return plugin_items
+        if source["kind"] == "rss":
+            return self.rss.list_episodes(source["url"], source["id"])
+        return self.yt_dlp.list_episodes(source["url"], source["id"])
+
+    def check_source(self, source_id: str, *, force: bool = False) -> int:
+        source = self._source(source_id)
+        now = self.now()
+        if not force and source.get("next_check"):
+            if datetime.fromisoformat(source["next_check"]) > now:
+                return 0
+        try:
+            listed = self._list_source(source)
+            first_check = not source.get("initialized")
+            added = 0
+            for episode in listed:
+                episode_id = episode["id"]
+                if episode_id in self.state["episodes"]:
+                    continue
+                episode["source_id"] = source_id
+                episode["status"] = "baseline" if first_check else "new"
+                episode["discovered_at"] = now.isoformat()
+                self.state["episodes"][episode_id] = episode
+                if not first_check:
+                    added += 1
+            source["initialized"] = True
+            source["last_error"] = None
+            source["last_success"] = now.isoformat()
+            source["next_check"] = (now + timedelta(seconds=self.interval)).isoformat()
+            if not first_check:
+                self._fill_queue(source_id)
+            self._save()
+            return added
+        except Exception as exc:
+            source["last_error"] = str(exc)
+            source["next_check"] = (now + timedelta(minutes=2)).isoformat()
+            self._save()
+            return 0
+
+    def _fill_queue(self, source_id: str) -> None:
+        if self.ahead <= 0:
+            return
+        queued = sum(1 for key in self.state["queue"]
+                     if self.state["episodes"].get(key, {}).get("source_id") == source_id)
+        capacity = self.ahead - queued
+        if capacity <= 0:
+            return
+        candidates = [episode for episode in self.state["episodes"].values()
+                      if episode.get("source_id") == source_id and episode.get("status") == "new"]
+        candidates.sort(key=lambda item: (item.get("date") or "", item.get("season") or 0,
+                                          item.get("episode") or 0))
+        for episode in candidates[:capacity]:
+            episode["status"] = "queued"
+            self.state["queue"].append(episode["id"])
+
+    def check_due(self) -> int:
+        added = 0
+        for source in list(self.state["sources"]):
+            added += self.check_source(source["id"])
+        return added
+
+    def queue_episode(self, episode_id: str) -> None:
+        episode = self.state["episodes"][episode_id]
+        if episode.get("status") in {"downloaded", "watched"}:
+            return
+        if episode_id not in self.state["queue"]:
+            self.state["queue"].append(episode_id)
+        episode["status"] = "queued"
+        self._save()
+
+    def next_queued(self) -> dict[str, Any] | None:
+        for episode_id in self.state["queue"]:
+            episode = self.state["episodes"].get(episode_id)
+            if episode and episode.get("status") == "queued":
+                return episode
+        return None
+
+    def mark_downloaded(self, episode_id: str, path: str) -> None:
+        episode = self.state["episodes"][episode_id]
+        episode["status"] = "downloaded"
+        episode["path"] = path
+        self.state["queue"] = [key for key in self.state["queue"] if key != episode_id]
+        self._fill_queue(episode["source_id"])
+        self._save()
+
+    def mark_watched(self, episode_id: str) -> None:
+        episode = self.state["episodes"][episode_id]
+        episode["status"] = "watched"
+        if episode_id not in self.state["watched"]:
+            self.state["watched"].append(episode_id)
+        self.state["queue"] = [key for key in self.state["queue"] if key != episode_id]
+        self._save()
