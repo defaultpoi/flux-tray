@@ -169,6 +169,22 @@ class TrayController:
             sources = self.media.state.get("sources", [])
             queue = self.media.state.get("queue", [])
             self._append(f"Media sources: {len(sources)} · queued: {len(queue)}", sensitive=False)
+            for source in sources:
+                source_label = source.get("name", source.get("url", "Media source"))
+                if source.get("last_error"):
+                    source_label += " · check failed"
+                parent_source = Gtk.MenuItem.new_with_label(source_label[:100])
+                source_menu = Gtk.Menu()
+                rename_source = Gtk.MenuItem.new_with_label("Rename…")
+                rename_source.connect("activate", lambda _widget, current=source:
+                                      self._rename_media_source_dialog(current))
+                remove_source = Gtk.MenuItem.new_with_label("Remove source…")
+                remove_source.connect("activate", lambda _widget, current=source:
+                                      self._remove_media_source_dialog(current))
+                source_menu.append(rename_source)
+                source_menu.append(remove_source)
+                parent_source.set_submenu(source_menu)
+                self.menu.append(parent_source)
             episodes = list(self.media.state.get("episodes", {}).values())
             episodes.sort(key=lambda item: item.get("discovered_at", ""), reverse=True)
             for episode in episodes[:8]:
