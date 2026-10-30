@@ -30,3 +30,13 @@ def test_shutdown_rejects_new_work():
         pass
     else:
         raise AssertionError("submit after shutdown must fail")
+
+def test_immediately_completed_tasks_release_duplicate_keys():
+    tasks = TaskManager(workers=2)
+    try:
+        for index in range(100):
+            future = tasks.submit(f"quick-{index}", lambda: True)
+            assert future is not None
+            assert future.result(timeout=2) is True
+    finally:
+        tasks.shutdown()
