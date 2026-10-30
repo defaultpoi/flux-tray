@@ -78,6 +78,8 @@ yt_dlp_sort =
 [weather]
 interval = 30
 alerts = false
+country = romania
+region =
 lat =
 lon =
 
