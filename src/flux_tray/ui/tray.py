@@ -8,7 +8,7 @@ import webbrowser
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import Gdk, Gio, GLib, Gtk
 
 
 class TrayController:
@@ -322,12 +322,23 @@ class TrayController:
             return self.feeds.check_due()
         future = self.tasks.submit("feed-refresh", work)
         if future is not None:
-            future.add_done_callback(lambda _future: GLib.idle_add(self._refresh_complete))
+            future.add_done_callback(lambda done: GLib.idle_add(self._refresh_complete, done))
 
-    def _refresh_complete(self):
+    def _refresh_complete(self, future):
+        try:
+            fresh = future.result()
+        except Exception:
+            self.log.exception("Feed refresh failed")
+            fresh = 0
         self._update_icon()
-        if self.menu.get_mapped():
+        if self.menu.get_mapped() or fresh:
             self._rebuild_menu(self.menu)
+        if fresh:
+            notification = Gio.Notification.new(f"{fresh} new feed items")
+            notification.set_body("New items are ready in Flux Tray.")
+            self.application.send_notification(None, notification)
+            if not self.menu.get_mapped():
+                self.menu.popup_at_pointer(None)
         return GLib.SOURCE_REMOVE
 
     def _periodic_refresh(self):
