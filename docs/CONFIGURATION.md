@@ -64,7 +64,7 @@ file_manager = ["thunar"]
 - `updates.installer`: `topgrade` (default) or `xbps`; if Topgrade is unavailable, Flux Tray falls back to XBPS directly.
 - `updates.topgrade_steps`: optional comma-separated Topgrade step names to run in addition to `system`. Use only step names accepted by your installed Topgrade version.
 - `timer.max`: maximum countdown in minutes.
-- `timer.step`: countdown step in seconds.
+- `timer.step`: countdown step in seconds.\n- Recurring alarms are managed from the tray menu, use local time and accept comma-separated weekdays (`Mon,Tue,Wed,Thu,Fri,Sat,Sun`), a 24-hour `HH:MM` time and a label. They are stored in `~/.local/share/flux-tray/timer.json`; they fire once per matching date and can be snoozed for five minutes or dismissed. These alarms do not depend on the countdown `max` or `step` settings.
 - `connectivity.interval`: seconds; default 10.
 - `connectivity.reset_command`: optional JSON argv array for a manual network-reset action. It is never run automatically; configure only a command you trust.
 
