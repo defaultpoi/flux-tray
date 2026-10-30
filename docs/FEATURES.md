@@ -9,7 +9,7 @@ GTK3 tray icon for XFCE/X11. Green = no unread feed items (show temperature if a
 
 - Unread feed rows: left-click opens and marks read; right-click marks read without opening. Hover text exposes the full title, author and categories.
 - Feed header context menu: mark all read, open all feed items as browser tabs, open the feed website or raw XML, and manage category/author mute and read-later rules.
-- Media source ordering: each source can use the driver's default order or explicitly choose oldest-first/newest-first. Recognize season/episode notation such as S01E05 and 1x05; otherwise use publication date and stable source order.
+- Media source ordering: each source can use the driver's default order or explicitly choose oldest-first/newest-first. Recognize season/episode notation such as S01E05 and 1x05; otherwise use publication date and stable source order. Flux stores the order on the source record and preserves the adapter's listing order by default.
 - Media presentation and files: show a compact per-source summary with next unwatched episode, download state/progress and failure reason; use predictable source/season/episode/title filenames and keep subtitles beside the video for mpv auto-loading.
 - HLS downloads: choose a screen-appropriate rendition, report progress from playlist duration, support cancellation and partial playback while downloading when the container permits it; reject live playlists as downloads. A failed subtitle must not fail the video.
 - Media plugins: expose small helpers for bounded JSON fetches, resumable downloads and season/episode parsing; plugin output and optional resolver/downloader results are validated before use.
