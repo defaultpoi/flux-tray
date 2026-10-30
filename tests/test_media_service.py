@@ -177,3 +177,26 @@ def test_download_failure_is_persisted_for_manual_retry(tmp_path):
     assert service.state["download"]["status"] == "failed"
     assert service.state["download"]["error"] == "network disconnected"
     assert service.next_queued() is not None
+
+
+
+def test_media_service_forwards_and_stores_download_progress(tmp_path):
+    class ProgressDownloader:
+        def download(self, episode, output_dir, **kwargs):
+            kwargs["progress_callback"]({"percent": 37.5, "downloaded_bytes": 375,
+                                         "total_bytes": 1000, "eta": 8})
+            return str(tmp_path / "episode.mkv")
+
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=1,
+                           yt_dlp=FakeYtDlp(), downloader=ProgressDownloader())
+    source_id = service.add_source("youtube", "https://youtube.com/playlist?list=x")
+    service.check_source(source_id)
+    service.check_source(source_id, force=True)
+    updates = []
+    service.download_next(progress_callback=updates.append)
+
+    assert updates[0]["percent"] == 37.5
+    assert service.state["download"]["percent"] == 100.0
+    assert service.state["download"]["status"] == "completed"
