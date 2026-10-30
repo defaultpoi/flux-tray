@@ -194,7 +194,7 @@ class TrayController:
             packages = []
             message = str(exc)
         else:
-            message = "\\n".join(packages) if packages else "No orphan packages found."
+            message = "\n".join(packages) if packages else "No orphan packages found."
         dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
             message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.CLOSE,
             text="Orphan packages")
