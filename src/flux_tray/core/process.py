@@ -94,8 +94,9 @@ class ProcessSupervisor:
         process.wait()
         with self._lock:
             self._processes.pop(process, None)
+
     def terminate_all(self) -> None:
-        """Prevent new work and terminate every child process group currently owned."""
+        """Prevent new work and terminate every unprotected child process group."""
         with self._lock:
             self._closed = True
             processes = tuple(process for process, protected in self._processes.items() if not protected)
@@ -108,10 +109,14 @@ class ProcessSupervisor:
             return
         try:
             os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        try:
             process.wait(timeout=2)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
