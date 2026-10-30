@@ -96,6 +96,11 @@ DEFAULT_CONFIG = """# Flux Tray configuration
 [feeds]
 interval = 60
 
+[popup]
+auto_open = true
+width = 440
+height = 620
+
 [live]
 interval = 15
 quality = best
