@@ -50,6 +50,7 @@ vod.m3u8
 seg.ts
 #EXT-X-ENDLIST
 """,
+        "/sub.vtt": "WEBVTT\\n\\n00:00:00.000 --> 00:00:01.000\\nPilot\\n",
     }
 
     class Handler(BaseHTTPRequestHandler):
@@ -82,12 +83,16 @@ seg.ts
 
         downloader = HlsDownloader(runner=runner)
         result = downloader.download(
-            {"url": url, "title": "Example Show S01E02 - Pilot"},
+            {"url": url, "title": "Example Show S01E02 - Pilot",
+             "subs": {"en": f"http://127.0.0.1:{server.server_port}/sub.vtt",
+                      "ro": f"http://127.0.0.1:{server.server_port}/missing.srt"}},
             tmp_path, source_name="Example Show", screen=(1366, 768),
             progress_callback=progress.append,
         )
         assert Path(result).name == "Example Show - S01E02 - Pilot.mkv"
         assert Path(result).read_bytes() == b"video"
+        assert Path(result).with_name("Example Show - S01E02 - Pilot.en.vtt").is_file()
+        assert not Path(result).with_name("Example Show - S01E02 - Pilot.ro.srt").exists()
         assert not Path(result + ".part").exists()
         assert calls[0][0][calls[0][0].index("-i") + 1].endswith("/vod.m3u8")
         assert progress[0]["percent"] == 50.0
