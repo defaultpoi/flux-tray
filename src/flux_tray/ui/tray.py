@@ -744,6 +744,8 @@ class TrayController:
     def _media_download_next(self):
         future = self.tasks.submit("media-download", self.media.download_next)
         if future is not None:
+            if self.menu.get_mapped():
+                self._rebuild_menu(self.menu)
             future.add_done_callback(lambda done: GLib.idle_add(self._media_download_complete, done))
 
     def _media_download_complete(self, future):
