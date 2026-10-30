@@ -198,7 +198,7 @@ segment.ts
             assert "non-empty media file" in str(exc)
         else:
             raise AssertionError("Empty HLS output was accepted")
-        assert not (tmp_path / "Empty video - Empty video.mkv").exists()
+        assert not (tmp_path / "Empty video.mkv").exists()
     finally:
         server.shutdown()
         thread.join(timeout=2)
