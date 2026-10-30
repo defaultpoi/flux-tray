@@ -362,3 +362,34 @@ def test_play_next_unwatched_respects_newest_episode_order(tmp_path):
     }
     service.play_episode = lambda episode_id: {"id": episode_id}
     assert service.play_next_unwatched(source_id)["id"] == "new"
+
+
+def test_play_episode_uses_large_hls_partial_and_playlist_duration(tmp_path):
+    class Player:
+        def __init__(self, partial):
+            self.partial = str(partial)
+            self.loaded = None
+        def load(self, path, title):
+            self.loaded = (path, title)
+        def get_property(self, name):
+            return {"time-pos": 95.0, "duration": 500.0, "path": self.partial}[name]
+
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    partial = tmp_path / "episode.mkv.part"
+    partial.write_bytes(b"x" * 1_500_000)
+    player = Player(partial)
+    service = MediaService(store, tmp_path / "plugins", player=player)
+    service.state["episodes"]["hls"] = {
+        "id": "hls", "title": "HLS episode", "url": "https://media.example.test/episode.m3u8",
+        "status": "queued", "source_id": "source",
+    }
+    service.state["download"] = {
+        "episode_id": "hls", "status": "downloading",
+        "part_path": str(partial), "duration": 100.0,
+    }
+
+    service.play_episode("hls")
+    assert player.loaded == (str(partial), "HLS episode")
+    assert service.update_playback_progress() is True
+    assert service.state["episodes"]["hls"]["status"] == "watched"
