@@ -59,6 +59,7 @@ class FeedService:
         self.state.setdefault("feeds", [])
         self.state.setdefault("items", {})
         self.state.setdefault("read_later", [])
+        self.state.setdefault("routing_rules", [])
 
     def _save(self) -> None:
         self.store.save(self.state)
@@ -94,6 +95,27 @@ class FeedService:
         self.state["feeds"] = [current[feed_id] for feed_id in ordered_ids]
         self._save()
 
+    def set_routing_rules(self, rules: list[dict[str, str]]) -> None:
+        validated = []
+        for rule in rules:
+            kind = rule.get("kind", "").strip().lower()
+            value = rule.get("value", "").strip()
+            if kind not in {"category", "author"} or not value:
+                raise ValueError("Routing rules require kind=category|author and a value")
+            validated.append({"kind": kind, "value": value})
+        self.state["routing_rules"] = validated
+        self._save()
+
+    def _matches_routing_rule(self, item: dict[str, Any]) -> bool:
+        author = _normal(item.get("author", ""))
+        categories = [_normal(value) for value in item.get("categories", [])]
+        for rule in self.state.get("routing_rules", []):
+            value = _normal(rule.get("value", ""))
+            if rule.get("kind") == "author" and value and value in author:
+                return True
+            if rule.get("kind") == "category" and value and any(value in category for category in categories):
+                return True
+        return False
     def set_breaking_words(self, words: list[str]) -> None:
         cleaned = list(dict.fromkeys(word.strip() for word in words if word.strip()))
         self.breaking_words = cleaned
@@ -191,6 +213,9 @@ class FeedService:
             self.state["items"][item_id] = item
             if not item["seen"]:
                 fresh += 1
+            if self._matches_routing_rule(item) and not feed.get("muted"):
+                item["read"] = item["seen"] = True
+                self.state["read_later"].append(item_id)
         unread = sorted((i for i in self.state["items"].values() if not i["read"]),
                         key=lambda i: i.get("published") or "")
         for item in unread[:-500]:
