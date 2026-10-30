@@ -39,15 +39,14 @@ class ProcessSupervisor:
             raise ValueError("argv must be a non-empty sequence of strings")
         if timeout <= 0:
             raise ValueError("timeout must be positive")
-        process = subprocess.Popen(
-            list(argv), cwd=cwd, env=dict(os.environ, **(env or {})),
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, start_new_session=True,
-        )
         with self._lock:
             if self._closed:
-                self._terminate(process)
                 raise ProcessError("process supervisor is shutting down")
+            process = subprocess.Popen(
+                list(argv), cwd=cwd, env=dict(os.environ, **(env or {})),
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, start_new_session=True,
+            )
             self._processes[process] = shutdown_protected
         deadline = time.monotonic() + timeout
         try:
@@ -77,15 +76,14 @@ class ProcessSupervisor:
               shutdown_protected: bool = False) -> subprocess.Popen:
         if not argv or not all(isinstance(part, str) for part in argv):
             raise ValueError("argv must be a non-empty sequence of strings")
-        process = subprocess.Popen(
-            list(argv), cwd=cwd, env=dict(os.environ, **(env or {})),
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
         with self._lock:
             if self._closed:
-                self._terminate(process)
                 raise ProcessError("process supervisor is shutting down")
+            process = subprocess.Popen(
+                list(argv), cwd=cwd, env=dict(os.environ, **(env or {})),
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
             self._processes[process] = shutdown_protected
         Thread(target=self._reap, args=(process,), daemon=True).start()
         return process
