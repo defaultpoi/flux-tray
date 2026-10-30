@@ -31,3 +31,44 @@ def test_cancellation_terminates_process():
             [sys.executable, "-c", "import time; time.sleep(5)"],
             timeout=3, cancelled=cancelled,
         )
+
+def test_shutdown_terminates_unprotected_children():
+    supervisor = ProcessSupervisor()
+    completed = threading.Event()
+
+    def work():
+        try:
+            supervisor.run([sys.executable, "-c", "import time; time.sleep(10)"], timeout=20)
+        except ProcessError:
+            completed.set()
+
+    worker = threading.Thread(target=work)
+    worker.start()
+    deadline = time.monotonic() + 2
+    while not supervisor._processes and time.monotonic() < deadline:
+        time.sleep(0.01)
+    supervisor.terminate_all()
+    worker.join(timeout=3)
+    assert completed.is_set()
+    assert not worker.is_alive()
+
+
+def test_shutdown_leaves_protected_transaction_running():
+    supervisor = ProcessSupervisor()
+    completed = threading.Event()
+
+    def work():
+        result = supervisor.run([sys.executable, "-c", "import time; time.sleep(0.2)"],
+                                timeout=3, shutdown_protected=True)
+        completed.set()
+        assert result.returncode == 0
+
+    worker = threading.Thread(target=work)
+    worker.start()
+    deadline = time.monotonic() + 2
+    while not supervisor._processes and time.monotonic() < deadline:
+        time.sleep(0.01)
+    supervisor.terminate_all()
+    worker.join(timeout=3)
+    assert completed.is_set()
+    assert not worker.is_alive()
