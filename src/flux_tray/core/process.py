@@ -105,8 +105,6 @@ class ProcessSupervisor:
 
     @staticmethod
     def _terminate(process: subprocess.Popen) -> None:
-        if process.poll() is not None:
-            return
         try:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
