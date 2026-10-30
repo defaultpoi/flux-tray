@@ -123,3 +123,15 @@ def test_configured_default_feed_interval_is_used(tmp_path):
     feed_id = service.add_feed("https://example.test/rss")
     feed = next(feed for feed in service.state["feeds"] if feed["id"] == feed_id)
     assert feed["interval"] == 180
+
+
+def test_breaking_item_notification_is_consumed_once(tmp_path):
+    body = "<rss><channel><item><guid>x</guid><title>Breaking: Alert</title></item></channel></rss>".encode("utf-8")
+    service = make_service(tmp_path, body)
+    feed_id = service.add_feed("https://example.test/rss")
+    service.check_feed(feed_id)
+
+    pending = service.take_unnotified_breaking_items()
+    assert len(pending) == 1
+    assert pending[0]["breaking_notified"] is True
+    assert service.take_unnotified_breaking_items() == []
