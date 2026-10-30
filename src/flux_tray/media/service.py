@@ -182,9 +182,12 @@ class MediaService:
         episode = self.state["episodes"].get(self.current_episode_id)
         if episode is None or not episode.get("path"):
             return False
-        position = self.player.get_property("time-pos")
-        duration = self.player.get_property("duration")
-        current_path = self.player.get_property("path")
+        try:
+            position = self.player.get_property("time-pos")
+            duration = self.player.get_property("duration")
+            current_path = self.player.get_property("path")
+        except OSError:
+            return False
         if current_path != episode["path"] or not isinstance(position, (int, float)) or not isinstance(duration, (int, float)) or duration <= 0:
             return False
         fraction = position / duration
