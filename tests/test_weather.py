@@ -58,3 +58,20 @@ def test_weather_alert_failure_does_not_discard_forecast(tmp_path):
     assert state["temperature"] == 10
     assert state["alerts"] == []
     assert state["alerts_error"] == "feed unavailable"
+
+
+def test_weather_geocodes_place_once_and_caches_coordinates(tmp_path):
+    store = JsonStore(tmp_path / "weather.json", dict)
+    calls = []
+    class Geocoder:
+        def lookup(self, location):
+            calls.append(location)
+            return 45.25, 26.67
+    fetcher = lambda _url: {"current": {"temperature_2m": 12}, "daily": {}}
+    first = WeatherService(store, location="Buzau, Romania", geocoder=Geocoder(), fetcher=fetcher)
+    assert first.refresh()["latitude"] == 45.25
+    second = WeatherService(store, location="Buzau, Romania",
+                            geocoder=type("NoLookup", (), {"lookup": lambda *_: (_ for _ in ()).throw(AssertionError("geocoded twice"))})(),
+                            fetcher=fetcher)
+    assert second.refresh(force=True)["longitude"] == 26.67
+    assert calls == ["Buzau, Romania"]
