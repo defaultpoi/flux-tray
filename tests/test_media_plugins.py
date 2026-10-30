@@ -131,3 +131,20 @@ def test_plugin_download_rejects_empty_file(tmp_path):
     else:
         raise AssertionError("Empty plugin download was accepted")
 
+def test_plugin_download_accepts_path_relative_to_output_directory(tmp_path):
+    directory = tmp_path / "plugins"
+    directory.mkdir()
+    (directory / "downloader.py").write_text(
+        "NAME = 'downloader'\\n"
+        "def list_episodes(source):\\n"
+        "    return []\\n"
+        "def download(episode, base, progress, cancelled):\\n"
+        "    (base / 'episode.mkv').write_bytes(b'video')\\n"
+        "    return 'episode.mkv'\\n",
+        encoding="utf-8",
+    )
+    registry = MediaPluginRegistry(directory)
+    registry.reload()
+    result = registry.download_episode("plugin:downloader:source", {}, tmp_path)
+    assert result == str(tmp_path / "episode.mkv")
+
