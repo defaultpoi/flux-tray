@@ -88,7 +88,7 @@ class TrayController:
                 weather_text = condition
             self._append(weather_text, sensitive=False)
             for day in weather.get("forecast", []):
-                label = f"{day.get('date')}: {day.get('condition')} · H {day.get('high')}° L {day.get('low')}°"
+                label = f"{day.get('date')}: {day.get('condition')} · H {day.get('high')}° L {day.get('low')}° · rain {day.get('rain_probability')}%"
                 self._append(label, sensitive=False)
         if self.live is not None:
             channels = self.live.state.get("channels", [])
