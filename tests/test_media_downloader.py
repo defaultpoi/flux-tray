@@ -1,5 +1,16 @@
+from pathlib import Path
+
 from flux_tray.core.process import ProcessResult
 from flux_tray.media.downloader import MediaDownloader
+
+
+def _create_download(argv):
+    output_dir = Path(argv[argv.index('-P') + 1])
+    template = argv[argv.index('-o') + 1]
+    path = output_dir / template.replace('%(ext)s', 'mkv')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'version')
+    return path
 
 
 def test_download_uses_resume_subtitles_and_safe_output_name(tmp_path):
@@ -7,12 +18,14 @@ def test_download_uses_resume_subtitles_and_safe_output_name(tmp_path):
 
     def runner(argv, **kwargs):
         calls.append((argv, kwargs))
-        return ProcessResult(tuple(argv), 0, "/tmp/Episode.mkv\n", "")
+        path = _create_download(argv)
+        return ProcessResult(tuple(argv), 0, f"{path}\n", "")
 
     downloader = MediaDownloader(runner=runner)
     path = downloader.download({"url": "https://example.test/video",
                                 "title": "../Episode S01E01"}, tmp_path)
-    assert path == "/tmp/Episode.mkv"
+    assert Path(path).is_file()
+    assert Path(path).parent == tmp_path.resolve()
     argv = calls[0][0]
     assert "--continue" in argv
     assert "--write-subs" in argv
@@ -35,7 +48,8 @@ def test_download_passes_resolution_sort_override(tmp_path):
     calls = []
     def runner(argv, **kwargs):
         calls.append(argv)
-        return ProcessResult(tuple(argv), 0, "/tmp/video.mkv\n", "")
+        path = _create_download(argv)
+        return ProcessResult(tuple(argv), 0, f"{path}\n", "")
     downloader = MediaDownloader(runner=runner)
     downloader.download({"url": "https://example.test/video", "title": "Video"},
                         tmp_path, format_sort="res:653")
@@ -76,7 +90,8 @@ def test_download_uses_source_directory_and_episode_filename(tmp_path):
 
     def runner(argv, **kwargs):
         calls.append(argv)
-        return ProcessResult(tuple(argv), 0, "/tmp/video.mkv\\n", "")
+        path = _create_download(argv)
+        return ProcessResult(tuple(argv), 0, f"{path}\\n", "")
 
     downloader = MediaDownloader(runner=runner)
     downloader.download(
@@ -88,3 +103,33 @@ def test_download_uses_source_directory_and_episode_filename(tmp_path):
     assert argv[argv.index("-o") + 1] == (
         "Example Show - S01E02 - Pilot.%(ext)s"
     )
+
+def test_download_rejects_reported_path_outside_output_directory(tmp_path):
+    outside = tmp_path.parent / "outside-media.mkv"
+    outside.write_bytes(b"video")
+
+    def runner(argv, **kwargs):
+        return ProcessResult(tuple(argv), 0, f"{outside}\\n", "")
+
+    downloader = MediaDownloader(runner=runner)
+    try:
+        downloader.download({"url": "https://example.test/video", "title": "Video"},
+                            tmp_path)
+    except RuntimeError as exc:
+        assert "outside the configured media directory" in str(exc)
+    else:
+        raise AssertionError("download path outside output directory was accepted")
+
+
+def test_download_rejects_missing_reported_file(tmp_path):
+    def runner(argv, **kwargs):
+        return ProcessResult(tuple(argv), 0, f"{tmp_path / 'missing.mkv'}\\n", "")
+
+    downloader = MediaDownloader(runner=runner)
+    try:
+        downloader.download({"url": "https://example.test/video", "title": "Video"},
+                            tmp_path)
+    except RuntimeError as exc:
+        assert "does not exist" in str(exc)
+    else:
+        raise AssertionError("missing downloaded file was accepted")
