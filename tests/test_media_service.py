@@ -210,3 +210,67 @@ def test_interrupted_download_is_recovered_on_service_restart(tmp_path):
     service = MediaService(store, tmp_path / "plugins")
     assert service.state["download"]["status"] == "failed"
     assert "interrupted" in service.state["download"]["error"]
+
+
+def test_default_media_order_preserves_driver_listing(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=3)
+    source_id = service.add_source("rss", "https://example.test/feed.xml")
+    service.state["episodes"] = {
+        "later": {"id": "later", "source_id": source_id, "status": "new", "source_order": 0},
+        "earlier": {"id": "earlier", "source_id": source_id, "status": "new", "source_order": 1},
+    }
+    service._fill_queue(source_id)
+    assert service.state["queue"] == ["later", "earlier"]
+
+
+def test_media_source_oldest_order_uses_episode_numbers(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=3)
+    source_id = service.add_source("rss", "https://example.test/feed.xml", order="oldest")
+    service.state["episodes"] = {
+        "ep3": {"id": "ep3", "source_id": source_id, "status": "new",
+                "season": 1, "episode": 3, "source_order": 0},
+        "ep1": {"id": "ep1", "source_id": source_id, "status": "new",
+                "season": 1, "episode": 1, "source_order": 1},
+        "ep2": {"id": "ep2", "source_id": source_id, "status": "new",
+                "season": 1, "episode": 2, "source_order": 2},
+    }
+    service._fill_queue(source_id)
+    assert service.state["queue"] == ["ep1", "ep2", "ep3"]
+
+
+def test_media_source_newest_order_uses_dates_when_numbers_missing(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=3)
+    source_id = service.add_source("rss", "https://example.test/feed.xml", order="newest")
+    service.state["episodes"] = {
+        "old": {"id": "old", "source_id": source_id, "status": "new",
+                "date": "2026-01-01", "source_order": 0},
+        "new": {"id": "new", "source_id": source_id, "status": "new",
+                "date": "2026-03-01", "source_order": 1},
+        "middle": {"id": "middle", "source_id": source_id, "status": "new",
+                   "date": "2026-02-01", "source_order": 2},
+    }
+    service._fill_queue(source_id)
+    assert service.state["queue"] == ["new", "middle", "old"]
+
+
+def test_media_source_order_can_be_updated_and_invalid_values_rejected(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/feed.xml")
+    service.update_source(source_id, "rss", "https://example.test/feed.xml", "Feed",
+                          order="newest")
+    assert service.state["sources"][0]["order"] == "newest"
+    try:
+        service.update_source(source_id, "rss", "https://example.test/feed.xml", "Feed",
+                              order="random")
+    except ValueError as exc:
+        assert "oldest or newest" in str(exc)
+    else:
+        raise AssertionError("Invalid source order was accepted")
