@@ -96,6 +96,8 @@ class MediaPluginRegistry:
         if result is None:
             return None
         path = Path(str(result)).expanduser()
+        if not path.is_absolute():
+            path = Path(base).expanduser() / path
         try:
             completed_path = path.resolve(strict=True)
             completed_path.relative_to(Path(base).expanduser().resolve())
