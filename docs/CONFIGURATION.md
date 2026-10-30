@@ -22,6 +22,7 @@ interval = 30
 alerts = false
 country = romania
 region =
+location =
 lat =
 lon =
 
@@ -52,7 +53,8 @@ file_manager = ["thunar"]
 - `media.screen_height`: optional manual display-height override in pixels; empty uses the active X11 display detected by `xrandr`.
 - `media.yt_dlp_sort`: optional yt-dlp `-S` value. When set, it overrides automatic monitor-aware resolution selection.
 - `weather.interval`: minutes; default 30, minimum 5.
-- `weather.lat` and `weather.lon`: decimal coordinates. Weather is disabled until both are set.
+- `weather.lat` and `weather.lon`: decimal coordinates. Set both, or leave both empty and configure `weather.location`.
+- `weather.location`: optional place name (for example `Buzau, Romania`); if coordinates are absent, Nominatim resolves it once and the coordinates are cached in weather state.
 - `weather.alerts`: enable optional MeteoAlarm warnings.
 - `weather.country`: MeteoAlarm country-feed slug (default `romania`).
 - `weather.region`: required region/county text used to filter active warnings, accent-insensitively. Example: `Buzau`.
