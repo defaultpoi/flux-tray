@@ -23,13 +23,14 @@ class TrayController:
         self.icon.connect("activate", self._on_activate)
         self.icon.connect("popup-menu", self._on_popup)
         self.menu = Gtk.Menu()
-        self.menu.connect("show", self._rebuild_menu)
         GLib.timeout_add_seconds(60, self._periodic_refresh)
 
     def _on_activate(self, _icon):
+        self._rebuild_menu(self.menu)
         self.menu.popup_at_pointer(None)
 
     def _on_popup(self, _icon, button, activate_time):
+        self._rebuild_menu(self.menu)
         self.menu.popup(None, None, Gtk.StatusIcon.position_menu, self.icon,
                         button, activate_time)
 
