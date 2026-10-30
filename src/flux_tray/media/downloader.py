@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from threading import Event
 from typing import Callable
 
@@ -20,7 +21,8 @@ class MediaDownloader:
     def download(self, episode: dict, output_dir: Path, *,
                  subtitle_languages: tuple[str, ...] = ("en",),
                  format_sort: str | None = None,
-                 cancelled: Event | None = None) -> str:
+                 cancelled: Event | None = None,
+                 progress_callback: Callable[[dict], None] | None = None) -> str:
         url = episode.get("url")
         if not url or not str(url).startswith(("http://", "https://")):
             raise ValueError("Episode has no playable HTTP(S) URL")
@@ -35,16 +37,48 @@ class MediaDownloader:
         title = safe_filename(str(episode.get("title") or "untitled"))
         argv = [
             "yt-dlp", "--continue", "--no-overwrites", "--no-playlist",
-            "--no-progress", "--no-warnings", "--write-subs", "--write-auto-subs",
+            "--no-warnings", "--write-subs", "--write-auto-subs",
             "--sub-format", "best", "--print", "after_move:filepath",
             "-P", str(output_dir), "-o", f"{title}.%(ext)s",
         ]
+        if progress_callback is None:
+            argv.append("--no-progress")
+        else:
+            argv.extend([
+                "--newline", "--progress-delta", "1", "--progress-template",
+                "download:%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.eta)s",
+            ])
         if subtitle_languages:
             argv.extend(["--sub-langs", ",".join(subtitle_languages)])
         if format_sort:
             argv.extend(["-S", format_sort])
         argv.append(str(url))
-        result = self.runner(argv, timeout=self.timeout, cancelled=cancelled)
+
+        def on_output(_channel: str, line: str) -> None:
+            if progress_callback is None or not line.startswith("download:"):
+                return
+            parts = line.strip().split("|")
+            if len(parts) < 4:
+                return
+
+            def number(value):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+
+            downloaded = number(parts[0].removeprefix("download:").strip())
+            total = number(parts[1].strip()) or number(parts[2].strip())
+            eta = number(parts[3].strip())
+            percent = (min(100.0, downloaded * 100.0 / total)
+                       if downloaded is not None and total else None)
+            progress_callback({"downloaded_bytes": downloaded, "total_bytes": total,
+                               "eta": eta, "percent": percent})
+
+        kwargs = {"timeout": self.timeout, "cancelled": cancelled}
+        if progress_callback is not None:
+            kwargs["output_callback"] = on_output
+        result = self.runner(argv, **kwargs)
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "Media download failed")
         paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
