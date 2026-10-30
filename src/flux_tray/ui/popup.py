@@ -199,7 +199,7 @@ class FeedPopup:
         add("Open all unread items", lambda *_: self._open_feed_items(unread),
             any(self._valid_web_url(item.get("link", "")) for item in unread))
         menu.append(Gtk.SeparatorMenuItem())
-        website = feed.get("site_url") or feed.get("url", "")
+        website = feed.get("site_url") or ""
         add("Open feed website", lambda *_: webbrowser.open(website),
             self._valid_web_url(website))
         feed_url = feed.get("url", "")
