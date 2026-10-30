@@ -63,7 +63,12 @@ class FluxTrayApplication(Gtk.Application):
         connectivity_store = JsonStore(self.paths.data_dir / "connectivity.json", dict)
         connectivity = ConnectivityService(connectivity_store)
         update_store = JsonStore(self.paths.data_dir / "updates.json", dict)
-        updates = UpdateService(update_store, process=self.process)
+        topgrade_steps = tuple(step.strip() for step in (config.get("updates", "topgrade_steps", "") or "").split(",") if step.strip())
+        updates = UpdateService(
+            update_store, process=self.process,
+            installer=config.get("updates", "installer", "topgrade") or "topgrade",
+            topgrade_steps=topgrade_steps,
+        )
         weather = None
         latitude = config.get("weather", "lat", "") or ""
         longitude = config.get("weather", "lon", "") or ""
