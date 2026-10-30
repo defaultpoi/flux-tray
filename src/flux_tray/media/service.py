@@ -153,13 +153,21 @@ class MediaService:
                 return episode
         return None
 
+    def _download_episode(self, episode: dict[str, Any], cancelled=None) -> str:
+        source = self._source(episode["source_id"])
+        resolved = self.plugins.resolve_episode(source["url"], episode)
+        plugin_path = self.plugins.download_episode(source["url"], resolved,
+                                                     self.output_dir, lambda *_args: None, cancelled)
+        if plugin_path is not None:
+            return plugin_path
+        return self.downloader.download(resolved, self.output_dir, cancelled=cancelled)
     def play_episode(self, episode_id: str) -> dict[str, Any]:
         if self.player is None:
             raise RuntimeError("Shared mpv player is not configured")
         episode = self.state["episodes"][episode_id]
         path = episode.get("path")
         if not path or not Path(path).is_file():
-            path = self.downloader.download(episode, self.output_dir)
+            path = self._download_episode(episode)
             self.mark_downloaded(episode_id, path)
         self.player.load(path, episode.get("title", "Flux Tray"))
         self.current_episode_id = episode_id
@@ -201,7 +209,7 @@ class MediaService:
         if episode is None:
             return None
         try:
-            path = self.downloader.download(episode, self.output_dir, cancelled=cancelled)
+            path = self._download_episode(episode, cancelled=cancelled)
         except Exception as exc:
             episode["download_error"] = str(exc)
             episode["last_attempt"] = self.now().isoformat()
