@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import webbrowser
+from html import escape
 from urllib.parse import urlsplit
 
 import gi
@@ -118,7 +119,7 @@ class FeedPopup:
 
     def _append_feed_title(self, listing, feed, count):
         title = Gtk.Label()
-        escaped = GLib_MARKUP_ESCAPE(feed.get("name") or feed.get("url") or "Feed")
+        escaped = escape(str(feed.get("name") or feed.get("url") or "Feed"), quote=True)
         title.set_markup(
             f"<b>{escaped}</b> <span foreground='#888888'>{count}</span>"
         )
@@ -137,13 +138,20 @@ class FeedPopup:
         clickable.set_visible_window(False)
         clickable.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
         clickable.connect("button-press-event", self._on_item_click, item)
-        clickable.set_tooltip_text(title)
+        details = [title]
+        if item.get("author"):
+            details.append(f"By {item['author']}")
+        categories = item.get("categories") or []
+        if categories:
+            details.append("Categories: " + ", ".join(str(value) for value in categories))
+        tooltip = "\n".join(details)
+        clickable.set_tooltip_text(tooltip)
 
         label = Gtk.Label(label=title)
         label.set_xalign(0)
         label.set_single_line_mode(True)
         label.set_ellipsize(Pango.EllipsizeMode.END)
-        label.set_tooltip_text(title)
+        label.set_tooltip_text(tooltip)
         label.set_hexpand(True)
         clickable.add(label)
         row.pack_start(clickable, True, True, 0)
@@ -193,7 +201,3 @@ class FeedPopup:
         if not self.feeds.unread_items():
             self.hide()
 
-
-def GLib_MARKUP_ESCAPE(value):
-    from html import escape
-    return escape(str(value), quote=True)
