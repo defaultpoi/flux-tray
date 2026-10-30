@@ -86,6 +86,13 @@ class TrayController:
             self._append("Start timer…", lambda _item: self._timer_dialog())
             if status in {"running", "missed", "ringing"}:
                 self._append("Cancel timer", lambda _item: self._cancel_timer())
+        if self.updates is not None:
+            changes = self.updates.state.get("changes", [])
+            self._append(f"XBPS updates: {len(changes)}", sensitive=False)
+            self._append("Check for updates", lambda _item: self._scan_updates())
+            if changes:
+                self._append("Apply system updates…", lambda _item: self._confirm_updates())
+            self._append("List orphan packages…", lambda _item: self._list_orphans())
         self._append("Refresh feeds", lambda _item: self.refresh())
         self._append("Quit", lambda _item: self.application.quit())
         self.menu.show_all()
