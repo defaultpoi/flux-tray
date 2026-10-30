@@ -61,6 +61,10 @@ class ProcessSupervisor:
                     raise ProcessError(f"command timed out after {timeout:g}s: {argv[0]}")
                 try:
                     stdout, stderr = process.communicate(timeout=min(0.1, remaining))
+                    with self._lock:
+                        shutting_down = self._closed and not shutdown_protected
+                    if shutting_down:
+                        raise ProcessError(f"command terminated during shutdown: {argv[0]}")
                     return ProcessResult(tuple(argv), process.returncode, stdout, stderr)
                 except subprocess.TimeoutExpired:
                     continue
