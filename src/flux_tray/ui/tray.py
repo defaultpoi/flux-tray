@@ -132,6 +132,31 @@ class TrayController:
                 error.destroy()
         dialog.destroy()
 
+    def _connectivity_tick(self):
+        if self.connectivity is None:
+            return GLib.SOURCE_REMOVE
+        future = self.tasks.submit("connectivity-check", self._check_connectivity)
+        if future is not None:
+            future.add_done_callback(lambda done: GLib.idle_add(self._connectivity_complete, done))
+        return GLib.SOURCE_CONTINUE
+
+    def _check_connectivity(self):
+        previous = self.connectivity.state.get("status")
+        current = self.connectivity.check()
+        return previous, current.status
+
+    def _connectivity_complete(self, future):
+        try:
+            previous, current = future.result()
+        except Exception:
+            self.log.exception("Connectivity check failed")
+            return GLib.SOURCE_REMOVE
+        if previous in {"offline", "dns-error"} and current == "online":
+            self.refresh()
+        if self.menu.get_mapped():
+            self._rebuild_menu(self.menu)
+        self._update_icon()
+        return GLib.SOURCE_REMOVE
     def _timer_dialog(self):
         dialog = Gtk.Dialog(title="Countdown timer", flags=Gtk.DialogFlags.MODAL)
         dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
