@@ -37,5 +37,5 @@ class LauncherService:
     def launch(self, name: str) -> subprocess.Popen:
         for command in self.commands():
             if command.name == name:
-                return self.process.spawn(command.argv)
+                return self.process.spawn(command.argv, shutdown_protected=True)
         raise KeyError(name)
