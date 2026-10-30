@@ -69,3 +69,22 @@ def test_download_reports_progress_callback(tmp_path):
     assert progress[-1]["downloaded_bytes"] == 500.0
     assert progress[-1]["total_bytes"] == 1000.0
     assert progress[-1]["eta"] == 10.0
+
+
+def test_download_uses_source_directory_and_episode_filename(tmp_path):
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append(argv)
+        return ProcessResult(tuple(argv), 0, "/tmp/video.mkv\\n", "")
+
+    downloader = MediaDownloader(runner=runner)
+    downloader.download(
+        {"url": "https://example.test/video", "title": "Example Show S01E02 - Pilot"},
+        tmp_path, source_name="Example Show",
+    )
+    argv = calls[0]
+    assert argv[argv.index("-P") + 1] == str(tmp_path)
+    assert argv[argv.index("-o") + 1] == (
+        "Example Show - S01E02 - Pilot.%(ext)s"
+    )
