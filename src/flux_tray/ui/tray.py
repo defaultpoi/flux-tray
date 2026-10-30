@@ -220,6 +220,101 @@ class TrayController:
             self.log.exception("Streamlink/mpv playback failed; opening browser fallback")
             webbrowser.open(fallback_url)
         return GLib.SOURCE_REMOVE
+    def _media_tick(self):
+        if self.media is None:
+            return GLib.SOURCE_REMOVE
+        future = self.tasks.submit("media-check", self.media.check_due)
+        if future is not None:
+            future.add_done_callback(lambda done: GLib.idle_add(self._media_check_complete, done))
+        return GLib.SOURCE_CONTINUE
+
+    def _media_check_complete(self, future):
+        try:
+            added = future.result()
+        except Exception:
+            self.log.exception("Media source check failed")
+            added = 0
+        if added:
+            notification = Gio.Notification.new(f"{added} new media episode(s)")
+            notification.set_body("New episodes are available in Flux Tray.")
+            self.application.send_notification(None, notification)
+            if not self.menu.get_mapped():
+                self._rebuild_menu(self.menu)
+                self.menu.popup_at_pointer(None)
+        elif self.menu.get_mapped():
+            self._rebuild_menu(self.menu)
+        return GLib.SOURCE_REMOVE
+
+    def _media_download_next(self):
+        future = self.tasks.submit("media-download", self.media.download_next)
+        if future is not None:
+            future.add_done_callback(lambda done: GLib.idle_add(self._media_download_complete, done))
+
+    def _media_download_complete(self, future):
+        try:
+            episode = future.result()
+            if episode:
+                self.log.info("Downloaded media episode: %s", episode.get("title"))
+        except Exception:
+            self.log.exception("Media download failed")
+        if self.menu.get_mapped():
+            self._rebuild_menu(self.menu)
+        return GLib.SOURCE_REMOVE
+
+    def _media_play_next(self):
+        future = self.tasks.submit("media-playback", self.media.play_next_unwatched)
+        if future is not None:
+            future.add_done_callback(lambda done: GLib.idle_add(self._media_play_complete, done, None))
+
+    def _play_media_episode(self, episode):
+        future = self.tasks.submit("media-playback", self.media.play_episode, episode["id"])
+        if future is not None:
+            future.add_done_callback(lambda done: GLib.idle_add(
+                self._media_play_complete, done, episode.get("url")))
+
+    def _media_play_complete(self, future, fallback_url):
+        try:
+            future.result()
+        except Exception:
+            self.log.exception("Media playback failed")
+            if fallback_url:
+                webbrowser.open(fallback_url)
+        return GLib.SOURCE_REMOVE
+
+    def _add_media_dialog(self):
+        dialog = Gtk.Dialog(title="Add media source", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Add", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        kind = Gtk.ComboBoxText()
+        for label in ("YouTube", "RSS/Atom", "URL (yt-dlp)", "Plugin"):
+            kind.append_text(label)
+        kind.set_active(0)
+        name = Gtk.Entry()
+        name.set_placeholder_text("Source name (optional)")
+        url = Gtk.Entry()
+        url.set_placeholder_text("Channel, playlist, feed or URL")
+        box.pack_start(kind, False, False, 0)
+        box.pack_start(name, False, False, 0)
+        box.pack_start(url, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            selected = (kind.get_active_text() or "YouTube").lower()
+            source_kind = {"youtube": "youtube", "rss/atom": "rss",
+                           "url (yt-dlp)": "url", "plugin": "plugin"}[selected]
+            try:
+                self.media.add_source(source_kind, url.get_text(), name.get_text().strip() or None)
+                self._media_tick()
+            except ValueError as exc:
+                self.log.warning("Could not add media source: %s", exc)
+        dialog.destroy()
+
     def _live_tick(self):
         if self.live is None:
             return GLib.SOURCE_REMOVE
