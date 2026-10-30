@@ -8,8 +8,8 @@ from typing import Callable
 from flux_tray.core.process import ProcessResult, ProcessSupervisor
 
 
-_CONNECTED = re.compile(r"^\\S+ connected(?: (primary))?\\s+(.*)$")
-_MODE = re.compile(r"(?<!\\d)(\\d{3,5})x(\\d{3,5})(?:[+-]\\d+[+-]\\d+)?")
+_CONNECTED = re.compile(r"^\S+ connected(?: (primary))?\s+(.*)$")
+_MODE = re.compile(r"(?<!\d)(\d{3,5})x(\d{3,5})(?:[+-]\d+[+-]\d+)?")
 
 
 class XrandrDisplay:
