@@ -116,3 +116,10 @@ def test_muting_removes_existing_read_later_items(tmp_path):
     service.save_for_later(item_id)
     service.set_muted(fid, True)
     assert item_id not in service.state["read_later"]
+
+def test_configured_default_feed_interval_is_used(tmp_path):
+    store = JsonStore(tmp_path / "f.json", lambda: {"feeds": [], "items": {}, "read_later": []})
+    service = FeedService(store, default_interval=180)
+    feed_id = service.add_feed("https://example.test/rss")
+    feed = next(feed for feed in service.state["feeds"] if feed["id"] == feed_id)
+    assert feed["interval"] == 180
