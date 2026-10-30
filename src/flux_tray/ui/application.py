@@ -21,6 +21,7 @@ from flux_tray.timers.service import CountdownTimer
 from flux_tray.connectivity.service import ConnectivityService
 from flux_tray.updates.service import UpdateService
 from flux_tray.weather.service import WeatherService
+from flux_tray.weather.alerts import MeteoAlarmClient
 from flux_tray.live.service import LiveService, StreamlinkProbe
 from flux_tray.live.twitch import TwitchProbe
 from flux_tray.media.player import MpvController
@@ -68,9 +69,20 @@ class FluxTrayApplication(Gtk.Application):
         if latitude.strip() and longitude.strip():
             try:
                 weather_store = JsonStore(self.paths.data_dir / "weather.json", dict)
+                alerts_client = None
+                if config.get_bool("weather", "alerts", False):
+                    region = config.get("weather", "region", "") or ""
+                    if region.strip():
+                        alerts_client = MeteoAlarmClient(
+                            country=config.get("weather", "country", "romania") or "romania",
+                            region=region,
+                        )
+                    else:
+                        logger.warning("MeteoAlarm alerts are enabled but weather.region is empty")
                 weather = WeatherService(
                     weather_store, float(latitude), float(longitude),
                     interval=config.get_int("weather", "interval", 30, minimum=5) * 60,
+                    alerts_client=alerts_client,
                 )
             except ValueError as exc:
                 logger.warning("Weather is disabled: %s", exc)
