@@ -298,6 +298,8 @@ class TrayController:
             return GLib.SOURCE_REMOVE
         if previous in {"offline", "dns-error"} and current == "online":
             self.refresh()
+            if self.weather is not None:
+                self._weather_tick()
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
         self._update_icon()
