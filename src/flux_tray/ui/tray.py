@@ -87,7 +87,7 @@ class TrayController:
             self.menu.append(Gtk.SeparatorMenuItem())
             self._append(f"Read later ({len(saved)})", sensitive=False)
             for item in saved[:10]:
-                title = item["title"].replace("\\n", " ").strip()[:90]
+                title = item["title"].replace("\n", " ").strip()[:90]
                 self._append(title, lambda _widget, current=item: self._open_item(current))
         self.menu.append(Gtk.SeparatorMenuItem())
         self._append("Add feed…", lambda _item: self._add_feed_dialog())
