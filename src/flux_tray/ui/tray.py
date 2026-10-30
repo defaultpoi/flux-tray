@@ -12,7 +12,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 
 
 class TrayController:
-    def __init__(self, application, feed_service, task_manager, timer_service=None, connectivity_service=None, update_service=None, weather_service=None, live_service=None, media_service=None):
+    def __init__(self, application, feed_service, task_manager, timer_service=None, connectivity_service=None, update_service=None, weather_service=None, live_service=None, media_service=None, launcher_service=None):
         self.application = application
         self.feeds = feed_service
         self.tasks = task_manager
@@ -22,6 +22,7 @@ class TrayController:
         self.weather = weather_service
         self.live = live_service
         self.media = media_service
+        self.launcher = launcher_service
         self.log = logging.getLogger("flux_tray.ui")
         self.icon = Gtk.StatusIcon.new_from_icon_name("view-list-symbolic")
         self.icon.set_visible(True)
@@ -157,11 +158,22 @@ class TrayController:
             if changes:
                 self._append("Apply system updates…", lambda _item: self._confirm_updates())
             self._append("List orphan packages…", lambda _item: self._list_orphans())
+        if self.launcher is not None:
+            commands = self.launcher.commands()
+            if commands:
+                self._append("Launch", sensitive=False)
+                for command in commands:
+                    self._append(command.name, lambda _item, name=command.name: self._launch_command(name))
         self._append("Refresh feeds", lambda _item: self.refresh())
         self._append("Quit", lambda _item: self.application.quit())
         self.menu.show_all()
         self._update_icon()
 
+    def _launch_command(self, name):
+        try:
+            self.launcher.launch(name)
+        except Exception:
+            self.log.exception("Could not launch configured command: %s", name)
     def _open_item(self, item):
         if item.get("link"):
             try:
