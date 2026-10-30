@@ -46,3 +46,42 @@ def test_plugins_receive_bounded_helper_api(tmp_path):
     assert callable(plugin.flux_tray_helpers.fetch_json)
     assert callable(plugin.flux_tray_helpers.download_file)
     assert callable(plugin.flux_tray_helpers.parse_season_episode)
+
+def test_plugin_resolver_output_is_normalized(tmp_path):
+    directory = tmp_path / "plugins"
+    directory.mkdir()
+    (directory / "resolver.py").write_text(
+        "NAME = 'resolver'\n"
+        "def list_episodes(source):\n"
+        "    return [{'id': '1', 'title': 'Episode'}]\n"
+        "def resolve(episode):\n"
+        "    return {'url': 'https://example.test/video.mp4', 'ext': 'mp4'}\n",
+        encoding="utf-8",
+    )
+    registry = MediaPluginRegistry(directory)
+    registry.reload()
+    episode = registry.list_episodes("plugin:resolver:source")[0]
+    resolved = registry.resolve_episode("plugin:resolver:source", episode)
+    assert resolved["url"] == "https://example.test/video.mp4"
+    assert resolved["id"] == episode["id"]
+
+
+def test_plugin_download_must_return_an_existing_file(tmp_path):
+    directory = tmp_path / "plugins"
+    directory.mkdir()
+    (directory / "downloader.py").write_text(
+        "NAME = 'downloader'\n"
+        "def list_episodes(source):\n"
+        "    return []\n"
+        "def download(episode, base, progress, cancelled):\n"
+        "    return str(base / 'missing.mkv')\n",
+        encoding="utf-8",
+    )
+    registry = MediaPluginRegistry(directory)
+    registry.reload()
+    try:
+        registry.download_episode("plugin:downloader:source", {}, tmp_path)
+    except ValueError as exc:
+        assert "existing file" in str(exc)
+    else:
+        raise AssertionError("Missing plugin download file was accepted")
