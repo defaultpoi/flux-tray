@@ -43,6 +43,11 @@ class MediaService:
         self.state.setdefault("episodes", {})
         self.state.setdefault("queue", [])
         self.state.setdefault("watched", [])
+        download = self.state.get("download")
+        if isinstance(download, dict) and download.get("status") == "downloading":
+            download.update({"status": "failed",
+                             "error": "Download interrupted before completion"})
+            self.store.save(self.state)
 
     def _save(self):
         self.store.save(self.state)
