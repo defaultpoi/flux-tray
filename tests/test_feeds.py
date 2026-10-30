@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from flux_tray.core.storage import JsonStore
 from flux_tray.feeds.fetch import FetchResult
@@ -76,7 +76,7 @@ def test_feed_settings_and_order_are_persisted(tmp_path):
 
 def test_invalid_feed_order_is_rejected(tmp_path):
     service = make_service(tmp_path, b"<rss><channel/></rss>")
-    feed_id = service.add_feed("https://one.test/rss")
+    service.add_feed("https://one.test/rss")
     try:
         service.reorder_feeds([])
     except ValueError:
