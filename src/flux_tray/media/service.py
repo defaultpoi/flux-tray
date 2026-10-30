@@ -278,6 +278,19 @@ class MediaService:
             raise RuntimeError("Shared mpv player is not configured")
         episode = self.state["episodes"][episode_id]
         path = episode.get("path")
+        download = self.state.get("download") or {}
+        if download.get("episode_id") == episode_id and download.get("status") == "downloading":
+            partial_path = download.get("part_path")
+            if partial_path:
+                partial = Path(partial_path)
+                try:
+                    available = partial.is_file() and partial.stat().st_size >= 1_500_000
+                except OSError:
+                    available = False
+                if available:
+                    episode["partial_path"] = str(partial)
+                    episode["partial_duration"] = download.get("duration")
+                    path = str(partial)
         if not path or not Path(path).is_file():
             if self._is_streaming_episode(episode):
                 path = episode.get("url")
@@ -367,15 +380,16 @@ class MediaService:
         episode = self.state["episodes"].get(self.current_episode_id)
         if episode is None:
             return False
-        source = episode.get("path") or episode.get("url")
+        source = episode.get("partial_path") or episode.get("path") or episode.get("url")
         if not source:
             return False
         try:
             position = self.player.get_property("time-pos")
-            duration = self.player.get_property("duration")
+            player_duration = self.player.get_property("duration")
             current_path = self.player.get_property("path")
         except OSError:
             return False
+        duration = episode.get("partial_duration") if episode.get("partial_path") else player_duration
         if current_path != source or not isinstance(position, (int, float)) or not isinstance(duration, (int, float)) or duration <= 0:
             return False
         fraction = position / duration
