@@ -80,14 +80,14 @@ class MpvController:
             self._send(["set_property", "force-media-title", title])
 
     def get_property(self, name: str):
-        payload = json.dumps({"command": ["get_property", name], "request_id": 1}) + "\\n"
+        payload = json.dumps({"command": ["get_property", name], "request_id": 1}) + "\n"
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.settimeout(2.0)
         try:
             client.connect(str(self.socket_path))
             client.sendall(payload.encode("utf-8"))
             response = b""
-            while b"\\n" not in response:
+            while b"\n" not in response:
                 chunk = client.recv(65536)
                 if not chunk:
                     break
@@ -98,6 +98,7 @@ class MpvController:
             return result.get("data") if result.get("error") == "success" else None
         finally:
             client.close()
+
     def close(self) -> None:
         with self._lock:
             if self._owned and self.process is not None and self.process.poll() is None:
