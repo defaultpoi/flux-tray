@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-from threading import Lock
 from dataclasses import asdict, dataclass
+from threading import Lock
 from datetime import datetime, timezone
 from typing import Callable, Sequence
 
@@ -50,6 +50,7 @@ class UpdateService:
     def _run(self, argv: Sequence[str], *, timeout: float) -> ProcessResult:
         with self._lock:
             return self.runner(list(argv), timeout=timeout, env=self._env())
+
     def scan_updates(self) -> list[PackageChange]:
         result = self._run(["xbps-install", "-Mn", "-u"], timeout=180)
 
@@ -76,12 +77,12 @@ class UpdateService:
     def apply_updates(self) -> ProcessResult:
         """Run the real system update; callers must only expose this after explicit user action."""
         return self._run(self._privileged(["xbps-install", "-y", "-u"]),
-                           timeout=self.timeout)
+                         timeout=self.timeout)
 
     def remove_orphans(self) -> ProcessResult:
         """Remove current automatic orphans after an explicit confirmation in the UI."""
         return self._run(self._privileged(["xbps-remove", "-y", "-o"]),
-                           timeout=self.timeout, env=self._env())
+                           timeout=self.timeout)
 
     def clean_cache(self) -> ProcessResult:
         """Remove outdated cached packages after an explicit confirmation in the UI."""
