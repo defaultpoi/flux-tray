@@ -8,14 +8,15 @@ import webbrowser
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 
 class TrayController:
-    def __init__(self, application, feed_service, task_manager):
+    def __init__(self, application, feed_service, task_manager, timer_service=None):
         self.application = application
         self.feeds = feed_service
         self.tasks = task_manager
+        self.timer = timer_service
         self.log = logging.getLogger("flux_tray.ui")
         self.icon = Gtk.StatusIcon.new_from_icon_name("view-list-symbolic")
         self.icon.set_visible(True)
@@ -24,6 +25,9 @@ class TrayController:
         self.icon.connect("popup-menu", self._on_popup)
         self.menu = Gtk.Menu()
         GLib.timeout_add_seconds(60, self._periodic_refresh)
+        if self.timer is not None:
+            self.timer.poll()
+            GLib.timeout_add_seconds(1, self._timer_tick)
 
     def _on_activate(self, _icon):
         self._rebuild_menu(self.menu)
@@ -60,6 +64,17 @@ class TrayController:
                 self._append(title, lambda _widget, current=item: self._open_item(current))
         self.menu.append(Gtk.SeparatorMenuItem())
         self._append("Add feed…", lambda _item: self._add_feed_dialog())
+        if self.timer is not None:
+            status = self.timer.state.get("status", "idle")
+            if status == "running":
+                self._append(f"Timer: {self.timer.remaining()}s remaining", sensitive=False)
+            elif status == "missed":
+                self._append("Timer missed while away", sensitive=False)
+            elif status == "ringing":
+                self._append("Timer finished", sensitive=False)
+            self._append("Start timer…", lambda _item: self._timer_dialog())
+            if status in {"running", "missed", "ringing"}:
+                self._append("Cancel timer", lambda _item: self._cancel_timer())
         self._append("Refresh feeds", lambda _item: self.refresh())
         self._append("Quit", lambda _item: self.application.quit())
         self.menu.show_all()
@@ -113,6 +128,47 @@ class TrayController:
                 error.destroy()
         dialog.destroy()
 
+    def _timer_dialog(self):
+        dialog = Gtk.Dialog(title="Countdown timer", flags=Gtk.DialogFlags.MODAL)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Start", Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        spin = Gtk.SpinButton.new_with_range(1, max(1, self.timer.maximum // 60),
+                                            max(1, self.timer.step // 60))
+        spin.set_value(5)
+        box.pack_start(Gtk.Label(label="Duration (minutes)"), False, False, 0)
+        box.pack_start(spin, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            try:
+                self.timer.start(int(spin.get_value()) * 60)
+            except ValueError as exc:
+                self.log.warning("Invalid timer duration: %s", exc)
+        dialog.destroy()
+        self._rebuild_menu(self.menu)
+
+    def _cancel_timer(self):
+        self.timer.cancel()
+        self._rebuild_menu(self.menu)
+
+    def _timer_tick(self):
+        if self.timer is None:
+            return GLib.SOURCE_REMOVE
+        result = self.timer.poll()
+        if result == "ring":
+            display = Gdk.Display.get_default()
+            if display is not None:
+                display.beep()
+            self.icon.set_tooltip_text("Flux Tray — timer finished")
+        if self.menu.get_mapped():
+            self._rebuild_menu(self.menu)
+        return GLib.SOURCE_CONTINUE
     def refresh(self):
         def work():
             return self.feeds.check_due()
