@@ -136,3 +136,28 @@ segment.ts
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+def test_parser_does_not_reuse_a_later_variant_uri():
+    parsed = parse_playlist("""#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=100000,RESOLUTION=640x360
+#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=50000,URI="iframe.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=200000,RESOLUTION=854x480
+second.m3u8
+""", "https://media.example.test/master.m3u8")
+    assert len(parsed.variants) == 1
+    assert parsed.variants[0].url == "https://media.example.test/second.m3u8"
+
+
+def test_parser_ignores_non_finite_hls_segment_durations():
+    parsed = parse_playlist("""#EXTM3U
+#EXTINF:nan,
+nan.ts
+#EXTINF:inf,
+infinite.ts
+#EXTINF:5.5,
+finite.ts
+#EXT-X-ENDLIST
+""", "https://media.example.test/video.m3u8")
+    assert parsed.duration == 5.5
+    assert parsed.ended is True
+
