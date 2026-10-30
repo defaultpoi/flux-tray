@@ -19,13 +19,13 @@ This document is deliberately conservative. A service existing in the repository
 | Weather | Open-Meteo current conditions and five-day forecast; optional MeteoAlarm country Atom feed with active-time and accent-insensitive region filtering, severity mapping and alert display; guided place/coordinate and alert setup dialog; severe alerts pulse in both the tray icon and open popup | Real-provider validation and real XFCE alert interaction testing |
 | Connectivity | DNS/direct-IP diagnostic, offline feed pause, recovery-triggered checks and explicit confirmation for an optional user-configured argv reset command | Broader outage/recovery tests and real reset-command validation |
 | XBPS | Dry-run update scan, orphan listing, explicitly confirmed system update, orphan removal/cache cleanup, optional Topgrade `system` plus configured steps, per-package XBPS fallback, package/version/action/download-size confirmation summary, and persisted maintenance outcomes with view/dismiss UI | Installed-versus-available version comparison and real Void package-manager validation |
-| Timers | Persistent countdown with suspend/restart missed-deadline handling; weekly local-time alarms with weekday selection, once-per-date firing, persistent active alert, five-minute snooze and dismiss controls | Richer warning/alert controls and real suspend/restart desktop validation |
+| Timers | Persistent countdown with suspend/restart missed-deadline handling; weekly local-time alarms with weekday selection, add/edit/remove, once-per-date firing, persistent active alert, five-minute snooze and dismiss controls | Richer warning/alert controls and real suspend/restart desktop validation |
 | Launcher | JSON argv commands, managed background spawn | Launcher configuration UI and optional explicitly trusted shell commands |
 | Tray | GTK3 status icon, popup, notifications and basic actions | Focus-out rules, theme/icon fallback validation and real XFCE interaction tests |
 
 ## Verification status
 
-- GitHub Actions compiles `src` and `tests`, then runs the pytest suite successfully on Python 3.11, 3.12, 3.13 and 3.14 (latest verified run: guided weather configuration tests).
+- GitHub Actions compiles `src` and `tests`, then runs the pytest suite successfully on Python 3.11, 3.12, 3.13 and 3.14 (latest verified run: recurring alarm editing and the full service test suite).
 - CI does not exercise GTK interactions, real network providers, mpv, XBPS/Topgrade or the target desktop.
 - The code has **not** been run on the target Void Linux desktop in this development session; real XFCE/X11 integration remains unverified.
 - Do not treat this branch as a release until the missing behavior is implemented, the test suite passes, and the application has been exercised on the target machine over an extended run.
