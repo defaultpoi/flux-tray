@@ -95,6 +95,9 @@ seg.ts
         assert not Path(result).with_name("Example Show - S01E02 - Pilot.ro.srt").exists()
         assert not Path(result + ".part").exists()
         assert calls[0][0][calls[0][0].index("-i") + 1].endswith("/vod.m3u8")
+        assert calls[0][0][calls[0][0].index("-protocol_whitelist") + 1] == (
+            "http,https,tcp,tls,crypto"
+        )
         assert progress[0]["part_path"].endswith(".mkv.part")
         assert progress[0]["duration"] == 10.0
         assert progress[1]["percent"] == 50.0
@@ -199,6 +202,47 @@ segment.ts
         else:
             raise AssertionError("Empty HLS output was accepted")
         assert not (tmp_path / "Empty video.mkv").exists()
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+def test_hls_rejects_header_injection_before_fetching(tmp_path):
+    downloader = HlsDownloader(runner=lambda *args, **kwargs: None)
+    with pytest.raises(ValueError, match="line breaks"):
+        downloader.download(
+            {"url": "https://media.example.test/video.m3u8",
+             "headers": {"X-Test": "value" + chr(13) + chr(10) + "Injected: yes"}},
+            tmp_path, source_name="Example",
+        )
+
+
+def test_hls_rejects_non_http_variant_urls(tmp_path):
+    playlist = """#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=100000,RESOLUTION=640x360
+file:///etc/passwd
+"""
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = playlist.encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        downloader = HlsDownloader(runner=lambda *args, **kwargs: None)
+        with pytest.raises(ValueError, match="variant URLs must use HTTP or HTTPS"):
+            downloader.download(
+                {"url": f"http://127.0.0.1:{server.server_port}/master.m3u8"},
+                tmp_path, source_name="Example",
+            )
     finally:
         server.shutdown()
         thread.join(timeout=2)
