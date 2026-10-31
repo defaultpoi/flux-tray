@@ -336,8 +336,12 @@ class MediaService:
             if partial_path:
                 partial = Path(partial_path)
                 try:
-                    available = partial.is_file() and partial.stat().st_size >= 1_500_000
-                except OSError:
+                    available = (
+                        partial.is_file()
+                        and partial.stat().st_size > 0
+                        and float(download.get("elapsed") or 0) >= 60
+                    )
+                except (OSError, TypeError, ValueError):
                     available = False
                 if available:
                     episode["partial_path"] = str(partial)
