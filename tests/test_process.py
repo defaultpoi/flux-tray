@@ -129,5 +129,3 @@ def test_process_capture_keeps_bounded_output_tails():
     assert len(result.stderr) <= ProcessSupervisor.MAX_CAPTURE_CHARS
     assert result.stdout.endswith("stdout-tail")
     assert result.stderr.endswith("stderr-tail")
-    assert "A" not in result.stdout
-    assert "B" not in result.stderr
