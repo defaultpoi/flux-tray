@@ -103,7 +103,7 @@ class HlsDownloader:
                  playlist_timeout: float = 15, max_playlist_bytes: int = 1_000_000):
         for name, value in (("timeout", timeout), ("playlist_timeout", playlist_timeout)):
             try:
-                valid = math.isfinite(value) and value > 0
+                valid = not isinstance(value, bool) and math.isfinite(value) and value > 0
             except TypeError as exc:
                 raise ValueError(f"{name} must be a finite positive number") from exc
             if not valid:
