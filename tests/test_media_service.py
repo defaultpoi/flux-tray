@@ -652,3 +652,30 @@ def test_concurrent_media_download_requests_do_not_download_same_episode_twice(t
     assert service.state["episodes"]["episode"]["status"] == "downloaded"
     assert service.state["download"]["status"] == "completed"
 
+
+
+def test_play_episode_does_not_use_hls_partial_before_one_minute(tmp_path):
+    class Player:
+        def __init__(self):
+            self.loaded = None
+        def load(self, path, title):
+            self.loaded = (path, title)
+
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    partial = tmp_path / "episode.mkv.part"
+    partial.write_bytes(b"x")
+    player = Player()
+    service = MediaService(store, tmp_path / "plugins", player=player)
+    url = "https://media.example.test/episode.m3u8"
+    service.state["episodes"]["hls"] = {
+        "id": "hls", "title": "HLS episode", "url": url,
+        "status": "queued", "source_id": "source",
+    }
+    service.state["download"] = {
+        "episode_id": "hls", "status": "downloading",
+        "part_path": str(partial), "duration": 100.0, "elapsed": 59.0,
+    }
+
+    service.play_episode("hls")
+    assert player.loaded == (url, "HLS episode")
