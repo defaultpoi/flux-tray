@@ -338,7 +338,7 @@ class MediaService:
                 try:
                     available = (
                         partial.is_file()
-                        and partial.stat().st_size > 0
+                        and partial.stat().st_size >= 65_536
                         and float(download.get("elapsed") or 0) >= 60
                     )
                 except (OSError, TypeError, ValueError):
