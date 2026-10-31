@@ -104,7 +104,7 @@ class HlsDownloader:
         for name, value in (("timeout", timeout), ("playlist_timeout", playlist_timeout)):
             try:
                 valid = not isinstance(value, bool) and math.isfinite(value) and value > 0
-            except TypeError as exc:
+            except (OverflowError, TypeError) as exc:
                 raise ValueError(f"{name} must be a finite positive number") from exc
             if not valid:
                 raise ValueError(f"{name} must be a finite positive number")
