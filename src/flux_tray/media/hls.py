@@ -21,6 +21,19 @@ from flux_tray.media.helpers import _safe_headers
 _ATTRIBUTE = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
 
 
+def _validate_http_url(url: str, description: str) -> None:
+    """Reject non-HTTP URLs and malformed authorities before opening a URL."""
+    try:
+        parsed = urlsplit(url)
+        valid = parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+        if parsed.port is not None and not (1 <= parsed.port <= 65535):
+            valid = False
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError(f"{description} must use a valid HTTP or HTTPS URL")
+
+
 @dataclass(frozen=True, slots=True)
 class HlsVariant:
     url: str
@@ -112,7 +125,11 @@ class HlsDownloader:
         if not isinstance(subtitles, dict):
             return
         for language, url in subtitles.items():
-            if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            if not isinstance(url, str):
+                continue
+            try:
+                _validate_http_url(url, "Subtitle URL")
+            except ValueError:
                 continue
             extension = Path(urlsplit(url).path).suffix.lower()
             if extension not in {".vtt", ".srt", ".ass", ".ssa", ".ttml"}:
@@ -145,15 +162,19 @@ class HlsDownloader:
                  screen: tuple[int, int] | None = None, cancelled: Event | None = None,
                  progress_callback: Callable[[dict], None] | None = None) -> str:
         url = str(episode.get("url") or "")
-        if not url.startswith(("http://", "https://")) or not url.split("?", 1)[0].lower().endswith(".m3u8"):
+        try:
+            _validate_http_url(url, "HLS playlist URL")
+        except ValueError as exc:
+            raise ValueError("HLS download requires a valid HTTP(S) .m3u8 URL") from exc
+        if not urlsplit(url).path.lower().endswith(".m3u8"):
             raise ValueError("HLS download requires an HTTP(S) .m3u8 URL")
         headers = _safe_headers(episode.get("headers"))
         playlist = parse_playlist(self._fetch_playlist(url, headers), url)
         if playlist.variants:
             url = pick_variant(playlist.variants, screen).url
-            parsed_url = urlsplit(url)
-            if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-                raise ValueError("HLS variant URLs must use HTTP or HTTPS")
+            # Validate before opening: urlopen supports local file URLs, which
+            # must never be reachable through an untrusted master playlist.
+            _validate_http_url(url, "HLS variant URL")
             playlist = parse_playlist(self._fetch_playlist(url, headers), url)
         if not playlist.ended:
             raise ValueError("Live HLS playlists cannot be downloaded")
