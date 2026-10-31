@@ -3,7 +3,7 @@ from threading import Thread
 
 import pytest
 
-from flux_tray.media.helpers import download_file
+from flux_tray.media.helpers import download_file, fetch_json
 
 
 def _serve(handler):
@@ -160,3 +160,35 @@ def test_resumable_download_does_not_append_bytes_beyond_range(tmp_path):
         thread.join(timeout=2)
         server.server_close()
 
+
+
+
+@pytest.mark.parametrize("url", ["http:///missing-host", "http://example.test:99999/video"])
+def test_plugin_download_rejects_malformed_http_authorities(tmp_path, url):
+    with pytest.raises(ValueError, match="valid HTTP"):
+        download_file(url, tmp_path / "video.bin")
+    assert not (tmp_path / "video.bin.part").exists()
+
+
+@pytest.mark.parametrize("url", ["http:///missing-host", "http://example.test:99999/data"])
+def test_plugin_json_fetch_rejects_malformed_http_authorities(url):
+    with pytest.raises(ValueError, match="valid HTTP"):
+        fetch_json(url)
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("nan")])
+def test_plugin_download_rejects_invalid_timeout(tmp_path, timeout):
+    with pytest.raises(ValueError, match="finite positive"):
+        download_file("https://example.test/video", tmp_path / "video.bin", timeout=timeout)
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("inf")])
+def test_plugin_json_fetch_rejects_invalid_timeout(timeout):
+    with pytest.raises(ValueError, match="finite positive"):
+        fetch_json("https://example.test/data", timeout=timeout)
+
+
+@pytest.mark.parametrize("max_bytes", [0, -1, True])
+def test_plugin_json_fetch_requires_positive_integer_limit(max_bytes):
+    with pytest.raises(ValueError, match="positive integer"):
+        fetch_json("https://example.test/data", max_bytes=max_bytes)
