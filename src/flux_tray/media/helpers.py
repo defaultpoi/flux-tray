@@ -32,7 +32,7 @@ def _safe_headers(headers: dict[str, str] | None) -> dict[str, str]:
 def _validate_timeout(timeout: float) -> None:
     try:
         valid = not isinstance(timeout, bool) and math.isfinite(timeout) and timeout > 0
-    except TypeError as exc:
+    except (OverflowError, TypeError) as exc:
         raise ValueError("timeout must be a finite positive number") from exc
     if not valid:
         raise ValueError("timeout must be a finite positive number")
