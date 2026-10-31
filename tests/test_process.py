@@ -16,7 +16,7 @@ def test_process_captures_output_and_environment():
     assert result.stdout.strip() == "works"
 
 
-@pytest.mark.parametrize("timeout", [0, -1, True, float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("timeout", [0, -1, True, 10**1000, float("nan"), float("inf"), -float("inf")])
 def test_process_rejects_invalid_timeout_before_starting(timeout):
     with pytest.raises(ValueError, match="finite positive"):
         ProcessSupervisor().run([sys.executable, "-c", "pass"], timeout=timeout)
