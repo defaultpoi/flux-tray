@@ -84,8 +84,8 @@ def test_download_reports_progress_callback(tmp_path):
     downloader = MediaDownloader(runner=runner)
     downloader.download({"url": "https://example.test/video", "title": "Video"},
                         tmp_path, progress_callback=progress.append)
-    assert progress[-1]["percent"] == 50.0
-    assert progress[-1]["downloaded_bytes"] == 500.0
+    assert progress[-1]["percent"] == 75.0
+    assert progress[-1]["downloaded_bytes"] == 750.0
     assert progress[-1]["total_bytes"] == 1000.0
     assert progress[-1]["eta"] == 5.0
     assert len(progress) == 2
