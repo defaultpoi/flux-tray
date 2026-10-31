@@ -80,7 +80,11 @@ seg.ts
         def runner(argv, **kwargs):
             calls.append((argv, kwargs))
             Path(argv[-1]).write_bytes(b"video")
-            kwargs["output_callback"]("stdout", "out_time_ms=5000000\n")
+            callback = kwargs["output_callback"]
+            callback("stdout", "out_time_")
+            callback("stdout", "ms=5000000\n")
+            callback("stdout", "X" * 70_000)
+            callback("stdout", "\nout_time_ms=7500000\n")
             return ProcessResult(tuple(argv), 0, "", "")
 
         downloader = HlsDownloader(runner=runner)
@@ -103,6 +107,7 @@ seg.ts
         assert progress[0]["part_path"].endswith(".mkv.part")
         assert progress[0]["duration"] == 10.0
         assert progress[1]["percent"] == 50.0
+        assert progress[2]["percent"] == 75.0
         assert progress[-1]["percent"] == 100.0
     finally:
         server.shutdown()
