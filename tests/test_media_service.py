@@ -378,7 +378,7 @@ def test_play_episode_uses_hls_partial_after_one_minute_of_media(tmp_path):
     store = JsonStore(tmp_path / "media.json",
                       lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
     partial = tmp_path / "episode.mkv.part"
-    partial.write_bytes(b"x")
+    partial.write_bytes(b"x" * 65_536)
     player = Player(partial)
     service = MediaService(store, tmp_path / "plugins", player=player)
     service.state["episodes"]["hls"] = {
@@ -664,7 +664,7 @@ def test_play_episode_does_not_use_hls_partial_before_one_minute(tmp_path):
     store = JsonStore(tmp_path / "media.json",
                       lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
     partial = tmp_path / "episode.mkv.part"
-    partial.write_bytes(b"x")
+    partial.write_bytes(b"x" * 65_536)
     player = Player()
     service = MediaService(store, tmp_path / "plugins", player=player)
     url = "https://media.example.test/episode.m3u8"
