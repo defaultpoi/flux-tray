@@ -39,12 +39,13 @@ def test_successful_command_terminates_remaining_process_group_children(tmp_path
         "pathlib.Path(" + repr(str(marker)) + ").touch()"
     )
     parent_code = (
-        "import subprocess, sys, time; "
-        "subprocess.Popen([sys.executable, '-c', " + repr(child_code) + "]); "
-        "deadline = time.monotonic() + 2; "
-        "from pathlib import Path; "
-        "ready = Path(" + repr(str(ready)) + "); "
-        "while not ready.exists() and time.monotonic() < deadline: time.sleep(0.01)"
+        "import subprocess, sys, time\\n"
+        "child = " + repr(child_code) + "\\n"
+        "subprocess.Popen([sys.executable, '-c', child])\\n"
+        "ready = " + repr(str(ready)) + "\\n"
+        "deadline = time.monotonic() + 2\\n"
+        "while not pathlib.Path(ready).exists() and time.monotonic() < deadline:\\n"
+        "    time.sleep(0.01)\\n"
     )
     started = time.monotonic()
     result = ProcessSupervisor().run([sys.executable, "-c", parent_code], timeout=3)
