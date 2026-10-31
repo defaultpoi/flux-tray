@@ -39,7 +39,7 @@ def test_successful_command_terminates_remaining_process_group_children(tmp_path
         "pathlib.Path(" + repr(str(marker)) + ").touch()"
     )
     parent_code = (
-        "import subprocess, sys, time\\n"
+        "import pathlib, subprocess, sys, time\\n"
         "child = " + repr(child_code) + "\\n"
         "subprocess.Popen([sys.executable, '-c', child])\\n"
         "ready = " + repr(str(ready)) + "\\n"
