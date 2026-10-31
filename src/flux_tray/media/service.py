@@ -347,8 +347,7 @@ class MediaService:
                 if not path:
                     raise ValueError("Streaming episode has no playable URL")
             else:
-                path = self._download_episode(episode)
-                self.mark_downloaded(episode_id, path)
+                path = self._download_and_record(episode)
         self.player.load(path, episode.get("title", "Flux Tray"))
         self.current_episode_id = episode_id
         return episode
@@ -429,10 +428,8 @@ class MediaService:
             self.current_episode_id = None
             return True
         return False
-    def download_next(self, *, cancelled=None, progress_callback=None) -> dict[str, Any] | None:
-        episode = self.next_queued()
-        if episode is None:
-            return None
+    def _download_and_record(self, episode: dict[str, Any], *, cancelled=None,
+                             progress_callback=None) -> str:
         download_state = {
             "episode_id": episode["id"], "title": episode.get("title", "Untitled"),
             "status": "downloading", "started_at": self.now().isoformat(),
@@ -453,20 +450,35 @@ class MediaService:
                 progress_callback(dict(download_state))
 
         try:
-            path = self._download_episode(episode, cancelled=cancelled,
-                                          progress_callback=report_progress)
+            path = self._download_episode(
+                episode, cancelled=cancelled, progress_callback=report_progress
+            )
         except Exception as exc:
             episode["download_error"] = str(exc)
             episode["last_attempt"] = self.now().isoformat()
-            download_state.update({"status": "failed", "error": str(exc),
-                                   "completed_at": self.now().isoformat()})
+            download_state.update({
+                "status": "failed", "error": str(exc),
+                "completed_at": self.now().isoformat(),
+            })
             self._save()
             raise
+
         self.mark_downloaded(episode["id"], path)
         episode["download_error"] = None
-        download_state.update({"status": "completed", "path": path, "percent": 100.0,
-                               "completed_at": self.now().isoformat()})
+        download_state.update({
+            "status": "completed", "path": path, "percent": 100.0,
+            "completed_at": self.now().isoformat(),
+        })
         self._save()
+        return path
+
+    def download_next(self, *, cancelled=None, progress_callback=None) -> dict[str, Any] | None:
+        episode = self.next_queued()
+        if episode is None:
+            return None
+        self._download_and_record(
+            episode, cancelled=cancelled, progress_callback=progress_callback
+        )
         return episode
     def mark_downloaded(self, episode_id: str, path: str) -> None:
         episode = self.state["episodes"][episode_id]
