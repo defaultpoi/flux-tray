@@ -34,7 +34,7 @@ class Scheduler:
         try:
             valid_interval = (not isinstance(interval, bool)
                              and math.isfinite(interval) and interval > 0)
-        except TypeError as exc:
+        except (TypeError, OverflowError) as exc:
             raise ValueError("interval must be a finite positive number") from exc
         if not valid_interval:
             raise ValueError("interval must be a finite positive number")
