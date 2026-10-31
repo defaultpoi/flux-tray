@@ -25,7 +25,7 @@ This document is deliberately conservative. A service existing in the repository
 
 ## Verification status
 
-- GitHub Actions compiles `src` and `tests`, then runs the pytest suite on Python 3.14 only. The latest Python 3.14 CI run passed on 31 October 2026: **151 tests passed**. The workflow validates installer shell syntax, compiles `src` and `tests`, then runs pytest.
+- GitHub Actions compiles `src` and `tests`, then runs the pytest suite on Python 3.14 only. The latest Python 3.14 CI run passed on 31 October 2026: **152 tests passed**. The workflow validates installer shell syntax, compiles `src` and `tests`, then runs pytest.
 - CI does not exercise GTK interactions, real network providers, mpv, XBPS/Topgrade or the target desktop.
 - The code has **not** been run on the target Void Linux desktop in this development session; real XFCE/X11 integration remains unverified. A repeatable manual checklist is in [XFCE-VALIDATION.md](XFCE-VALIDATION.md).
 - Do not treat this branch as a release until the missing behavior is implemented, the test suite passes, and the application has been exercised on the target machine over an extended run.
