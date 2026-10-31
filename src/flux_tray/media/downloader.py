@@ -55,8 +55,11 @@ class MediaDownloader:
             argv.extend(["-S", format_sort])
         argv.append(str(url))
 
-        def on_output(_channel: str, line: str) -> None:
-            if progress_callback is None or not line.startswith("FLUX_PROGRESS|"):
+        pending_output = {"stdout": "", "stderr": ""}
+        discarding_output = set()
+
+        def report_progress_line(line: str) -> None:
+            if not line.startswith("FLUX_PROGRESS|"):
                 return
             parts = line.strip().split("|")
             if len(parts) < 5:
@@ -75,6 +78,25 @@ class MediaDownloader:
                        if downloaded is not None and total else None)
             progress_callback({"downloaded_bytes": downloaded, "total_bytes": total,
                                "eta": eta, "percent": percent})
+
+        def on_output(channel: str, chunk: str) -> None:
+            if progress_callback is None:
+                return
+            if channel not in pending_output:
+                pending_output[channel] = ""
+            if channel in discarding_output:
+                if "\n" not in chunk:
+                    return
+                chunk = chunk.split("\n", 1)[1]
+                discarding_output.discard(channel)
+            lines = (pending_output[channel] + chunk).split("\n")
+            pending_output[channel] = lines.pop()
+            if len(pending_output[channel]) > 65_536:
+                pending_output[channel] = ""
+                discarding_output.add(channel)
+            for line in lines:
+                if len(line) <= 65_536:
+                    report_progress_line(line)
 
         kwargs = {"timeout": self.timeout, "cancelled": cancelled}
         if progress_callback is not None:
