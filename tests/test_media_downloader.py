@@ -73,7 +73,11 @@ def test_download_reports_progress_callback(tmp_path):
     def runner(argv, **kwargs):
         assert "--newline" in argv
         assert "--progress-template" in argv
-        kwargs["output_callback"]("stderr", "FLUX_PROGRESS|500|1000|1000|10\n")
+        callback = kwargs["output_callback"]
+        callback("stderr", "FLUX_PRO")
+        callback("stderr", "GRESS|500|1000|1000|10\n")
+        callback("stderr", "X" * 70_000)
+        callback("stderr", "\nFLUX_PROGRESS|750|1000|1000|5\n")
         path = _create_download(argv)
         return ProcessResult(tuple(argv), 0, f"{path}\n", "")
 
@@ -83,7 +87,8 @@ def test_download_reports_progress_callback(tmp_path):
     assert progress[-1]["percent"] == 50.0
     assert progress[-1]["downloaded_bytes"] == 500.0
     assert progress[-1]["total_bytes"] == 1000.0
-    assert progress[-1]["eta"] == 10.0
+    assert progress[-1]["eta"] == 5.0
+    assert len(progress) == 2
 
 
 def test_download_uses_source_directory_and_episode_filename(tmp_path):
