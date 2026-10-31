@@ -147,3 +147,15 @@ def test_feed_website_url_is_saved_from_feed_metadata(tmp_path):
     service.check_feed(feed_id)
     feed = next(feed for feed in service.state["feeds"] if feed["id"] == feed_id)
     assert feed["site_url"] == "https://example.test/"
+
+
+def test_add_feed_rejects_malformed_http_urls(tmp_path):
+    service = make_service(tmp_path, b"<rss><channel/></rss>")
+    for url in ("http:///missing-host", "https://example.test:99999/feed",
+                "file:///etc/passwd", "https://example.test/feed with spaces"):
+        try:
+            service.add_feed(url)
+        except ValueError as exc:
+            assert "valid HTTP" in str(exc)
+        else:
+            raise AssertionError(f"Malformed feed URL was accepted: {url}")
