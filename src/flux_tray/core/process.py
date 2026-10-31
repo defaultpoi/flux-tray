@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock, Thread
@@ -58,8 +59,8 @@ class ProcessSupervisor:
                 text=True, bufsize=1, start_new_session=True,
             )
             self._processes[process] = shutdown_protected
-        stdout_chunks: list[str] = []
-        stderr_chunks: list[str] = []
+        stdout_chunks: deque[str] = deque()
+        stderr_chunks: deque[str] = deque()
 
         def drain(stream, chunks, channel):
             captured_chars = 0
@@ -67,12 +68,19 @@ class ProcessSupervisor:
                 for line in iter(lambda: stream.readline(self.READ_CHUNK_CHARS), ""):
                     chunks.append(line)
                     captured_chars += len(line)
-                    if captured_chars > self.MAX_CAPTURE_CHARS:
-                        # Keep the diagnostic tail without allowing noisy commands
-                        # to grow captured output without bound.
-                        tail = "".join(chunks)[-self.MAX_CAPTURE_CHARS:]
-                        chunks[:] = [tail]
-                        captured_chars = len(tail)
+                    # Trim only the excess prefix. Joining the entire capture on
+                    # every read would become quadratic for noisy subprocesses.
+                    excess = captured_chars - self.MAX_CAPTURE_CHARS
+                    while excess > 0:
+                        first = chunks[0]
+                        if len(first) <= excess:
+                            chunks.popleft()
+                            excess -= len(first)
+                            captured_chars -= len(first)
+                        else:
+                            chunks[0] = first[excess:]
+                            captured_chars -= excess
+                            excess = 0
                     if output_callback is not None:
                         try:
                             output_callback(channel, line)
