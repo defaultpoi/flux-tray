@@ -114,3 +114,20 @@ def test_output_callback_receives_process_output():
     )
     assert result.stdout.strip() == "callback works"
     assert ("stdout", "callback works") in observed
+
+
+def test_process_capture_keeps_bounded_output_tails():
+    size = ProcessSupervisor.MAX_CAPTURE_CHARS + 100_000
+    script = (
+        "import sys; "
+        "sys.stdout.write('A' * " + str(size) + " + 'stdout-tail'); "
+        "sys.stderr.write('B' * " + str(size) + " + 'stderr-tail')"
+    )
+    result = ProcessSupervisor().run([sys.executable, "-c", script], timeout=5)
+
+    assert len(result.stdout) <= ProcessSupervisor.MAX_CAPTURE_CHARS
+    assert len(result.stderr) <= ProcessSupervisor.MAX_CAPTURE_CHARS
+    assert result.stdout.endswith("stdout-tail")
+    assert result.stderr.endswith("stderr-tail")
+    assert "A" not in result.stdout
+    assert "B" not in result.stderr
