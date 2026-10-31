@@ -133,6 +133,19 @@ class FeedPopup:
             for item in feed_items:
                 self._append_item(self.listing, item)
 
+        saved_items = self.feeds.read_later_items()
+        if saved_items:
+            separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            separator.set_margin_top(6)
+            separator.set_margin_bottom(4)
+            self.listing.pack_start(separator, False, False, 0)
+            saved_title = Gtk.Label(label=f"Read later ({len(saved_items)})")
+            saved_title.set_xalign(0)
+            saved_title.set_margin_top(3)
+            self.listing.pack_start(saved_title, False, False, 0)
+            for item in saved_items:
+                self._append_read_later_item(self.listing, item)
+
         self.root.show_all()
 
         def restore_scroll():
@@ -196,6 +209,58 @@ class FeedPopup:
         )
         row.pack_end(bookmark, False, False, 0)
         listing.pack_start(row, False, True, 0)
+
+    def _append_read_later_item(self, listing, item):
+        title = (item.get("title") or "(untitled)").strip()
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        clickable = Gtk.EventBox()
+        clickable.set_visible_window(False)
+        clickable.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        clickable.connect("button-press-event", self._on_read_later_click, item)
+        details = [title]
+        if item.get("author"):
+            details.append(f"By {item['author']}")
+        categories = item.get("categories") or []
+        if categories:
+            details.append("Categories: " + ", ".join(str(value) for value in categories))
+        tooltip = "\\n".join(details)
+        clickable.set_tooltip_text(tooltip)
+
+        label = Gtk.Label(label=title)
+        label.set_xalign(0)
+        label.set_single_line_mode(True)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        label.set_tooltip_text(tooltip)
+        label.set_hexpand(True)
+        clickable.add(label)
+        row.pack_start(clickable, True, True, 0)
+
+        remove = Gtk.Button.new_from_icon_name(
+            "window-close-symbolic", Gtk.IconSize.BUTTON
+        )
+        remove.set_relief(Gtk.ReliefStyle.NONE)
+        remove.set_tooltip_text("Remove from read later")
+        remove.connect(
+            "clicked", lambda *_args, item_id=item["id"]: self._remove_read_later(item_id)
+        )
+        row.pack_end(remove, False, False, 0)
+        listing.pack_start(row, False, True, 0)
+
+    def _on_read_later_click(self, _widget, event, item):
+        if event.button == Gdk.BUTTON_PRIMARY:
+            link = item.get("link", "")
+            if self._valid_web_url(link):
+                webbrowser.open(link)
+            self._remove_read_later(item["id"])
+            return True
+        if event.button == Gdk.BUTTON_SECONDARY:
+            self._remove_read_later(item["id"])
+            return True
+        return False
+
+    def _remove_read_later(self, item_id):
+        self.feeds.remove_read_later(item_id)
+        self.rebuild()
 
     def _on_feed_title_click(self, _widget, event, feed):
         if event.button == Gdk.BUTTON_PRIMARY:
