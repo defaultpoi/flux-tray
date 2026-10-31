@@ -42,7 +42,7 @@ class ProcessSupervisor:
         try:
             valid_timeout = (not isinstance(timeout, bool)
                              and math.isfinite(timeout) and timeout > 0)
-        except TypeError as exc:
+        except (OverflowError, TypeError) as exc:
             raise ValueError("timeout must be a finite positive number") from exc
         if not valid_timeout:
             raise ValueError("timeout must be a finite positive number")
