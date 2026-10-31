@@ -173,8 +173,11 @@ segment.ts
 #EXT-X-ENDLIST
 """
 
+    requests = []
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            requests.append(self.path)
             body = playlist.encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
@@ -240,11 +243,14 @@ file:///etc/passwd
     thread.start()
     try:
         downloader = HlsDownloader(runner=lambda *args, **kwargs: None)
-        with pytest.raises(ValueError, match="variant URLs must use HTTP or HTTPS"):
+        with pytest.raises(ValueError, match="HLS variant URL.*HTTP or HTTPS"):
             downloader.download(
                 {"url": f"http://127.0.0.1:{server.server_port}/master.m3u8"},
                 tmp_path, source_name="Example",
             )
+        # Only the trusted master playlist is fetched; file:// is rejected
+        # before urlopen can read a local path.
+        assert requests == ["/master.m3u8"]
     finally:
         server.shutdown()
         thread.join(timeout=2)
