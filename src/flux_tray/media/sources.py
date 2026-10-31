@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from calendar import timegm
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -82,7 +83,15 @@ class RssMediaAdapter:
                     continue
                 published = entry.get("published_parsed") or entry.get("updated_parsed")
                 date = datetime.fromtimestamp(timegm(published), timezone.utc).isoformat() if published else None
-                extension = mime_type.rsplit("/", 1)[-1] if isinstance(mime_type, str) else None
+                filename = parsed_url.path.rsplit("/", 1)[-1]
+                extension = filename.rsplit(".", 1)[-1] if "." in filename else None
+                if not extension and isinstance(mime_type, str):
+                    subtype = mime_type.rsplit("/", 1)[-1].casefold()
+                    extension = "m3u8" if subtype in {
+                        "vnd.apple.mpegurl", "x-mpegurl"
+                    } else subtype.rsplit(".", 1)[-1]
+                if extension and not re.fullmatch(r"[a-z0-9]{1,10}", extension.casefold()):
+                    extension = None
                 raw = {
                     "id": str(entry.get("id") or media_url) + f":{index}",
                     "title": entry.get("title") or "Untitled media",
