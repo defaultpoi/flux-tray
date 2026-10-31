@@ -256,3 +256,17 @@ file:///etc/passwd
         thread.join(timeout=2)
         server.server_close()
 
+
+
+
+@pytest.mark.parametrize("name", ["timeout", "playlist_timeout"])
+@pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf"), -float("inf")])
+def test_hls_downloader_rejects_invalid_timeouts(name, value):
+    with pytest.raises(ValueError, match="finite positive"):
+        HlsDownloader(**{name: value})
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5])
+def test_hls_downloader_requires_positive_integer_playlist_limit(value):
+    with pytest.raises(ValueError, match="positive integer"):
+        HlsDownloader(max_playlist_bytes=value)
