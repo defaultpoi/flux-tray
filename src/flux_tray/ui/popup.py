@@ -12,6 +12,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gdk, GLib, Gtk, Pango
 
 from flux_tray.ui.layout import clamp_scroll_value
+from flux_tray.ui.links import is_valid_web_url
 
 
 class FeedPopup:
@@ -308,8 +309,7 @@ class FeedPopup:
 
     @staticmethod
     def _valid_web_url(url):
-        parsed = urlsplit(str(url or ""))
-        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+        return is_valid_web_url(url)
 
     def _open_feed_items(self, items):
         for item in items:
@@ -334,8 +334,7 @@ class FeedPopup:
     def _on_item_click(self, _widget, event, item):
         if event.button == Gdk.BUTTON_PRIMARY:
             link = item.get("link", "")
-            parsed = urlsplit(link)
-            if parsed.scheme in {"http", "https"} and parsed.netloc:
+            if self._valid_web_url(link):
                 webbrowser.open(link)
             self._mark_read(item["id"])
             return True
