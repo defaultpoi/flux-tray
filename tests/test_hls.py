@@ -319,6 +319,27 @@ class TestDownloadingWithAFakeFfmpeg(FakeFfmpegCase):
         self.assertFalse(os.path.exists(self.dest))
         self.assertEqual(os.listdir(os.path.dirname(self.dest)), [])
 
+    def test_a_playlist_address_that_is_not_http_is_refused_before_it_is_read(self):
+        secret = os.path.join(self.dir, 'secret.m3u8')
+        with open(secret, 'w') as f:
+            f.write('#EXTM3U\n#EXTINF:5,\na.ts\n#EXT-X-ENDLIST\n')
+        for url in ('file://' + secret, 'ftp://example.com/a.m3u8', 'gopher://example.com/a.m3u8'):
+            with self.assertRaises(ValueError) as caught:
+                rt.download_hls(url, self.dest)
+            self.assertIn('http', str(caught.exception))
+        self.assertEqual(self.calls(), [])
+
+    def test_a_master_playlist_cannot_send_the_download_to_a_local_file(self):
+        secret = os.path.join(self.dir, 'secret.m3u8')
+        with open(secret, 'w') as f:
+            f.write('#EXTM3U\n#EXTINF:5,\na.ts\n#EXT-X-ENDLIST\n')
+        self.site.routes['/sneaky.m3u8'] = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=160x90\nfile://' + secret + '\n'
+        with self.assertRaises(ValueError) as caught:
+            self.run_download('/sneaky.m3u8')
+        self.assertIn('http', str(caught.exception))
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(os.path.exists(self.dest))
+
     def test_a_server_that_refuses_the_playlist_is_reported(self):
         self.site.referer = 'https://embed.example/'
         with self.assertRaises(urllib.error.HTTPError):

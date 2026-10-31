@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 from collections import deque
 
+from .links import is_web_url
 from .updates import topgrade_env  # the environment for a tool run from the tray: UTF-8, plus ~/.local/bin on PATH
 
 
@@ -87,6 +88,8 @@ def playlist_seconds(text):
 
 
 def _fetch_text(url, headers):
+    if not is_web_url(url):  # urllib would also read file: and ftp: addresses, and a master playlist may name any
+        raise ValueError('only http and https playlists are downloaded')
     request = urllib.request.Request(url, headers={'User-Agent': DEFAULT_USER_AGENT, **headers})
     with urllib.request.urlopen(request, timeout=PLAYLIST_TIMEOUT_SECONDS) as response:
         return response.read(PLAYLIST_MAX_BYTES).decode('utf-8', 'replace')
