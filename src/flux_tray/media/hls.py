@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 
 from flux_tray.core.process import ProcessResult, ProcessSupervisor
 from flux_tray.media.episodes import media_filename, safe_filename
+from flux_tray.media.helpers import _safe_headers
 
 
 _ATTRIBUTE = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
@@ -94,7 +95,7 @@ class HlsDownloader:
         self.max_playlist_bytes = max_playlist_bytes
 
     def _fetch_playlist(self, url: str, headers: dict[str, str]) -> str:
-        request = Request(url, headers={"User-Agent": "FluxTray/0.1", **headers})
+        request = Request(url, headers={"User-Agent": "FluxTray/0.1", **_safe_headers(headers)})
         with urlopen(request, timeout=self.playlist_timeout) as response:
             payload = response.read(self.max_playlist_bytes + 1)
         if len(payload) > self.max_playlist_bytes:
@@ -119,10 +120,12 @@ class HlsDownloader:
             destination = output_dir / f"{basename}.{safe_filename(str(language), 24)}{extension}"
             partial = Path(str(destination) + ".part")
             try:
-                request = Request(url, headers={"User-Agent": "FluxTray/0.1", **headers})
+                request = Request(
+                    url, headers={"User-Agent": "FluxTray/0.1", **_safe_headers(headers)}
+                )
                 with urlopen(request, timeout=self.playlist_timeout) as response:
                     payload = response.read(2_000_001)
-                if len(payload) > 2_000_000:
+                if not payload or len(payload) > 2_000_000:
                     continue
                 with partial.open("wb") as stream:
                     stream.write(payload)
@@ -144,10 +147,13 @@ class HlsDownloader:
         url = str(episode.get("url") or "")
         if not url.startswith(("http://", "https://")) or not url.split("?", 1)[0].lower().endswith(".m3u8"):
             raise ValueError("HLS download requires an HTTP(S) .m3u8 URL")
-        headers = episode.get("headers") if isinstance(episode.get("headers"), dict) else {}
+        headers = _safe_headers(episode.get("headers"))
         playlist = parse_playlist(self._fetch_playlist(url, headers), url)
         if playlist.variants:
             url = pick_variant(playlist.variants, screen).url
+            parsed_url = urlsplit(url)
+            if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                raise ValueError("HLS variant URLs must use HTTP or HTTPS")
             playlist = parse_playlist(self._fetch_playlist(url, headers), url)
         if not playlist.ended:
             raise ValueError("Live HLS playlists cannot be downloaded")
@@ -159,6 +165,7 @@ class HlsDownloader:
         destination = output_dir / (media_filename(source_name, episode) + ".mkv")
         partial = Path(str(destination) + ".part")
         argv = ["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "error",
+                "-protocol_whitelist", "http,https,tcp,tls,crypto",
                 "-progress", "pipe:1", "-nostats"]
         if headers:
             argv.extend(["-headers", self._header_argument(headers)])
