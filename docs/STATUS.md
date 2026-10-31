@@ -7,7 +7,7 @@ This document is deliberately conservative. A service existing in the repository
 - Python package layout, GTK3 application composition root and X11 tray shell.
 - Human-editable INI configuration, atomic JSON storage and rotating logs.
 - Bounded task manager with positive worker-count, task-key and callable validation, monotonic scheduler with finite non-boolean timing, name and callback validation, and subprocess supervisor with finite positive timeout validation (including overflow-safe rejection of oversized values); feed, plugin HTTP and HLS timeout validation also rejects booleans and overflowing integers, process-group cleanup on timeout/shutdown, and descendant cleanup after synchronous command exit, and bounded stdout/stderr capture (1 MiB tail per stream).
-- Shared mpv IPC controller, including reuse of an existing configured IPC socket; GTK-independent popup scroll-bound and shared HTTP(S) link-validation helpers with regression tests; all popup and tray browser-opening paths validate links before handing them to the desktop browser.
+- Shared mpv IPC controller, including reuse of an existing configured IPC socket; GTK-independent popup scroll-bound and shared HTTP(S) link-validation helpers with regression tests; all popup and tray browser-opening paths validate links before handing them to the desktop browser; all worker-to-GTK idle callbacks pass through the shutdown guard.
 
 ## Partial feature implementations
 
