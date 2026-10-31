@@ -365,7 +365,7 @@ def test_play_next_unwatched_respects_newest_episode_order(tmp_path):
     assert service.play_next_unwatched(source_id)["id"] == "new"
 
 
-def test_play_episode_uses_large_hls_partial_and_playlist_duration(tmp_path):
+def test_play_episode_uses_hls_partial_after_one_minute_of_media(tmp_path):
     class Player:
         def __init__(self, partial):
             self.partial = str(partial)
@@ -378,7 +378,7 @@ def test_play_episode_uses_large_hls_partial_and_playlist_duration(tmp_path):
     store = JsonStore(tmp_path / "media.json",
                       lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
     partial = tmp_path / "episode.mkv.part"
-    partial.write_bytes(b"x" * 1_500_000)
+    partial.write_bytes(b"x")
     player = Player(partial)
     service = MediaService(store, tmp_path / "plugins", player=player)
     service.state["episodes"]["hls"] = {
@@ -387,7 +387,7 @@ def test_play_episode_uses_large_hls_partial_and_playlist_duration(tmp_path):
     }
     service.state["download"] = {
         "episode_id": "hls", "status": "downloading",
-        "part_path": str(partial), "duration": 100.0,
+        "part_path": str(partial), "duration": 100.0, "elapsed": 60.0,
     }
 
     service.play_episode("hls")
