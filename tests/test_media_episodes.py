@@ -65,3 +65,34 @@ def test_episode_normalization_validates_dates_numbers_headers_and_subtitles():
             pass
         else:
             raise AssertionError(f"Invalid plugin episode accepted: {invalid}")
+
+
+def test_episode_and_subtitle_urls_reject_malformed_http_authorities():
+    for invalid_url in (
+        "https://", "http:///missing-host", "https://example.test:bad/video.mp4",
+        "https://example.test:99999/video.mp4", "https://[::1/video.mp4",
+        "https://example.test/has space.mp4",
+    ):
+        try:
+            normalize_episode({"id": "bad", "title": "Bad", "url": invalid_url}, "source")
+        except ValueError as exc:
+            assert "valid HTTP or HTTPS URL" in str(exc)
+        else:
+            raise AssertionError(f"Malformed episode URL accepted: {invalid_url}")
+
+        try:
+            normalize_episode({
+                "id": "bad-sub", "title": "Bad",
+                "subs": {"en": invalid_url},
+            }, "source")
+        except ValueError as exc:
+            assert "valid HTTP(S) URL" in str(exc)
+        else:
+            raise AssertionError(f"Malformed subtitle URL accepted: {invalid_url}")
+
+
+def test_episode_url_scheme_is_case_insensitive():
+    normalized = normalize_episode({
+        "id": "upper", "title": "Upper", "url": "HTTPS://example.test/video.mp4",
+    }, "source")
+    assert normalized.url == "HTTPS://example.test/video.mp4"
