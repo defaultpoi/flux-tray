@@ -2,6 +2,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
+import pytest
+
 from flux_tray.core.process import ProcessResult
 from flux_tray.media.hls import HlsDownloader, HlsVariant, parse_playlist, pick_variant
 
