@@ -1,6 +1,8 @@
 import threading
 import time
 
+import pytest
+
 from flux_tray.core.tasks import TaskManager
 
 
@@ -38,5 +40,28 @@ def test_immediately_completed_tasks_release_duplicate_keys():
             future = tasks.submit(f"quick-{index}", lambda: True)
             assert future is not None
             assert future.result(timeout=2) is True
+    finally:
+        tasks.shutdown()
+@pytest.mark.parametrize("workers", [0, -1, True, 1.5])
+def test_task_manager_requires_positive_integer_worker_count(workers):
+    with pytest.raises(ValueError, match="positive integer"):
+        TaskManager(workers=workers)
+
+
+@pytest.mark.parametrize("key", [None, "", "  "])
+def test_task_manager_rejects_empty_task_keys(key):
+    tasks = TaskManager()
+    try:
+        with pytest.raises(ValueError, match="non-empty string"):
+            tasks.submit(key, lambda: None)
+    finally:
+        tasks.shutdown()
+
+
+def test_task_manager_rejects_non_callable_task():
+    tasks = TaskManager()
+    try:
+        with pytest.raises(TypeError, match="callable"):
+            tasks.submit("invalid", None)
     finally:
         tasks.shutdown()
