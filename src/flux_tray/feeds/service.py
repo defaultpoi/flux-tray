@@ -11,7 +11,7 @@ from uuid import uuid4
 import feedparser
 
 from flux_tray.core.storage import JsonStore
-from flux_tray.feeds.fetch import FetchResult, fetch_feed
+from flux_tray.feeds.fetch import FetchResult, fetch_feed, validate_feed_url
 
 
 def _now() -> datetime:
@@ -67,9 +67,7 @@ class FeedService:
         self.store.save(self.state)
 
     def add_feed(self, url: str, name: str | None = None, interval: int | None = None) -> str:
-        url = url.strip()
-        if not url.startswith(("https://", "http://")):
-            raise ValueError("Feed URL must use HTTP or HTTPS")
+        url = validate_feed_url(url.strip())
         if any(feed["url"] == url for feed in self.state["feeds"]):
             raise ValueError("Feed already exists")
         feed_id = uuid4().hex
