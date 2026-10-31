@@ -129,7 +129,7 @@ ln -sf ~/projects/void-tray/void-tray ~/.local/bin/void-tray
 void-tray   # run once in the foreground to see any tracebacks
 ```
 
-The launcher resolves the symlink, so updating is `git pull` and a restart of the app; there is no copy step.
+`./install.sh` does the `ln -sf` for you (`--autostart` also adds the autostart entry, `--no-autostart` removes it; `./uninstall.sh` undoes both and leaves your config alone). The launcher resolves the symlink, so updating is `git pull` and a restart of the app; there is no copy step.
 
 Coming from the single-file `rss-tray`: on its first start without a config of its own, void-tray copies `config.conf`, `state.json` and `notification.wav` from `~/.config/rss-tray/` (the old directory is left untouched), so feeds, read state and the sound carry over.
 
@@ -389,9 +389,14 @@ void_tray/
   playback.py          one persistent mpv fed by streamlink
   weather.py           Open-Meteo, MeteoAlarm, weather glyphs
   desktop.py           sound, fullscreen detection, editor, launcher
+  links.py             opens feed links only when they are http(s) addresses
+  fileutil.py          write_atomic: a file replaced whole, through a temp file of its own
   gi_env.py            the GObject-introspection imports, in one place
   ui/                  mixins: feeds, live, weather, updates, timer, icon, connectivity, popup
 tests/                 one test file per module, plus facade.py, helpers.py and run_stubbed.py
+tests/golden/          the popup's widget tree for two scenarios, and the script that makes it
+docs/                  FEATURES.md (what each test pins), ARCHITECTURE.md, STATUS.md, XFCE-VALIDATION.md
+install.sh, uninstall.sh
 ```
 
 Pure logic (parsers, config readers, schedule maths) lives in the top-level modules and never touches GTK; everything that builds or updates widgets is in `ui/`.
@@ -403,7 +408,7 @@ python3 -m unittest discover -s tests -v   # real PyGObject (needs PyGObject and
 python3 tests/run_stubbed.py               # GTK replaced by mocks; both must pass
 ```
 
-CI runs both on every push. Tests refer to the code through `tests/facade.py`, one namespace over the whole package: reading `rt.name` returns the value from the module that defines it, and `mock.patch.object(rt, 'name', ...)` rebinds it in every module that imported it, so a patch reaches the code under test wherever it lives. That only works while a name means one thing, so the facade refuses to build when two modules bind the same name to different objects (for example `import datetime` in one and `from datetime import datetime` in another): every test module then fails to import, with the name and the modules in the message. Rename one of them or import both the same way.
+`tests/test_golden_popup.py` compares the real popup's widget tree with the files in `tests/golden/` (it needs a display, so run the first command under `xvfb-run -a`), and `tests/test_parity.py` checks that every feature in `docs/FEATURES.md` still has its tests; see `CONTRIBUTING.md`. CI runs both modes on every push. Tests refer to the code through `tests/facade.py`, one namespace over the whole package: reading `rt.name` returns the value from the module that defines it, and `mock.patch.object(rt, 'name', ...)` rebinds it in every module that imported it, so a patch reaches the code under test wherever it lives. That only works while a name means one thing, so the facade refuses to build when two modules bind the same name to different objects (for example `import datetime` in one and `from datetime import datetime` in another): every test module then fails to import, with the name and the modules in the message. Rename one of them or import both the same way.
 
 ## License
 

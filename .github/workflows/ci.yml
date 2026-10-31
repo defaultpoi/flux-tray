@@ -14,6 +14,7 @@ jobs:
           /usr/bin/python3 -m compileall -q void_tray tests
           /usr/bin/python3 -m py_compile void-tray
           /usr/bin/python3 -m pyflakes void_tray tests void-tray
+          sh -n install.sh && sh -n uninstall.sh
       - name: Tests (real GTK)
         run: xvfb-run -a /usr/bin/python3 -m unittest discover -s tests -v
       - name: Tests (GTK stubbed)
