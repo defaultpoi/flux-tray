@@ -11,12 +11,18 @@ T = TypeVar("T")
 
 class TaskManager:
     def __init__(self, workers: int = 4):
+        if isinstance(workers, bool) or not isinstance(workers, int) or workers <= 0:
+            raise ValueError("workers must be a positive integer")
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="flux-tray")
         self._lock = Lock()
         self._active: dict[str, Future] = {}
         self._closed = False
 
     def submit(self, key: str, function: Callable[..., T], *args, **kwargs) -> Future[T] | None:
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("task key must be a non-empty string")
+        if not callable(function):
+            raise TypeError("task function must be callable")
         with self._lock:
             if self._closed:
                 raise RuntimeError("task manager is shut down")
