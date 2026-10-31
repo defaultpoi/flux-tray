@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -38,6 +39,7 @@ class MediaService:
         self.screen_height = int(screen_height) if screen_height else None
         self.yt_dlp_sort = yt_dlp_sort.strip() if yt_dlp_sort and yt_dlp_sort.strip() else None
         self.current_episode_id: str | None = None
+        self._download_lock = Lock()
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.state = store.load()
         if not isinstance(self.state, dict):
@@ -430,6 +432,18 @@ class MediaService:
         return False
     def _download_and_record(self, episode: dict[str, Any], *, cancelled=None,
                              progress_callback=None) -> str:
+        with self._download_lock:
+            existing_path = episode.get("path")
+            if existing_path and Path(existing_path).is_file():
+                if episode.get("status") != "downloaded":
+                    self.mark_downloaded(episode["id"], existing_path)
+                return existing_path
+            return self._download_and_record_locked(
+                episode, cancelled=cancelled, progress_callback=progress_callback
+            )
+
+    def _download_and_record_locked(self, episode: dict[str, Any], *, cancelled=None,
+                                    progress_callback=None) -> str:
         download_state = {
             "episode_id": episode["id"], "title": episode.get("title", "Untitled"),
             "status": "downloading", "started_at": self.now().isoformat(),
