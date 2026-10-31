@@ -118,14 +118,20 @@ def test_output_callback_receives_process_output():
 
 def test_process_capture_keeps_bounded_output_tails():
     size = ProcessSupervisor.MAX_CAPTURE_CHARS + 100_000
+    callback_chunks = []
     script = (
         "import sys; "
         "sys.stdout.write('A' * " + str(size) + " + 'stdout-tail'); "
         "sys.stderr.write('B' * " + str(size) + " + 'stderr-tail')"
     )
-    result = ProcessSupervisor().run([sys.executable, "-c", script], timeout=5)
+    result = ProcessSupervisor().run(
+        [sys.executable, "-c", script], timeout=5,
+        output_callback=lambda channel, chunk: callback_chunks.append(len(chunk)),
+    )
 
     assert len(result.stdout) <= ProcessSupervisor.MAX_CAPTURE_CHARS
     assert len(result.stderr) <= ProcessSupervisor.MAX_CAPTURE_CHARS
     assert result.stdout.endswith("stdout-tail")
     assert result.stderr.endswith("stderr-tail")
+    assert callback_chunks
+    assert max(callback_chunks) <= ProcessSupervisor.READ_CHUNK_CHARS
