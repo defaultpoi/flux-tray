@@ -18,11 +18,16 @@ class MediaPluginRegistry:
         self.directory = Path(directory)
         self.log = logging.getLogger("flux_tray.media.plugins")
         self.plugins: list[ModuleType] = []
+        self._module_names: set[str] = set()
 
     def reload(self) -> None:
         loaded = []
-        if self.directory.exists():
-            for path in sorted(self.directory.glob("*.py")):
+        paths = sorted(self.directory.glob("*.py")) if self.directory.exists() else []
+        current_names = {f"flux_tray_user_plugin_{path.stem}" for path in paths}
+        for stale_name in self._module_names - current_names:
+            sys.modules.pop(stale_name, None)
+        self._module_names = current_names
+        for path in paths:
                 module_name = f"flux_tray_user_plugin_{path.stem}"
                 try:
                     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -31,7 +36,9 @@ class MediaPluginRegistry:
                     module = importlib.util.module_from_spec(spec)
                     module.flux_tray_helpers = helpers
                     sys.modules[module_name] = module
-                    spec.loader.exec_module(module)
+                    # Bypass timestamp-based bytecode reuse so same-tick edits load.
+                    code = compile(path.read_bytes(), str(path), "exec")
+                    exec(code, module.__dict__)
                     if not callable(getattr(module, "list_episodes", None)):
                         raise TypeError("Plugin must define list_episodes(source)")
                     loaded.append(module)
