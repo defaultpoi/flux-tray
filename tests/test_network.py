@@ -170,6 +170,11 @@ class TestConnectivityProbes(unittest.TestCase):
         table = self.ROUTE.splitlines()[0] + '\n' + self.ROUTE.splitlines()[2] + '\n'
         self.assertIsNone(rt._parse_default_gateway(table))
 
+    def test_a_route_line_that_is_too_short_is_skipped_not_an_error(self):
+        table = 'Iface\tDestination\tGateway\nwlan0\t00000000\t0101A8C0\n' + self.ROUTE.splitlines()[1] + '\n'
+        self.assertEqual(rt._parse_default_gateway(table), '192.168.1.1')
+        self.assertIsNone(rt._parse_default_gateway('Iface\tDestination\tGateway\nwlan0\t00000000\t0101A8C0\n'))
+
     def test_down_default_route_is_ignored(self):
         self.assertIsNone(rt._parse_default_gateway(self.ROUTE.replace('0003', '0001', 1)))
 

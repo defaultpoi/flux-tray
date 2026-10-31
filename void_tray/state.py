@@ -3,9 +3,9 @@
 import json
 import math
 import os
-import uuid
 
 from .constants import CONFIG_DIR
+from .fileutil import write_atomic
 from .log import _log
 
 
@@ -79,17 +79,7 @@ def _write_json(path, data):
     place, so a reader never sees a half-written file and two writers (two
     threads, or a new instance starting while the old one exits) never share
     a temp file. The temp file is removed if anything fails."""
-    tmp = f'{path}.{uuid.uuid4().hex}.tmp'
-    try:
-        with open(tmp, 'x') as f:
-            json.dump(data, f)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    write_atomic(path, lambda f: json.dump(data, f))
 
 
 def save_state(state):

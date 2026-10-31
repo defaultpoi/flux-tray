@@ -704,3 +704,44 @@ class TestYoutubeChannelsAndQualities(TmpConfigCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestConfigEditsFromSeveralThreads(TmpConfigCase):
+    """A weather write and a Mute click are edits of config.conf from different threads."""
+
+    def test_edits_of_different_sections_do_not_overwrite_each_other(self):
+        import threading
+        import time
+        self.conf('[feeds]\n[mute]\n[twitch]\n[youtube]\n')
+        names, per_thread = ['feeds', 'mute', 'twitch', 'youtube'], 10
+        start = threading.Barrier(len(names))
+
+        def work(name):
+            start.wait()
+            for i in range(per_thread):
+                def transform(lines, i=i):
+                    time.sleep(0.002)  # a slow edit: the read and the write are far apart
+                    return lines + [f'{name}{i}\n']
+                rt._edit_config_section(name, transform)
+
+        threads = [threading.Thread(target=work, args=(n,)) for n in names]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        sections = rt._read_config_sections()
+        for name in names:
+            self.assertEqual(sections[name], [f'{name}{i}' for i in range(per_thread)], name)
+
+    def test_no_temp_file_is_left_beside_the_config(self):
+        self.conf('[feeds]\n')
+        rt._edit_config_section('feeds', lambda lines: lines + ['https://x.example/rss\n'])
+        self.assertEqual(os.listdir(self.dir), ['config.conf'])
+
+    def test_a_write_that_fails_leaves_the_config_alone_and_no_temp_file(self):
+        self.conf('[feeds]\nhttps://x.example/rss\n')
+        with mock.patch.object(rt.os, 'replace', side_effect=OSError('read-only')):
+            rt._edit_config_section('feeds', lambda lines: lines + ['https://y.example/rss\n'])  # best-effort: no error
+        self.assertEqual(os.listdir(self.dir), ['config.conf'])
+        with open(rt.CONFIG_FILE) as f:
+            self.assertEqual(f.read(), '[feeds]\nhttps://x.example/rss\n')

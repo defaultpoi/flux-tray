@@ -82,7 +82,7 @@ def _parse_default_gateway(route_table):
     dotted quad, or None if there is no default route."""
     for line in route_table.splitlines()[1:]:
         fields = line.split()
-        if len(fields) >= 3 and fields[1] == '00000000' and int(fields[3], 16) & 2:
+        if len(fields) >= 4 and fields[1] == '00000000' and int(fields[3], 16) & 2:
             raw = bytes.fromhex(fields[2])[::-1]  # stored little-endian
             return '.'.join(str(b) for b in raw)
     return None

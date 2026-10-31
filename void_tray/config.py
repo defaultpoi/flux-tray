@@ -4,8 +4,10 @@ import os
 import re
 import shlex
 import shutil
+import threading
 
 from .constants import CONFIG_DIR, CONFIG_FILE, DEFAULT_HIGHLIGHT_WORDS, LEGACY_CONFIG_DIR
+from .fileutil import write_atomic
 from .log import _log
 from .textutil import _fold_text
 from .windows import parse_schedule
@@ -538,40 +540,43 @@ def load_weather_settings():
     }
 
 
+_config_edit_lock = threading.RLock()  # one edit of config.conf at a time: read, change, replace
+
+
 def _edit_config_section(name, transform):
     """Rewrites config.conf in place: `transform` receives the lines of the
     [name] section (without the header; the section is created at the end of
     the file if it's missing) and returns the replacement lines. Every other
     line -- including comments and other sections -- is left untouched.
-    Best-effort: failures are swallowed (callers just redo the work later)."""
-    try:
-        with open(CONFIG_FILE, encoding='utf-8', errors='replace') as f:
-            lines = f.readlines()
-    except OSError:
-        lines = []
+    Edits from different threads (a weather write, a Mute click) take turns, so
+    none overwrites the other's change, and each writes through a temp file of
+    its own. Best-effort: failures are swallowed (callers just redo the work later)."""
+    with _config_edit_lock:
+        try:
+            with open(CONFIG_FILE, encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+        except OSError:
+            lines = []
 
-    def is_section(line, wanted=None):
-        stripped = line.strip()
-        if not (stripped.startswith('[') and stripped.endswith(']')):
-            return False
-        return wanted is None or stripped[1:-1].strip().lower() == wanted
+        def is_section(line, wanted=None):
+            stripped = line.strip()
+            if not (stripped.startswith('[') and stripped.endswith(']')):
+                return False
+            return wanted is None or stripped[1:-1].strip().lower() == wanted
 
-    start = next((i for i, l in enumerate(lines) if is_section(l, name)), None)
-    if start is None:
-        if lines and not lines[-1].endswith('\n'):
-            lines.append('\n')
-        lines.append(f'[{name}]\n')
-        start = len(lines) - 1
-    end = next((i for i in range(start + 1, len(lines)) if is_section(lines[i])), len(lines))
-    lines[start + 1:end] = transform(lines[start + 1:end])
+        start = next((i for i, l in enumerate(lines) if is_section(l, name)), None)
+        if start is None:
+            if lines and not lines[-1].endswith('\n'):
+                lines.append('\n')
+            lines.append(f'[{name}]\n')
+            start = len(lines) - 1
+        end = next((i for i in range(start + 1, len(lines)) if is_section(lines[i])), len(lines))
+        lines[start + 1:end] = transform(lines[start + 1:end])
 
-    try:
-        tmp = CONFIG_FILE + '.tmp'
-        with open(tmp, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
-        os.replace(tmp, CONFIG_FILE)
-    except OSError:
-        pass
+        try:
+            write_atomic(CONFIG_FILE, lambda f: f.writelines(lines))
+        except OSError:
+            pass
 
 
 def _edit_weather_section(transform):
