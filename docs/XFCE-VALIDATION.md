@@ -8,6 +8,9 @@ This checklist is intentionally separate from the pure-Python CI result. Complet
 - [ ] Confirm GTK3/PyGObject imports: `python3 -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk, Gdk, GLib'`.
 - [ ] Confirm the tray host is running (XFCE Panel's notification area or Status Notifier host).
 - [ ] Launch Flux Tray from a terminal once and inspect `~/.local/state/flux-tray/` for startup errors.
+- [ ] Run `./install.sh --autostart`; verify the launcher, applications entry and XFCE autostart entry are created and launch without a terminal.
+- [ ] Run `./install.sh --no-autostart`; verify the application entry remains but the autostart entry is removed.
+- [ ] In a disposable test account, run `./uninstall.sh`; verify application files are removed while config and data remain.
 - [ ] Launch it a second time; verify the existing tray opens and a second icon/controller is not created.
 - [ ] Launch from the intended desktop autostart entry and verify no terminal is required.
 
