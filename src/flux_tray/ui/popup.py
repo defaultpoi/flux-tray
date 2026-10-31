@@ -223,7 +223,7 @@ class FeedPopup:
         categories = item.get("categories") or []
         if categories:
             details.append("Categories: " + ", ".join(str(value) for value in categories))
-        tooltip = "\\n".join(details)
+        tooltip = "\n".join(details)
         clickable.set_tooltip_text(tooltip)
 
         label = Gtk.Label(label=title)
