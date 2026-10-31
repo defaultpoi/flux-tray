@@ -1,3 +1,6 @@
+import os
+import sys
+
 from flux_tray.media.plugins import MediaPluginRegistry
 
 
@@ -148,10 +151,6 @@ def test_plugin_download_accepts_path_relative_to_output_directory(tmp_path):
     result = registry.download_episode("plugin:downloader:source", {}, tmp_path)
     assert result == str(tmp_path / "episode.mkv")
 
-
-
-import os
-import sys
 
 
 def test_plugin_reload_observes_same_size_edit_with_unchanged_timestamp(tmp_path):
