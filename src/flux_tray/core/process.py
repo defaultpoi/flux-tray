@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import signal
 import subprocess
@@ -38,8 +39,13 @@ class ProcessSupervisor:
     ) -> ProcessResult:
         if not argv or not all(isinstance(part, str) for part in argv):
             raise ValueError("argv must be a non-empty sequence of strings")
-        if timeout <= 0:
-            raise ValueError("timeout must be positive")
+        try:
+            valid_timeout = (not isinstance(timeout, bool)
+                             and math.isfinite(timeout) and timeout > 0)
+        except TypeError as exc:
+            raise ValueError("timeout must be a finite positive number") from exc
+        if not valid_timeout:
+            raise ValueError("timeout must be a finite positive number")
         with self._lock:
             if self._closed:
                 raise ProcessError("process supervisor is shutting down")
