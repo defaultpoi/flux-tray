@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from threading import Event, Thread
 
 from flux_tray.core.storage import JsonStore
 from flux_tray.media.service import MediaService
@@ -602,4 +603,52 @@ def test_play_episode_persists_on_demand_download_failure(tmp_path):
     assert episode["last_attempt"]
     assert service.state["download"]["status"] == "failed"
     assert service.state["download"]["error"] == "network unavailable"
+
+def test_concurrent_media_download_requests_do_not_download_same_episode_twice(tmp_path):
+    started = Event()
+    release = Event()
+    calls = []
+
+    class Downloader:
+        def download(self, episode, output_dir, **kwargs):
+            calls.append(episode["id"])
+            started.set()
+            assert release.wait(timeout=3)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            path = output_dir / "episode.mkv"
+            path.write_bytes(b"video")
+            return str(path)
+
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", ahead=0,
+                           downloader=Downloader(), output_dir=tmp_path / "videos")
+    source_id = service.add_source("rss", "https://example.test/feed.xml", "Feed")
+    service.state["episodes"]["episode"] = {
+        "id": "episode", "source_id": source_id, "title": "Episode",
+        "url": "https://media.example.test/episode.mp4", "status": "queued",
+    }
+    service.state["queue"] = ["episode"]
+    errors = []
+
+    def run_download():
+        try:
+            service.download_next()
+        except Exception as exc:
+            errors.append(exc)
+
+    first = Thread(target=run_download)
+    second = Thread(target=run_download)
+    first.start()
+    assert started.wait(timeout=3)
+    second.start()
+    release.set()
+    first.join(timeout=3)
+    second.join(timeout=3)
+
+    assert not first.is_alive() and not second.is_alive()
+    assert errors == []
+    assert calls == ["episode"]
+    assert service.state["episodes"]["episode"]["status"] == "downloaded"
+    assert service.state["download"]["status"] == "completed"
 
