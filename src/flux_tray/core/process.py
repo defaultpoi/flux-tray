@@ -27,6 +27,7 @@ class ProcessError(RuntimeError):
 
 class ProcessSupervisor:
     MAX_CAPTURE_CHARS = 1_048_576
+    READ_CHUNK_CHARS = 8_192
 
     def __init__(self):
         self._lock = Lock()
@@ -63,7 +64,7 @@ class ProcessSupervisor:
         def drain(stream, chunks, channel):
             captured_chars = 0
             try:
-                for line in iter(stream.readline, ""):
+                for line in iter(lambda: stream.readline(self.READ_CHUNK_CHARS), ""):
                     chunks.append(line)
                     captured_chars += len(line)
                     if captured_chars > self.MAX_CAPTURE_CHARS:
