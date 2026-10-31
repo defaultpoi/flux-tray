@@ -884,7 +884,7 @@ class TrayController:
             return GLib.SOURCE_REMOVE
         future = self.tasks.submit("media-check", self.media.check_due, force=force)
         if future is not None:
-            future.add_done_callback(lambda done: GLib.idle_add(self._media_check_complete, done))
+            future.add_done_callback(lambda done: self._idle_add(self._media_check_complete, done))
         return GLib.SOURCE_CONTINUE
 
     def _media_check_complete(self, future):
@@ -916,10 +916,10 @@ class TrayController:
         if future is not None:
             if self.menu.get_mapped():
                 self._rebuild_menu(self.menu)
-            future.add_done_callback(lambda done: GLib.idle_add(self._media_download_complete, done))
+            future.add_done_callback(lambda done: self._idle_add(self._media_download_complete, done))
 
     def _queue_media_progress(self, download_state):
-        GLib.idle_add(self._media_progress_update, download_state)
+        self._idle_add(self._media_progress_update, download_state)
 
     def _media_progress_update(self, download_state):
         current = self.media.state.get("download") or {}
@@ -958,12 +958,12 @@ class TrayController:
         future = self.tasks.submit("media-playback", self.media.play_next_unwatched,
                                    source_id=source_id)
         if future is not None:
-            future.add_done_callback(lambda done: GLib.idle_add(self._media_play_complete, done, None))
+            future.add_done_callback(lambda done: self._idle_add(self._media_play_complete, done, None))
 
     def _play_media_episode(self, episode):
         future = self.tasks.submit("media-playback", self.media.play_episode, episode["id"])
         if future is not None:
-            future.add_done_callback(lambda done: GLib.idle_add(
+            future.add_done_callback(lambda done: self._idle_add(
                 self._media_play_complete, done, episode.get("url")))
 
     def _media_play_complete(self, future, fallback_url):
@@ -1104,7 +1104,7 @@ class TrayController:
             return GLib.SOURCE_REMOVE
         future = self.tasks.submit("live-check", self.live.check_due, force=force)
         if future is not None:
-            future.add_done_callback(lambda done: GLib.idle_add(self._live_complete, done))
+            future.add_done_callback(lambda done: self._idle_add(self._live_complete, done))
         return GLib.SOURCE_CONTINUE
 
     def _live_complete(self, future):
@@ -1278,7 +1278,7 @@ class TrayController:
             return GLib.SOURCE_REMOVE
         future = self.tasks.submit("weather-refresh", self.weather.refresh, force=force)
         if future is not None:
-            future.add_done_callback(lambda done: GLib.idle_add(self._weather_complete, done))
+            future.add_done_callback(lambda done: self._idle_add(self._weather_complete, done))
         return GLib.SOURCE_CONTINUE
 
     def _weather_complete(self, future):
@@ -1300,7 +1300,7 @@ class TrayController:
     def _scan_updates(self):
         future = self.tasks.submit("xbps-scan", self.updates.scan_updates)
         if future is not None:
-            future.add_done_callback(lambda done: GLib.idle_add(self._update_scan_complete, done))
+            future.add_done_callback(lambda done: self._idle_add(self._update_scan_complete, done))
 
     def _update_scan_complete(self, future):
         try:
@@ -1332,7 +1332,7 @@ class TrayController:
         if response == Gtk.ResponseType.YES:
             future = self.tasks.submit("xbps-update", self.updates.apply_updates)
             if future is not None:
-                future.add_done_callback(lambda done: GLib.idle_add(self._update_action_complete, done))
+                future.add_done_callback(lambda done: self._idle_add(self._update_action_complete, done))
 
     def _show_update_action_dialog(self):
         action = self.updates.state.get("last_action") or {}
@@ -1369,7 +1369,7 @@ class TrayController:
     def _list_orphans(self):
         future = self.tasks.submit("xbps-orphans", self.updates.list_orphans)
         if future is not None:
-            future.add_done_callback(lambda done: GLib.idle_add(self._orphan_list_complete, done))
+            future.add_done_callback(lambda done: self._idle_add(self._orphan_list_complete, done))
 
     def _orphan_list_complete(self, future):
         try:
@@ -1393,7 +1393,7 @@ class TrayController:
             action = self.updates.remove_orphans_and_clean_cache if response == 2 else self.updates.remove_orphans
             future = self.tasks.submit("xbps-remove-orphans", action)
             if future is not None:
-                future.add_done_callback(lambda done: GLib.idle_add(self._update_action_complete, done))
+                future.add_done_callback(lambda done: self._idle_add(self._update_action_complete, done))
         return GLib.SOURCE_REMOVE
 
     def _update_action_complete(self, future):
@@ -1432,7 +1432,7 @@ class TrayController:
         if response == Gtk.ResponseType.YES:
             future = self.tasks.submit("connectivity-reset", self.connectivity.reset)
             if future is not None:
-                future.add_done_callback(lambda done: GLib.idle_add(self._network_reset_complete, done))
+                future.add_done_callback(lambda done: self._idle_add(self._network_reset_complete, done))
 
     def _network_reset_complete(self, future):
         try:
@@ -1448,7 +1448,7 @@ class TrayController:
             return GLib.SOURCE_REMOVE
         future = self.tasks.submit("connectivity-check", self._check_connectivity)
         if future is not None:
-            future.add_done_callback(lambda done: GLib.idle_add(self._connectivity_complete, done))
+            future.add_done_callback(lambda done: self._idle_add(self._connectivity_complete, done))
         return GLib.SOURCE_CONTINUE
 
     def _check_connectivity(self):
@@ -1603,7 +1603,7 @@ class TrayController:
             return self.feeds.check_due(force=force)
         future = self.tasks.submit("feed-refresh", work)
         if future is not None:
-            future.add_done_callback(lambda done: GLib.idle_add(self._refresh_complete, done))
+            future.add_done_callback(lambda done: self._idle_add(self._refresh_complete, done))
 
     def _refresh_complete(self, future):
         try:
