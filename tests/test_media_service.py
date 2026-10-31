@@ -694,3 +694,17 @@ def test_media_source_rejects_malformed_http_authority(tmp_path):
             raise AssertionError(f"Malformed media source URL accepted: {url}")
     source_id = service.add_source("rss", "HTTPS://example.test/feed.xml")
     assert service.state["sources"][0]["id"] == source_id
+
+
+def test_media_source_update_rejects_malformed_http_authority(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    source_id = service.add_source("rss", "https://example.test/old.xml")
+    try:
+        service.update_source(source_id, "rss", "https://example.test:bad/new.xml", "New")
+    except ValueError as exc:
+        assert "valid HTTP or HTTPS URL" in str(exc)
+    else:
+        raise AssertionError("Malformed replacement source URL was accepted")
+    assert service.state["sources"][0]["url"] == "https://example.test/old.xml"
