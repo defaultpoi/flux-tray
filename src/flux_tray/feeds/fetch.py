@@ -42,7 +42,7 @@ def fetch_feed(url: str, *, etag: str | None = None, modified: str | None = None
     """Fetch one feed with conditional headers, a hard timeout and size limit."""
     validate_feed_url(url)
     try:
-        valid_timeout = math.isfinite(timeout) and timeout > 0
+        valid_timeout = not isinstance(timeout, bool) and math.isfinite(timeout) and timeout > 0
     except TypeError as exc:
         raise ValueError("Feed timeout must be a finite positive number") from exc
     if not valid_timeout:
