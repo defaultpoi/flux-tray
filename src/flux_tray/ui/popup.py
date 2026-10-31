@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import webbrowser
 from html import escape
-from urllib.parse import urlsplit
 
 import gi
 
