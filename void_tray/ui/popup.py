@@ -170,6 +170,40 @@ class PopupMixin:
             self.popup.hide()
 
     def build_popup_window(self):
+        """The popup, top to bottom: weather bar, offline banner, schedule warning, the
+        list with the timer slide over it, the footer buttons. Each part is built by
+        its own method; the order of the calls is the order the widgets were always
+        made in, which the timer widgets depend on."""
+        win = self._new_popup_window()
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._add_weather_bar(outer)
+        self._add_offline_banner(outer)
+        self._add_schedule_warning(outer)
+        content_overlay = self._build_list_overlay()
+        timer_children = self._add_timer_slide(content_overlay)
+        self._add_timer_status(content_overlay)
+        self._apply_missed_style()  # a countdown missed while the popup was closed is still showing
+        self._update_timer_widgets()
+        self._update_timer_status()
+        # timer_box has no_show_all(True) so that the popup's own show_all()
+        # doesn't reveal it prematurely — but that flag ALSO blocks show_all()
+        # called on timer_box itself (no_show_all stops recursion at the
+        # widget that has it set, however show_all() was invoked). So its
+        # children must be shown individually with .show(), which no_show_all
+        # does not affect, rather than via any show_all() call on the box.
+        for widget in timer_children:
+            widget.show_all()
+        self._apply_timer_mode()
+
+        outer.pack_start(content_overlay, True, True, 0)
+
+        outer.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 2)
+        outer.pack_start(self._build_footer(), False, False, 0)
+
+        win.add(outer)
+        self.popup = win
+
+    def _new_popup_window(self):
         win = Gtk.Window(type=Gtk.WindowType.POPUP)
         win.set_decorated(False)
         win.set_skip_taskbar_hint(True)
@@ -179,9 +213,9 @@ class PopupMixin:
         win.set_default_size(WINDOW_WIDTH, -1)
         win.connect('focus-out-event', self.on_popup_focus_out)
         win.connect('key-press-event', self.on_popup_key)
+        return win
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-
+    def _add_weather_bar(self, outer):
         weather_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         weather_box.get_style_context().add_class('weather-bar')
         weather_box.set_margin_start(6)
@@ -193,6 +227,7 @@ class PopupMixin:
         outer.pack_start(weather_box, False, False, 0)
         outer.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 0)
 
+    def _add_offline_banner(self, outer):
         banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         banner.get_style_context().add_class('offline-banner')
         banner_label = Gtk.Label(label=OFFLINE_BANNER_TEXT)
@@ -212,6 +247,7 @@ class PopupMixin:
         self.reset_btn = reset_btn
         outer.pack_start(banner, False, False, 0)
 
+    def _add_schedule_warning(self, outer):
         warn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         warn_box.get_style_context().add_class('schedule-warning')
         warn_label = Gtk.Label()
@@ -233,6 +269,9 @@ class PopupMixin:
         self.schedule_banner_label = warn_label
         outer.pack_start(warn_box, False, False, 0)
 
+    def _build_list_overlay(self):
+        """The scrolled list (with the spacer under it) in an overlay the timer slide and
+        its status readout are laid over. Sets self.scroller, self.listbox, self.list_spacer."""
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroller.set_propagate_natural_height(True)
@@ -266,7 +305,11 @@ class PopupMixin:
 
         content_overlay = Gtk.Overlay()
         content_overlay.add(scroller)
+        return content_overlay
 
+    def _add_timer_slide(self, content_overlay):
+        """The Countdown/Schedule slide. Returns the boxes whose children must be shown
+        one by one once the rest is set up (see build_popup_window)."""
         timer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         timer_box.set_margin_start(8)
         timer_box.set_margin_end(8)
@@ -322,7 +365,9 @@ class PopupMixin:
 
         self.timer_box = timer_box
         content_overlay.add_overlay(timer_box)
+        return header, countdown_box, schedule_box
 
+    def _add_timer_status(self, content_overlay):
         # the readout that stands in for the slide while it is closed: what is counting,
         # one per line, right-aligned in the bottom-right corner above the footer
         status_label = Gtk.Label()
@@ -343,24 +388,8 @@ class PopupMixin:
         self.timer_status_box, self.timer_status_label = status_box, status_label
         self.timer_overlay = content_overlay
         self._timer_status_text = None
-        self._apply_missed_style()  # a countdown missed while the popup was closed is still showing
-        self._update_timer_widgets()
-        self._update_timer_status()
-        # timer_box has no_show_all(True) so that the popup's own show_all()
-        # doesn't reveal it prematurely — but that flag ALSO blocks show_all()
-        # called on timer_box itself (no_show_all stops recursion at the
-        # widget that has it set, however show_all() was invoked). So its
-        # children must be shown individually with .show(), which no_show_all
-        # does not affect, rather than via any show_all() call on the box.
-        header.show_all()
-        countdown_box.show_all()
-        schedule_box.show_all()
-        self._apply_timer_mode()
 
-        outer.pack_start(content_overlay, True, True, 0)
-
-        outer.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 2)
-
+    def _build_footer(self):
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         footer.set_margin_start(6)
         footer.set_margin_end(6)
@@ -388,10 +417,7 @@ class PopupMixin:
         quit_btn = Gtk.Button(label='Quit')
         quit_btn.connect('clicked', lambda *_a: Gtk.main_quit())
         footer.pack_start(quit_btn, True, True, 0)
-        outer.pack_start(footer, False, False, 0)
-
-        win.add(outer)
-        self.popup = win
+        return footer
 
     def on_popup_key(self, widget, event):
         if event.keyval == Gdk.KEY_Escape:

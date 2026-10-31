@@ -199,13 +199,25 @@ class TestItemTooltipDetails(unittest.TestCase):
         self.assertIsNone(self.tooltip({'id': '1', 'link': 'l', 'title': 'Short'}))
 
 
+POPUP_BUILDERS = ('_new_popup_window', '_add_weather_bar', '_add_offline_banner', '_add_schedule_warning',
+                  '_build_list_overlay', '_add_timer_slide', '_add_timer_status', '_build_footer')
+
+
+def with_real_popup_builders(app):
+    """A mock app whose popup builder methods are the real ones, so that
+    build_popup_window runs against mocked widgets."""
+    for name in POPUP_BUILDERS:
+        setattr(app, name, rt.types.MethodType(getattr(rt.RssTray, name), app))
+    return app
+
+
 class TestPopupReservesRoomForTheScheduleSlide(unittest.TestCase):
     """The popup window is never resized, so a short or empty list must already
     be tall enough for the Schedule slide when the person switches to it."""
 
     def build(self):
         gtk = mock.MagicMock()
-        app = mock.MagicMock()
+        app = with_real_popup_builders(mock.MagicMock())
         app.timer_remaining_seconds = 0
         app.timer_mode = 'countdown'
         app.timer_visible = True
@@ -223,7 +235,7 @@ class TestPopupReservesRoomForTheScheduleSlide(unittest.TestCase):
 
     def test_the_closed_timer_readout_is_an_overlay_that_lets_clicks_through(self):
         gtk = mock.MagicMock()
-        app = mock.MagicMock()
+        app = with_real_popup_builders(mock.MagicMock())
         app.timer_remaining_seconds = 0
         app.timer_mode = 'countdown'
         app.timer_visible = False
