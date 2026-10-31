@@ -46,7 +46,7 @@ def test_add_rejects_non_finite_initial_delay(delay):
         scheduler.add("feeds", 60, lambda: None, initial_delay=delay)
 
 
-@pytest.mark.parametrize("delay", [math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize("delay", [True, 10**1000, math.nan, math.inf, -math.inf])
 def test_retry_rejects_non_finite_delay(delay):
     scheduler = Scheduler()
     scheduler.add("feeds", 60, lambda: None)
