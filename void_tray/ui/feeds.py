@@ -3,11 +3,11 @@
 import feedparser
 import threading
 import time as time_module
-import webbrowser
 
 from ..gi_env import GLib, Gdk, Gtk, Pango
 from ..config import load_feeds, load_mute_filters
 from ..desktop import play_notification_sound
+from ..links import open_link
 from ..network import run_when_online
 from ..rules import (
     add_feed_mute_rule,
@@ -280,7 +280,7 @@ class FeedsMixin:
 
     def _feed_menu_open(self, _button, popover, url):
         popover.popdown()
-        webbrowser.open(url)
+        open_link(url)
 
     def _feed_menu_open_all(self, _button, popover, feed_url):
         """Every unread item of the feed becomes a browser tab and counts as read, as
@@ -300,8 +300,8 @@ class FeedsMixin:
     @staticmethod
     def _open_tabs(links):
         for link in links:
-            webbrowser.open_new_tab(link)
-            time_module.sleep(OPEN_TABS_DELAY_SECONDS)
+            if open_link(link, new_tab=True):
+                time_module.sleep(OPEN_TABS_DELAY_SECONDS)
 
     def _feed_menu_mute(self, _button, popover, feed_url, field, value):
         popover.popdown()
@@ -359,7 +359,7 @@ class FeedsMixin:
         """Opening a saved item takes it off the list, like reading an unread one."""
         self.remove_read_later(item_id)
         if link:
-            webbrowser.open(link)
+            open_link(link)
 
     def _remove_unread(self, item_id):
         with self.lock:

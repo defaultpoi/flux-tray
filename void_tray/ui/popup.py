@@ -1,7 +1,6 @@
 """The popup window and its list."""
 
 import threading
-import webbrowser
 
 from ..gi_env import GLib, Gdk, Gtk, Pango
 from ..config import (
@@ -14,6 +13,7 @@ from ..config import (
 )
 from ..constants import CONFIG_FILE, OFFLINE_BANNER_TEXT, TIMER_HEIGHT_COUNTDOWN_PX
 from ..desktop import edit_file_externally, is_fullscreen_active, run_launcher_command
+from ..links import open_link
 from ..playback import open_twitch_stream, open_youtube_stream
 from ..rules import group_unread_by_feed, item_detail_text, item_is_highlighted
 from ..updates import format_change
@@ -910,6 +910,6 @@ class PopupMixin:
         item_id, link = row.entry_id, row.link
         self._remove_unread(item_id)
         if link:
-            webbrowser.open(link)
+            open_link(link)
         self.update_icon()
         self.refresh_list()

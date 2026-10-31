@@ -195,11 +195,11 @@ class TestSaveForLater(unittest.TestCase):
         stub.refresh_list.assert_called_once()
 
     def test_opening_a_saved_item_removes_it_and_opens_its_link(self):
-        stub = self.Stub(read_later=[{'id': 'a', 'title': 'A', 'link': 'la'}])
+        stub = self.Stub(read_later=[{'id': 'a', 'title': 'A', 'link': 'https://x.example/la'}])
         with mock.patch.object(rt, 'save_state'), mock.patch.object(rt.webbrowser, 'open') as opened:
-            stub.open_read_later('a', 'la')
+            stub.open_read_later('a', 'https://x.example/la')
         self.assertEqual(stub.state['read_later'], [])
-        opened.assert_called_once_with('la')
+        opened.assert_called_once_with('https://x.example/la')
 
 
 class TestOpenAllAsTabs(unittest.TestCase):
@@ -248,8 +248,16 @@ class TestOpenAllAsTabs(unittest.TestCase):
         events = []
         with mock.patch.object(rt.webbrowser, 'open_new_tab', side_effect=lambda l: events.append(('tab', l))), \
                 mock.patch.object(rt.time_module, 'sleep', side_effect=lambda s: events.append(('sleep', s))):
-            rt.RssTray._open_tabs(['a', 'b'])
-        self.assertEqual(events, [('tab', 'a'), ('sleep', rt.OPEN_TABS_DELAY_SECONDS), ('tab', 'b'), ('sleep', rt.OPEN_TABS_DELAY_SECONDS)])
+            rt.RssTray._open_tabs(['https://x.example/a', 'https://x.example/b'])
+        self.assertEqual(events, [('tab', 'https://x.example/a'), ('sleep', rt.OPEN_TABS_DELAY_SECONDS),
+                                  ('tab', 'https://x.example/b'), ('sleep', rt.OPEN_TABS_DELAY_SECONDS)])
+
+    def test_a_link_that_is_not_a_web_address_is_skipped_without_a_pause(self):
+        events = []
+        with mock.patch.object(rt.webbrowser, 'open_new_tab', side_effect=lambda l: events.append(('tab', l))), \
+                mock.patch.object(rt.time_module, 'sleep', side_effect=lambda s: events.append(('sleep', s))):
+            rt.RssTray._open_tabs(['file:///etc/passwd', 'https://x.example/b'])
+        self.assertEqual(events, [('tab', 'https://x.example/b'), ('sleep', rt.OPEN_TABS_DELAY_SECONDS)])
 
 
 class TestFeedMenuReadLater(unittest.TestCase):
