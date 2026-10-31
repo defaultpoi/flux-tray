@@ -101,6 +101,16 @@ class HlsDownloader:
     def __init__(self, runner: Callable[..., ProcessResult] | None = None,
                  process: ProcessSupervisor | None = None, timeout: float = 14400,
                  playlist_timeout: float = 15, max_playlist_bytes: int = 1_000_000):
+        for name, value in (("timeout", timeout), ("playlist_timeout", playlist_timeout)):
+            try:
+                valid = math.isfinite(value) and value > 0
+            except TypeError as exc:
+                raise ValueError(f"{name} must be a finite positive number") from exc
+            if not valid:
+                raise ValueError(f"{name} must be a finite positive number")
+        if (isinstance(max_playlist_bytes, bool)
+                or not isinstance(max_playlist_bytes, int) or max_playlist_bytes <= 0):
+            raise ValueError("max_playlist_bytes must be a positive integer")
         self.process = process or ProcessSupervisor()
         self.runner = runner or self.process.run
         self.timeout = timeout
