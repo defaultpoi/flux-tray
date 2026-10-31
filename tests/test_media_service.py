@@ -538,3 +538,68 @@ def test_media_source_order_can_be_reset_to_driver_default(tmp_path):
     assert service.state["sources"][0]["order"] is None
     assert service.state["queue"] == ["first", "second"]
 
+def test_play_episode_persists_successful_on_demand_download(tmp_path):
+    class Downloader:
+        def download(self, episode, output_dir, **kwargs):
+            return str(output_dir / "episode.mkv")
+
+    class Player:
+        def __init__(self):
+            self.loaded = None
+        def load(self, path, title):
+            self.loaded = (path, title)
+
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    player = Player()
+    service = MediaService(store, tmp_path / "plugins", player=player,
+                           downloader=Downloader(), output_dir=tmp_path / "videos")
+    source_id = service.add_source("rss", "https://example.test/feed.xml", "Feed")
+    service.state["episodes"]["episode"] = {
+        "id": "episode", "source_id": source_id, "title": "Episode",
+        "url": "https://media.example.test/episode.mp4", "status": "new",
+    }
+
+    service.play_episode("episode")
+
+    episode = service.state["episodes"]["episode"]
+    assert episode["status"] == "downloaded"
+    assert episode["path"].endswith("episode.mkv")
+    assert episode["download_error"] is None
+    assert service.state["download"]["status"] == "completed"
+    assert service.state["download"]["path"] == episode["path"]
+    assert player.loaded == (episode["path"], "Episode")
+
+
+def test_play_episode_persists_on_demand_download_failure(tmp_path):
+    class Downloader:
+        def download(self, episode, output_dir, **kwargs):
+            raise RuntimeError("network unavailable")
+
+    class Player:
+        def load(self, *_args):
+            raise AssertionError("Player must not start after download failure")
+
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins", player=Player(),
+                           downloader=Downloader(), output_dir=tmp_path / "videos")
+    source_id = service.add_source("rss", "https://example.test/feed.xml", "Feed")
+    service.state["episodes"]["episode"] = {
+        "id": "episode", "source_id": source_id, "title": "Episode",
+        "url": "https://media.example.test/episode.mp4", "status": "new",
+    }
+
+    try:
+        service.play_episode("episode")
+    except RuntimeError as exc:
+        assert "network unavailable" in str(exc)
+    else:
+        raise AssertionError("Playback unexpectedly succeeded")
+
+    episode = service.state["episodes"]["episode"]
+    assert episode["download_error"] == "network unavailable"
+    assert episode["last_attempt"]
+    assert service.state["download"]["status"] == "failed"
+    assert service.state["download"]["error"] == "network unavailable"
+
