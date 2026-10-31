@@ -29,6 +29,38 @@ Required: Python 3, PyGObject/GTK3, GLib, feedparser.
 
 Optional integrations are detected at runtime: mpv, Streamlink, yt-dlp, ffmpeg, Topgrade, xbps utilities and a command-line notification/audio player. Missing optional tools disable only the relevant action and produce a useful status message.
 
+## Install on Void Linux
+
+Install the required system dependencies first: Python 3.14+, GTK3, PyGObject and feedparser. Optional integrations such as mpv, Streamlink, yt-dlp and ffmpeg can be installed separately; missing optional tools disable only their related features.
+
+From a source checkout:
+
+```sh
+./install.sh
+```
+
+This installs the application under `~/.local/lib/flux-tray`, creates the `~/.local/bin/flux-tray` launcher and installs a desktop entry. It uses system Python so GTK/PyGObject remain available.
+
+Enable XFCE session autostart during installation:
+
+```sh
+./install.sh --autostart
+```
+
+To disable an existing autostart entry while updating:
+
+```sh
+./install.sh --no-autostart
+```
+
+Remove the application files later with:
+
+```sh
+./uninstall.sh
+```
+
+The uninstaller leaves `~/.config/flux-tray` and `~/.local/share/flux-tray` untouched. Ensure `~/.local/bin` is on your shell's `PATH` if you want to launch `flux-tray` from a terminal; the desktop entry uses the installed absolute launcher path.
+
 ## Development
 
 See [CONFIGURATION.md](docs/CONFIGURATION.md) for the current settings and [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and test commands. Use the [XFCE/X11 validation checklist](docs/XFCE-VALIDATION.md) for the real-desktop checks that CI cannot cover. The application is designed to be developed and tested on the target Void machine; CI should cover pure Python tests and static checks without pretending to validate XFCE tray behavior.
