@@ -40,6 +40,8 @@ class FeedPopup:
         self.scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.scroller.set_min_content_height(120)
         self.scroller.set_max_content_height(590)
+        self.scroller.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        self.scroller.connect("button-press-event", self._on_blank_area_click)
         self.root.pack_start(self.scroller, True, True, 0)
         self.listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
         self.listing.set_border_width(2)
@@ -55,6 +57,12 @@ class FeedPopup:
     def _on_delete(self, *_args):
         self.hide()
         return True
+
+    def _on_blank_area_click(self, _widget, event):
+        if event.button == Gdk.BUTTON_SECONDARY:
+            self.hide()
+            return True
+        return False
 
     def show(self):
         self.rebuild()
