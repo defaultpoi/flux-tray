@@ -207,7 +207,10 @@ class HlsDownloader:
             progress_callback({"part_path": str(partial), "duration": playlist.duration,
                                "percent": 0.0})
 
-        def on_output(_channel: str, line: str) -> None:
+        pending_output = {"stdout": "", "stderr": ""}
+        discarding_output = set()
+
+        def report_progress_line(line: str) -> None:
             key, separator, value = line.strip().partition("=")
             if not separator:
                 return
@@ -221,6 +224,25 @@ class HlsDownloader:
             percent = min(100.0, elapsed * 100.0 / playlist.duration)
             progress_callback({"percent": percent, "elapsed": elapsed,
                                "duration": playlist.duration})
+
+        def on_output(channel: str, chunk: str) -> None:
+            if progress_callback is None:
+                return
+            if channel not in pending_output:
+                pending_output[channel] = ""
+            if channel in discarding_output:
+                if "\n" not in chunk:
+                    return
+                chunk = chunk.split("\n", 1)[1]
+                discarding_output.discard(channel)
+            lines = (pending_output[channel] + chunk).split("\n")
+            pending_output[channel] = lines.pop()
+            if len(pending_output[channel]) > 65_536:
+                pending_output[channel] = ""
+                discarding_output.add(channel)
+            for line in lines:
+                if len(line) <= 65_536:
+                    report_progress_line(line)
 
         try:
             result = self.runner(argv, timeout=self.timeout, cancelled=cancelled,
