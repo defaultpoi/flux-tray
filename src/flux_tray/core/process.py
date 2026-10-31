@@ -88,6 +88,10 @@ class ProcessSupervisor:
                     self._terminate(process)
                     raise ProcessError(f"command timed out after {timeout:g}s: {argv[0]}")
                 time.sleep(min(0.05, remaining))
+            # A synchronous command owns its process group. Some wrappers exit
+            # before a child they launched; terminate those descendants too, or
+            # they can outlive the request and keep the captured pipes open.
+            self._terminate(process)
             process.wait()
             for reader in readers:
                 reader.join(timeout=2)
