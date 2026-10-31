@@ -29,6 +29,31 @@ def test_timeout_terminates_process():
         )
 
 
+def test_successful_command_terminates_remaining_process_group_children(tmp_path):
+    ready = tmp_path / "child-ready"
+    marker = tmp_path / "child-survived"
+    child_code = (
+        "import pathlib, time; "
+        "pathlib.Path(" + repr(str(ready)) + ").touch(); "
+        "time.sleep(0.6); "
+        "pathlib.Path(" + repr(str(marker)) + ").touch()"
+    )
+    parent_code = (
+        "import subprocess, sys, time; "
+        "subprocess.Popen([sys.executable, '-c', " + repr(child_code) + "]); "
+        "deadline = time.monotonic() + 2; "
+        "from pathlib import Path; "
+        "ready = Path(" + repr(str(ready)) + "); "
+        "while not ready.exists() and time.monotonic() < deadline: time.sleep(0.01)"
+    )
+    started = time.monotonic()
+    result = ProcessSupervisor().run([sys.executable, "-c", parent_code], timeout=3)
+    assert result.returncode == 0
+    assert time.monotonic() - started < 2
+    time.sleep(0.7)
+    assert not marker.exists()
+
+
 def test_cancellation_terminates_process():
     cancelled = threading.Event()
     threading.Thread(target=lambda: (time.sleep(0.1), cancelled.set()), daemon=True).start()
