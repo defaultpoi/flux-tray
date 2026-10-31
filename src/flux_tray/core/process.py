@@ -83,6 +83,8 @@ class ProcessSupervisor:
                             excess = 0
                     if output_callback is not None:
                         try:
+                            # Reads are deliberately bounded, so callbacks receive
+                            # chunks and must not assume each one ends at a newline.
                             output_callback(channel, line)
                         except Exception:
                             # A progress observer must never interrupt pipe draining.
