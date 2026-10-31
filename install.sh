@@ -6,7 +6,7 @@ APP_DIR="$HOME/.local/lib/flux-tray"
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
-APPlications_DIR="$DATA_DIR/applications"
+APPLICATIONS_DIR="$DATA_DIR/applications"
 AUTOSTART_DIR="$CONFIG_DIR/autostart"
 AUTOSTART_MODE=keep
 
@@ -48,11 +48,11 @@ fi
     exit 1
 }
 
-mkdir -p "$APP_DIR" "$BIN_DIR" "$APPlications_DIR"
+mkdir -p "$APP_DIR" "$BIN_DIR" "$APPLICATIONS_DIR"
 rm -rf "$APP_DIR/flux_tray"
 cp -a "$SCRIPT_DIR/src/flux_tray" "$APP_DIR/"
 
-python3 - "$APP_DIR" "$BIN_DIR/flux-tray" "$SCRIPT_DIR/flux-tray.desktop" "$APPlications_DIR/flux-tray.desktop" <<'PY'
+python3 - "$APP_DIR" "$BIN_DIR/flux-tray" "$SCRIPT_DIR/flux-tray.desktop" "$APPLICATIONS_DIR/flux-tray.desktop" <<'PY'
 from pathlib import Path
 import shlex
 import sys
@@ -75,14 +75,14 @@ PY
 
 if [ "$AUTOSTART_MODE" = enable ]; then
     mkdir -p "$AUTOSTART_DIR"
-    cp "$APPlications_DIR/flux-tray.desktop" "$AUTOSTART_DIR/flux-tray.desktop"
+    cp "$APPLICATIONS_DIR/flux-tray.desktop" "$AUTOSTART_DIR/flux-tray.desktop"
 elif [ "$AUTOSTART_MODE" = disable ]; then
     rm -f "$AUTOSTART_DIR/flux-tray.desktop"
 fi
 
 printf 'Flux Tray installed.\n'
 printf 'Launcher: %s/flux-tray\n' "$BIN_DIR"
-printf 'Desktop entry: %s/flux-tray.desktop\n' "$APPlications_DIR"
+printf 'Desktop entry: %s/flux-tray.desktop\n' "$APPLICATIONS_DIR"
 if [ -f "$AUTOSTART_DIR/flux-tray.desktop" ]; then
     printf 'Autostart: enabled\n'
 else
