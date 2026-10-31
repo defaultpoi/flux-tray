@@ -32,14 +32,14 @@ import math
 import pytest
 
 
-@pytest.mark.parametrize("interval", [0, -1, math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize("interval", [0, -1, True, 10**1000, math.nan, math.inf, -math.inf])
 def test_add_rejects_non_positive_or_non_finite_intervals(interval):
     scheduler = Scheduler()
     with pytest.raises(ValueError, match="finite positive"):
         scheduler.add("feeds", interval, lambda: None)
 
 
-@pytest.mark.parametrize("delay", [math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize("delay", [True, 10**1000, math.nan, math.inf, -math.inf])
 def test_add_rejects_non_finite_initial_delay(delay):
     scheduler = Scheduler()
     with pytest.raises(ValueError, match="finite non-negative"):
