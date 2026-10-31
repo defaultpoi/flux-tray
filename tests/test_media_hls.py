@@ -260,7 +260,7 @@ file:///etc/passwd
 
 
 @pytest.mark.parametrize("name", ["timeout", "playlist_timeout"])
-@pytest.mark.parametrize("value", [0, -1, True, float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("value", [0, -1, True, 10**1000, float("nan"), float("inf"), -float("inf")])
 def test_hls_downloader_rejects_invalid_timeouts(name, value):
     with pytest.raises(ValueError, match="finite positive"):
         HlsDownloader(**{name: value})
