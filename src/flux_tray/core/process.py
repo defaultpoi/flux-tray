@@ -26,6 +26,8 @@ class ProcessError(RuntimeError):
 
 
 class ProcessSupervisor:
+    MAX_CAPTURE_CHARS = 1_048_576
+
     def __init__(self):
         self._lock = Lock()
         self._processes: dict[subprocess.Popen, bool] = {}
@@ -59,9 +61,17 @@ class ProcessSupervisor:
         stderr_chunks: list[str] = []
 
         def drain(stream, chunks, channel):
+            captured_chars = 0
             try:
                 for line in iter(stream.readline, ""):
                     chunks.append(line)
+                    captured_chars += len(line)
+                    if captured_chars > self.MAX_CAPTURE_CHARS:
+                        # Keep the diagnostic tail without allowing noisy commands
+                        # to grow captured output without bound.
+                        tail = "".join(chunks)[-self.MAX_CAPTURE_CHARS:]
+                        chunks[:] = [tail]
+                        captured_chars = len(tail)
                     if output_callback is not None:
                         try:
                             output_callback(channel, line)
