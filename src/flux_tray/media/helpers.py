@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -10,7 +11,7 @@ from threading import Event
 from typing import Callable
 from urllib.request import Request, urlopen
 
-from flux_tray.media.episodes import parse_season_episode
+from flux_tray.media.episodes import parse_season_episode, validate_http_url
 
 
 def _safe_headers(headers: dict[str, str] | None) -> dict[str, str]:
@@ -28,10 +29,21 @@ def _safe_headers(headers: dict[str, str] | None) -> dict[str, str]:
     return result
 
 
+def _validate_timeout(timeout: float) -> None:
+    try:
+        valid = math.isfinite(timeout) and timeout > 0
+    except TypeError as exc:
+        raise ValueError("timeout must be a finite positive number") from exc
+    if not valid:
+        raise ValueError("timeout must be a finite positive number")
+
+
 def fetch_json(url: str, *, timeout: float = 10, max_bytes: int = 1_000_000,
                headers: dict[str, str] | None = None):
-    if not url.startswith(("https://", "http://")):
-        raise ValueError("URL must use HTTP or HTTPS")
+    validate_http_url(url, "Plugin request URL")
+    _validate_timeout(timeout)
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
+        raise ValueError("max_bytes must be a positive integer")
     request = Request(url, headers={"User-Agent": "FluxTray/0.1", **_safe_headers(headers)})
     with urlopen(request, timeout=timeout) as response:
         payload = response.read(max_bytes + 1)
@@ -45,8 +57,8 @@ def download_file(url: str, destination: Path, *, timeout: float = 30,
                   headers: dict[str, str] | None = None,
                   progress: Callable[[int, int | None], None] | None = None,
                   cancelled: Event | None = None) -> str:
-    if not url.startswith(("https://", "http://")):
-        raise ValueError("URL must use HTTP or HTTPS")
+    validate_http_url(url, "Plugin download URL")
+    _validate_timeout(timeout)
     destination = Path(destination).expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix(destination.suffix + ".part")
