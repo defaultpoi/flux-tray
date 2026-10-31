@@ -227,8 +227,11 @@ def test_hls_rejects_non_http_variant_urls(tmp_path):
 #EXT-X-STREAM-INF:BANDWIDTH=100000,RESOLUTION=640x360
 file:///etc/passwd
 """
+    requests = []
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            requests.append(self.path)
             body = playlist.encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
