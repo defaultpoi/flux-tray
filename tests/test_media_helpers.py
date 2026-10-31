@@ -176,13 +176,13 @@ def test_plugin_json_fetch_rejects_malformed_http_authorities(url):
         fetch_json(url)
 
 
-@pytest.mark.parametrize("timeout", [0, -1, True, float("nan")])
+@pytest.mark.parametrize("timeout", [0, -1, True, 10**1000, float("nan")])
 def test_plugin_download_rejects_invalid_timeout(tmp_path, timeout):
     with pytest.raises(ValueError, match="finite positive"):
         download_file("https://example.test/video", tmp_path / "video.bin", timeout=timeout)
 
 
-@pytest.mark.parametrize("timeout", [0, -1, True, float("inf")])
+@pytest.mark.parametrize("timeout", [0, -1, True, 10**1000, float("inf")])
 def test_plugin_json_fetch_rejects_invalid_timeout(timeout):
     with pytest.raises(ValueError, match="finite positive"):
         fetch_json("https://example.test/data", timeout=timeout)
