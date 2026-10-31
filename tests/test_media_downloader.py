@@ -134,3 +134,16 @@ def test_download_rejects_missing_reported_file(tmp_path):
         assert "does not exist" in str(exc)
     else:
         raise AssertionError("missing downloaded file was accepted")
+
+
+def test_download_rejects_malformed_http_url_before_running(tmp_path):
+    calls = []
+    downloader = MediaDownloader(runner=lambda *args, **kwargs: calls.append(args))
+    try:
+        downloader.download({"url": "https://example.test:bad/video", "title": "Video"},
+                            tmp_path)
+    except ValueError as exc:
+        assert "valid HTTP or HTTPS URL" in str(exc)
+    else:
+        raise AssertionError("Malformed download URL was accepted")
+    assert calls == []
