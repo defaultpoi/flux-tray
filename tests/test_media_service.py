@@ -679,3 +679,18 @@ def test_play_episode_does_not_use_hls_partial_before_one_minute(tmp_path):
 
     service.play_episode("hls")
     assert player.loaded == (url, "HLS episode")
+
+
+def test_media_source_rejects_malformed_http_authority(tmp_path):
+    store = JsonStore(tmp_path / "media.json",
+                      lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+    service = MediaService(store, tmp_path / "plugins")
+    for url in ("https://", "https:///missing-host", "https://example.test:bad/feed.xml"):
+        try:
+            service.add_source("rss", url)
+        except ValueError as exc:
+            assert "valid HTTP or HTTPS URL" in str(exc)
+        else:
+            raise AssertionError(f"Malformed media source URL accepted: {url}")
+    source_id = service.add_source("rss", "HTTPS://example.test/feed.xml")
+    assert service.state["sources"][0]["id"] == source_id
