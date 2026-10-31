@@ -196,9 +196,9 @@ class TrayController:
                 alert_label = f"⚠ {alert.get('severity', 'warning').title()}: {alert.get('title', 'Weather warning')} · {alert.get('area', '')}"
                 link = alert.get("url")
                 callback = (lambda _item, target=link: webbrowser.open(target)
-                            if target and target.startswith(("http://", "https://")) else None)
+                            if is_valid_web_url(target) else None)
                 alert_item = Gtk.MenuItem.new_with_label(alert_label[:110])
-                alert_item.set_sensitive(bool(link))
+                alert_item.set_sensitive(is_valid_web_url(link))
                 if alert.get("level", 0) >= 3:
                     self._weather_alert_items.append((alert_item, alert_label[:110]))
                 if link:
