@@ -148,3 +148,51 @@ def test_plugin_download_accepts_path_relative_to_output_directory(tmp_path):
     result = registry.download_episode("plugin:downloader:source", {}, tmp_path)
     assert result == str(tmp_path / "episode.mkv")
 
+
+
+import os
+import sys
+
+
+def test_plugin_reload_observes_same_size_edit_with_unchanged_timestamp(tmp_path):
+    directory = tmp_path / "plugins"
+    directory.mkdir()
+    path = directory / "example.py"
+    old_source = (
+        "NAME = 'example'\n"
+        "def list_episodes(source):\n"
+        "    return [{'id': '1', 'title': 'Old'}]\n"
+    )
+    new_source = old_source.replace("Old", "New")
+    path.write_text(old_source, encoding="utf-8")
+    stamp = 1_700_000_000_000_000_000
+    os.utime(path, ns=(stamp, stamp))
+
+    registry = MediaPluginRegistry(directory)
+    registry.reload()
+    assert registry.list_episodes("plugin:example:feed")[0]["title"] == "Old"
+
+    path.write_text(new_source, encoding="utf-8")
+    os.utime(path, ns=(stamp, stamp))
+    registry.reload()
+    assert registry.list_episodes("plugin:example:feed")[0]["title"] == "New"
+
+
+def test_plugin_reload_removes_deleted_plugin_module_from_sys_modules(tmp_path):
+    directory = tmp_path / "plugins"
+    directory.mkdir()
+    path = directory / "example.py"
+    path.write_text(
+        "NAME = 'example'\n"
+        "def list_episodes(source):\n"
+        "    return []\n",
+        encoding="utf-8",
+    )
+    registry = MediaPluginRegistry(directory)
+    registry.reload()
+    module_name = "flux_tray_user_plugin_example"
+    assert module_name in sys.modules
+
+    path.unlink()
+    registry.reload()
+    assert module_name not in sys.modules
