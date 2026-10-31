@@ -6,6 +6,7 @@ import json
 from calendar import timegm
 from datetime import datetime, timezone
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 import feedparser
 
@@ -68,17 +69,26 @@ class RssMediaAdapter:
         for entry in parsed.entries:
             enclosures = entry.get("enclosures", [])
             for index, enclosure in enumerate(enclosures):
+                if not isinstance(enclosure, dict):
+                    continue
                 media_url = enclosure.get("href") or enclosure.get("url")
-                if not media_url:
+                if not isinstance(media_url, str):
+                    continue
+                parsed_url = urlsplit(media_url)
+                if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                    continue
+                mime_type = enclosure.get("type")
+                if isinstance(mime_type, str) and mime_type.casefold().startswith("image/"):
                     continue
                 published = entry.get("published_parsed") or entry.get("updated_parsed")
                 date = datetime.fromtimestamp(timegm(published), timezone.utc).isoformat() if published else None
+                extension = mime_type.rsplit("/", 1)[-1] if isinstance(mime_type, str) else None
                 raw = {
                     "id": str(entry.get("id") or media_url) + f":{index}",
                     "title": entry.get("title") or "Untitled media",
                     "date": date,
                     "url": media_url,
-                    "ext": enclosure.get("type", "").split("/")[-1] or None,
+                    "ext": extension or None,
                     "metadata": {"author": entry.get("author", ""),
                                  "summary": entry.get("summary", "")},
                 }
