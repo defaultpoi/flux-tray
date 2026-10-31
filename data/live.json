@@ -1,0 +1,171 @@
+{
+  "channels": [
+    {
+      "id": "kano",
+      "last_check": "2026-10-31T11:05:32.227458+00:00",
+      "last_error": null,
+      "metadata": {},
+      "name": "kano",
+      "next_check": "2026-10-31T11:15:32.227458+00:00",
+      "platform": "twitch",
+      "schedule": [],
+      "status": "offline",
+      "streams": [],
+      "url": "https://twitch.tv/kano"
+    },
+    {
+      "id": "mrllamasc",
+      "last_check": "2026-10-31T11:05:32.227458+00:00",
+      "last_error": null,
+      "metadata": {},
+      "name": "mrllamasc",
+      "next_check": "2026-10-31T11:15:32.227458+00:00",
+      "platform": "twitch",
+      "schedule": [
+        {
+          "time": "18:00",
+          "weekday": 0
+        },
+        {
+          "time": "18:00",
+          "weekday": 1
+        },
+        {
+          "time": "18:00",
+          "weekday": 2
+        },
+        {
+          "time": "18:00",
+          "weekday": 3
+        },
+        {
+          "time": "18:00",
+          "weekday": 4
+        },
+        {
+          "time": "18:00",
+          "weekday": 5
+        },
+        {
+          "time": "18:00",
+          "weekday": 6
+        }
+      ],
+      "status": "offline",
+      "streams": [],
+      "url": "https://twitch.tv/mrllamasc"
+    },
+    {
+      "id": "denimblue7",
+      "last_check": "2026-10-31T11:05:32.227458+00:00",
+      "last_error": null,
+      "metadata": {},
+      "name": "denimblue7",
+      "next_check": "2026-10-31T11:15:32.227458+00:00",
+      "platform": "twitch",
+      "schedule": [
+        {
+          "time": "13:00",
+          "weekday": 1
+        },
+        {
+          "time": "13:00",
+          "weekday": 2
+        },
+        {
+          "time": "13:00",
+          "weekday": 3
+        },
+        {
+          "time": "13:00",
+          "weekday": 4
+        },
+        {
+          "time": "13:00",
+          "weekday": 5
+        },
+        {
+          "time": "13:00",
+          "weekday": 6
+        }
+      ],
+      "status": "offline",
+      "streams": [],
+      "url": "https://twitch.tv/denimblue7"
+    },
+    {
+      "id": "327x",
+      "last_check": "2026-10-31T11:05:32.227458+00:00",
+      "last_error": null,
+      "metadata": {
+        "author": "327x",
+        "category": "Diablo II: Resurrected",
+        "checked_at": "2026-10-31T11:05:32.800604+00:00",
+        "created_at": "2026-10-31T06:58:41Z",
+        "title": "UBER HARDCORE SPEEDRUN -- !рыбалка",
+        "viewers": 179
+      },
+      "name": "327x",
+      "next_check": "2026-10-31T11:15:32.227458+00:00",
+      "platform": "twitch",
+      "schedule": [],
+      "status": "live",
+      "streams": [
+        "best"
+      ],
+      "url": "https://twitch.tv/327x"
+    },
+    {
+      "id": "friendlyfire",
+      "last_check": "2026-10-31T11:05:32.227458+00:00",
+      "last_error": null,
+      "metadata": {},
+      "name": "FriendlyFire",
+      "next_check": "2026-10-31T11:15:32.227458+00:00",
+      "platform": "youtube",
+      "schedule": [
+        {
+          "time": "18:00",
+          "weekday": 2
+        }
+      ],
+      "status": "offline",
+      "streams": [],
+      "url": "https://youtube.com/@FriendlyFireCuMoiseSiVlad"
+    },
+    {
+      "id": "g4media",
+      "last_check": "2026-10-31T11:05:32.227458+00:00",
+      "last_error": null,
+      "metadata": {},
+      "name": "G4Media",
+      "next_check": "2026-10-31T11:15:32.227458+00:00",
+      "platform": "youtube",
+      "schedule": [
+        {
+          "time": "10:00",
+          "weekday": 0
+        },
+        {
+          "time": "10:00",
+          "weekday": 1
+        },
+        {
+          "time": "10:00",
+          "weekday": 2
+        },
+        {
+          "time": "10:00",
+          "weekday": 3
+        },
+        {
+          "time": "10:00",
+          "weekday": 4
+        }
+      ],
+      "status": "offline",
+      "streams": [],
+      "url": "https://youtube.com/@g4media479"
+    }
+  ]
+}

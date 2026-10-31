@@ -46,6 +46,10 @@ class TrayController:
             width=config.get_int("popup", "width", 440, minimum=320) if config else 440,
             max_height=config.get_int("popup", "height", 620, minimum=240) if config else 620,
             on_feed_rules=self._feed_rules_dialog,
+            weather_service=self.weather,
+            live_service=self.live,
+            media_service=self.media,
+            updates_service=self.updates,
         )
         self._weather_alert_items = []
         self._weather_pulse_source = None
@@ -76,6 +80,66 @@ class TrayController:
         if self.media is not None:
             self._add_timeout_seconds(max(600, self.media.interval), self._media_tick)
             self._media_tick()
+
+        # Config watcher for [media] sources (Gio.FileMonitor, 800ms debounce)
+        self._config_monitor = None
+        self._config_debounce_source = None
+        if config and self.media is not None:
+            config_path = config.path
+            if config_path.exists():
+                self._setup_config_watcher(config_path)
+
+    def _setup_config_watcher(self, config_path):
+        """Set up Gio.FileMonitor on config.conf for media source changes."""
+        try:
+            file = Gio.File.new_for_path(str(config_path))
+            self._config_monitor = file.monitor_file(Gio.FileMonitorFlags.NONE, None)
+            self._config_monitor.connect("changed", self._on_config_changed)
+        except Exception:
+            self.log.exception("Could not set up config file monitor")
+
+    def _on_config_changed(self, _monitor, _file, _other_file, event):
+        if event not in (Gio.FileMonitorEvent.CHANGES_DONE_HINT, Gio.FileMonitorEvent.CREATED):
+            return
+        # Debounce: only process after 800ms of no changes
+        if self._config_debounce_source is not None:
+            GLib.source_remove(self._config_debounce_source)
+        self._config_debounce_source = GLib.timeout_add(800, self._process_config_change)
+
+    def _process_config_change(self):
+        self._config_debounce_source = None
+        # Reload config and check for new [media] sources
+        if self.config:
+            self.config.load()
+            # Check for new media sources in config
+            if self.media:
+                # Get current source URLs from media service
+                current_urls = {source.get("url") for source in self.media.state.get("sources", [])}
+                # Get media sources from config
+                config_sources = self.config.get("media", "sources", fallback="")
+                for line in config_sources.splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.split("|")
+                    if parts:
+                        url = parts[0].strip()
+                        if url and url not in current_urls:
+                            self.log.info("New media source detected: %s", url)
+                            self._check_media_source(only=url)
+        return GLib.SOURCE_REMOVE
+
+    def _check_media_source(self, *, only: str = None):
+        """Trigger media check for specific source(s)."""
+        if only:
+            self.log.info("Checking media source: %s", only)
+            # This will be called from idle to avoid blocking
+            def check():
+                if self.media:
+                    self.media.check_due(force=True)
+            GLib.idle_add(check)
+        else:
+            self._media_tick(force=True)
 
     def _add_timeout_seconds(self, seconds, callback):
         source_id = None
@@ -157,6 +221,7 @@ class TrayController:
         self.popup.toggle()
 
     def _on_popup(self, _icon, _button, _activate_time):
+        self._rebuild_menu(self.menu)
         self.popup.toggle()
 
     def _append(self, label, callback=None, sensitive=True):
@@ -1290,6 +1355,9 @@ class TrayController:
         self._update_icon()
         if self.menu.get_mapped():
             self._rebuild_menu(self.menu)
+        # Update popup weather display if visible
+        if self.popup.visible:
+            self.popup.rebuild()
         return GLib.SOURCE_REMOVE
     def _update_scan_tick(self):
         if self.updates is None:
@@ -1349,6 +1417,12 @@ class TrayController:
                     lines.append(f"{change.get('package')}: {change.get('old') or 'not installed'} -> {change.get('new') or 'removed'}")
             else:
                 lines.append("\nNo installed XBPS package versions changed.")
+        # Show "Not updated:" line for failed packages
+        not_updated = action.get("not_updated")
+        if not_updated:
+            lines.append("\nNot updated:")
+            for pkg in not_updated:
+                lines.append(f"  {pkg}")
         for result in results:
             argv = " ".join(result.get("argv", []))
             lines.append(f"\n$ {argv}\nExit code: {result.get('returncode')}")
@@ -1381,15 +1455,19 @@ class TrayController:
         else:
             message = "\n".join(packages) if packages else "No orphan packages found."
         dialog = Gtk.MessageDialog(flags=Gtk.DialogFlags.MODAL,
-            message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.CLOSE,
+            message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.CANCEL,
             text="Orphan packages")
         dialog.format_secondary_text(message)
         if packages:
+            dialog.add_button("List", 0)
             dialog.add_button("Remove", 1)
             dialog.add_button("Remove + clean cache", 2)
         response = dialog.run()
         dialog.destroy()
-        if response in (1, 2):
+        if response == 0:
+            # List clicked - re-list orphans
+            self._list_orphans()
+        elif response in (1, 2):
             action = self.updates.remove_orphans_and_clean_cache if response == 2 else self.updates.remove_orphans
             future = self.tasks.submit("xbps-remove-orphans", action)
             if future is not None:

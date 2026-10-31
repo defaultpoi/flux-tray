@@ -35,7 +35,8 @@ def test_topgrade_runs_system_and_configured_steps(monkeypatch, tmp_path):
                             installer="topgrade", topgrade_steps=("cargo", "rustup", "cargo"))
     result = service.apply_updates()
     assert result.returncode == 0
-    assert calls[1][0] == ["topgrade", "--only", "system", "cargo", "rustup", "--yes", "--no-retry"]
+    # Now includes --no-self-update --skip-notify
+    assert calls[1][0] == ["topgrade", "--only", "system", "cargo", "rustup", "--yes", "--no-retry", "--no-self-update", "--skip-notify"]
     assert calls[1][1]["env"]["LC_ALL"] == "C.UTF-8"
     assert calls[1][1]["shutdown_protected"] is True
 
@@ -99,9 +100,10 @@ def test_installed_versions_are_compared_before_and_after_topgrade(monkeypatch, 
                             installer="topgrade")
     service.apply_updates()
     changes = service.state["last_action"]["version_changes"]
+    # Now drops build revision _1 unless it's the only change
     assert changes == [
-        {"package": "curl", "old": "8.1_1", "new": "8.2_1"},
-        {"package": "newpkg", "old": None, "new": "2.0_1"},
+        {"package": "curl", "old": "8.1", "new": "8.2"},
+        {"package": "newpkg", "old": None, "new": "2.0"},
     ]
 
 
@@ -113,3 +115,29 @@ def test_version_change_parser_uses_package_name_before_version(tmp_path):
     assert service._installed_versions() == {
         "libfoo-devel": "1.2_3", "python3.14": "3.14.1_1",
     }
+
+
+def test_build_revision_dropped_only_when_not_only_change(tmp_path):
+    """Test that build revision _N is dropped unless it's the only change."""
+    service = UpdateService(JsonStore(tmp_path / "updates.json", dict), runner=lambda *a, **k: None)
+    
+    # Only build revision changes - should keep full version
+    before = {"pkg": "1.0_1", "other": "2.0"}
+    after = {"pkg": "1.0_2", "other": "2.0"}
+    changes = service._version_changes(before, after)
+    # pkg only had build revision change, other unchanged
+    assert any(c["package"] == "pkg" and c["old"] == "1.0_1" and c["new"] == "1.0_2" for c in changes)
+    # other unchanged, not in changes
+
+
+def test_build_revision_dropped_when_real_version_change(tmp_path):
+    """Test that build revision _N is dropped when real version changes."""
+    service = UpdateService(JsonStore(tmp_path / "updates.json", dict), runner=lambda *a, **k: None)
+    
+    # Real version change - should drop build revision
+    before = {"pkg": "1.0_1"}
+    after = {"pkg": "1.1_1"}
+    changes = service._version_changes(before, after)
+    assert len(changes) == 1
+    assert changes[0]["old"] == "1.0"
+    assert changes[0]["new"] == "1.1"

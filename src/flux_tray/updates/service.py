@@ -60,7 +60,8 @@ class UpdateService:
                                shutdown_protected=shutdown_protected)
 
     def _record_action(self, action: str, results: Sequence[ProcessResult],
-                       version_changes: list[dict] | None = None) -> None:
+                       version_changes: list[dict] | None = None,
+                       not_updated: list[str] | None = None) -> None:
         records = [{
             "argv": list(result.argv),
             "returncode": int(result.returncode),
@@ -75,6 +76,8 @@ class UpdateService:
         }
         if action.startswith("System update"):
             self.state["last_action"]["version_changes"] = version_changes
+            if not_updated:
+                self.state["last_action"]["not_updated"] = not_updated
         self.store.save(self.state)
 
     def dismiss_last_action(self) -> None:
@@ -122,26 +125,97 @@ class UpdateService:
         return versions
 
     @staticmethod
-    def _version_changes(before: dict[str, str] | None,
+    def _drop_build_revision(version: str) -> str:
+        """Drop trailing _N build revision unless it's the only difference."""
+        # Match version ending with _N where N is a number
+        match = re.match(r"^(.+)_(\d+)$", version)
+        if match:
+            return match.group(1)
+        return version
+
+    def _version_changes(self, before: dict[str, str] | None,
                          after: dict[str, str] | None) -> list[dict] | None:
         if before is None or after is None:
             return None
-        return [
-            {"package": name, "old": before.get(name), "new": after.get(name)}
-            for name in sorted(before.keys() | after.keys())
-            if before.get(name) != after.get(name)
-        ]
+        changes = []
+        for name in sorted(before.keys() | after.keys()):
+            old = before.get(name)
+            new = after.get(name)
+            if old != new:
+                # Drop build revision _N unless it's the only change
+                old_dropped = self._drop_build_revision(old) if old else None
+                new_dropped = self._drop_build_revision(new) if new else None
+                if old_dropped == new_dropped:
+                    # Only build revision changed - keep the full versions
+                    changes.append({"package": name, "old": old, "new": new})
+                else:
+                    # Real version change - drop build revision
+                    changes.append({"package": name, "old": old_dropped, "new": new_dropped})
+        return changes
+
+    def _parse_claude_code_version(self, output: str) -> str | None:
+        """Parse Claude Code version from topgrade output."""
+        # Look for patterns like "Claude Code 1.0.42" or similar
+        match = re.search(r"Claude Code\s+(\S+)", output, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        return None
+
+    def _parse_rustup_version(self, output: str) -> str | None:
+        """Parse rustup version from topgrade output."""
+        # Look for patterns like "rustup 1.27.0" or similar
+        match = re.search(r"rustup\s+(\S+)", output, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        return None
+
+    def _parse_codex_version(self, output: str) -> str | None:
+        """Parse Codex version from topgrade output."""
+        match = re.search(r"Codex\s+(\S+)", output, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        return None
+
+    def _parse_uv_version(self, output: str) -> str | None:
+        """Parse uv version from topgrade output."""
+        match = re.search(r"\buv\s+(\S+)", output, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        return None
 
     def apply_updates(self) -> ProcessResult | tuple[ProcessResult, ...]:
         """Run the real system update; callers must only expose this after explicit user action."""
         before = self._installed_versions()
+        not_updated = []
         if self.installer == "topgrade" and shutil.which(self.topgrade_executable):
             steps = tuple(dict.fromkeys(("system", *self.topgrade_steps)))
-            argv = [self.topgrade_executable, "--only", *steps, "--yes", "--no-retry"]
+            argv = [self.topgrade_executable, "--only", *steps, "--yes", "--no-retry", "--no-self-update", "--skip-notify"]
             result = self._run(argv, timeout=self.timeout, shutdown_protected=True)
             results = (result,)
             action = "System update (Topgrade)"
             return_value = result
+            
+            # Parse version info from topgrade output for special tools
+            if result.returncode == 0:
+                combined_output = result.stdout + "\n" + result.stderr
+                claude_code_ver = self._parse_claude_code_version(combined_output)
+                rustup_ver = self._parse_rustup_version(combined_output)
+                codex_ver = self._parse_codex_version(combined_output)
+                uv_ver = self._parse_uv_version(combined_output)
+                
+                # Store parsed versions for display
+                extra_versions = {}
+                if claude_code_ver:
+                    extra_versions["claude_code"] = claude_code_ver
+                if rustup_ver:
+                    extra_versions["rustup"] = rustup_ver
+                if codex_ver:
+                    extra_versions["codex"] = codex_ver
+                if uv_ver:
+                    extra_versions["uv"] = uv_ver
+                if extra_versions:
+                    self.state["last_action"] = self.state.get("last_action", {})
+                    self.state["last_action"]["extra_versions"] = extra_versions
         else:
             changes = self.state.get("changes") or []
             completed = []
@@ -154,12 +228,12 @@ class UpdateService:
                                    timeout=self.timeout, shutdown_protected=True)
                 completed.append(result)
                 if result.returncode != 0:
-                    break
+                    not_updated.append(package)
             results = tuple(completed)
             action = "System update (XBPS)"
             return_value = results
         after = self._installed_versions()
-        self._record_action(action, results, self._version_changes(before, after))
+        self._record_action(action, results, self._version_changes(before, after), not_updated or None)
         return return_value
 
     def remove_orphans(self) -> ProcessResult:

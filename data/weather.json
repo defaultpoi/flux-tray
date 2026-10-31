@@ -1,0 +1,53 @@
+{
+  "alert_level": 0,
+  "alerts": [],
+  "alerts_error": null,
+  "condition": "Overcast",
+  "error": null,
+  "feels_like": 10.6,
+  "fetched_at": "2026-10-31T10:55:03.646603+00:00",
+  "forecast": [
+    {
+      "condition": "Light rain",
+      "date": "2026-10-31",
+      "high": 11.6,
+      "low": 8.5,
+      "rain_probability": 75
+    },
+    {
+      "condition": "Light rain",
+      "date": "2026-11-01",
+      "high": 9.9,
+      "low": 7.9,
+      "rain_probability": 48
+    },
+    {
+      "condition": "Rain",
+      "date": "2026-11-02",
+      "high": 8.6,
+      "low": 6.2,
+      "rain_probability": 100
+    },
+    {
+      "condition": "Light rain",
+      "date": "2026-11-03",
+      "high": 8.5,
+      "low": 6.3,
+      "rain_probability": 74
+    },
+    {
+      "condition": "Overcast",
+      "date": "2026-11-04",
+      "high": 9.7,
+      "low": 4.2,
+      "rain_probability": 28
+    }
+  ],
+  "humidity": 84,
+  "latitude": 45.361698,
+  "location": null,
+  "longitude": 26.775255,
+  "precipitation": 0.0,
+  "temperature": 11.5,
+  "wind_speed": 4.4
+}

@@ -336,10 +336,10 @@ class MediaService:
             if partial_path:
                 partial = Path(partial_path)
                 try:
+                    # ~1.5 MB threshold for partial HLS playback (void-tray behavior)
                     available = (
                         partial.is_file()
-                        and partial.stat().st_size >= 65_536
-                        and float(download.get("elapsed") or 0) >= 60
+                        and partial.stat().st_size >= 1_572_864
                     )
                 except (OSError, TypeError, ValueError):
                     available = False

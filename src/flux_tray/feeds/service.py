@@ -44,6 +44,118 @@ def _whole_word_match(text: str, words: list[str]) -> bool:
                for word in words if word.strip())
 
 
+def _get_author(entry: Any) -> str:
+    """Extract author from feedparser entry, checking multiple possible fields.
+    Prefers parsed name from author_detail over raw author string."""
+    # Try author_detail first (feedparser standard for parsed author info)
+    author_detail = entry.get("author_detail")
+    if isinstance(author_detail, dict):
+        name = author_detail.get("name")
+        if name:
+            return str(name)
+    # Try authors list (some feeds have multiple authors)
+    authors = entry.get("authors")
+    if authors:
+        first = authors[0]
+        if isinstance(first, dict):
+            return str(first.get("name", ""))
+        return str(first)
+    # Fall back to raw author string (may be email format)
+    author = entry.get("author")
+    if author:
+        return str(author)
+    return ""
+
+
+def _parse_rules(rules: list[str]) -> tuple[list[str], list[str]]:
+    """Parse semicolon-separated rules into category and author patterns."""
+    categories = []
+    authors = []
+    for rule in rules:
+        rule = rule.strip()
+        if not rule:
+            continue
+        if rule.startswith("category:"):
+            categories.append(_normal(rule[9:]))  # "category:" is 9 chars
+        elif rule.startswith("author:"):
+            authors.append(_normal(rule[7:]))  # "author:" is 7 chars
+    return categories, authors
+
+
+def _matches_per_feed_rules(item: dict[str, Any], mute_categories: list[str],
+                             mute_authors: list[str], read_later_categories: list[str],
+                             read_later_authors: list[str]) -> tuple[bool, bool]:
+    """Check if item matches per-feed mute or read-later rules.
+    Returns (is_muted, is_read_later).
+    Mute rule beats read-later rule (per void-tray behavior)."""
+    author = _normal(item.get("author", ""))
+    categories = [_normal(value) for value in item.get("categories", [])]
+
+    # Check mute rules first (mute beats read-later)
+    for cat in mute_categories:
+        if cat and any(cat in c for c in categories):
+            return True, False
+    for auth in mute_authors:
+        if auth and auth in author:
+            return True, False
+
+    # Check read-later rules
+    for cat in read_later_categories:
+        if cat and any(cat in c for c in categories):
+            return False, True
+    for auth in read_later_authors:
+        if auth and auth in author:
+            return False, True
+
+    return False, False
+
+
+def _apply_feed_rules_to_items(feed: dict[str, Any], items: dict[str, Any],
+                                routing_rules: list[dict[str, str]],
+                                breaking_words: list[str]) -> tuple[int, list[str]]:
+    """Apply feed rules to items and return (fresh_count, read_later_ids_to_add)."""
+    fresh = 0
+    read_later_to_add = []
+    mute_cats = feed.get("mute_categories", [])
+    mute_auths = feed.get("mute_authors", [])
+    rl_cats = feed.get("read_later_categories", [])
+    rl_auths = feed.get("read_later_authors", [])
+
+    for item_id, item in items.items():
+        if item.get("feed_id") != feed["id"]:
+            continue
+
+        # Check per-feed mute/read-later rules first
+        is_muted, is_read_later = _matches_per_feed_rules(
+            item, mute_cats, mute_auths, rl_cats, rl_auths)
+
+        # Then check global routing rules
+        routed = False
+        if not feed.get("muted"):
+            author = _normal(item.get("author", ""))
+            categories = [_normal(value) for value in item.get("categories", [])]
+            for rule in routing_rules:
+                value = _normal(rule.get("value", ""))
+                if rule.get("kind") == "author" and value and value in author:
+                    routed = True
+                    break
+                if rule.get("kind") == "category" and value and any(value in category for category in categories):
+                    routed = True
+                    break
+
+        if is_muted:
+            item["read"] = item["seen"] = True
+            # Mute beats read-later - don't add to read_later
+        elif is_read_later or routed:
+            item["read"] = item["seen"] = True
+            if item_id not in read_later_to_add:
+                read_later_to_add.append(item_id)
+        elif not item["seen"]:
+            fresh += 1
+
+    return fresh, read_later_to_add
+
+
 class FeedService:
     """Owns feed definitions, item state, unread/read-later and mute rules."""
 
@@ -66,14 +178,21 @@ class FeedService:
     def _save(self) -> None:
         self.store.save(self.state)
 
-    def add_feed(self, url: str, name: str | None = None, interval: int | None = None) -> str:
+    def add_feed(self, url: str, name: str | None = None, interval: int | None = None,
+                 mute_rules: list[str] | None = None,
+                 read_later_rules: list[str] | None = None) -> str:
         url = validate_feed_url(url.strip())
         if any(feed["url"] == url for feed in self.state["feeds"]):
             raise ValueError("Feed already exists")
         feed_id = uuid4().hex
+        mute_cats, mute_auths = _parse_rules(mute_rules or [])
+        rl_cats, rl_auths = _parse_rules(read_later_rules or [])
         self.state["feeds"].append({"id": feed_id, "url": url, "site_url": None, "name": name or url,
-            "interval": max(60, int(interval if interval is not None else self.default_interval)), "next_check": None, "etag": None,
-            "modified": None, "muted": False, "last_error": None, "last_success": None})
+            "interval": max(60, int(interval if interval is not None else self.default_interval)),
+            "next_check": None, "etag": None, "modified": None, "muted": False,
+            "last_error": None, "last_success": None,
+            "mute_categories": mute_cats, "mute_authors": mute_auths,
+            "read_later_categories": rl_cats, "read_later_authors": rl_auths})
         self._save()
         return feed_id
 
@@ -86,6 +205,25 @@ class FeedService:
 
     def set_interval(self, feed_id: str, interval: int) -> None:
         self._feed(feed_id)["interval"] = max(60, int(interval))
+        self._save()
+
+    def set_feed_rules(self, feed_id: str, mute_rules: list[str] | None = None,
+                       read_later_rules: list[str] | None = None) -> None:
+        feed = self._feed(feed_id)
+        if mute_rules is not None:
+            mute_cats, mute_auths = _parse_rules(mute_rules)
+            feed["mute_categories"] = mute_cats
+            feed["mute_authors"] = mute_auths
+        if read_later_rules is not None:
+            rl_cats, rl_auths = _parse_rules(read_later_rules)
+            feed["read_later_categories"] = rl_cats
+            feed["read_later_authors"] = rl_auths
+        # Re-apply rules to existing items for this feed
+        fresh, read_later_to_add = _apply_feed_rules_to_items(
+            feed, self.state["items"], self.state["routing_rules"], self.breaking_words)
+        for item_id in read_later_to_add:
+            if item_id not in self.state["read_later"]:
+                self.state["read_later"].append(item_id)
         self._save()
 
     def reorder_feeds(self, ordered_ids: list[str]) -> None:
@@ -104,26 +242,15 @@ class FeedService:
                 raise ValueError("Routing rules require kind=category|author and a value")
             validated.append({"kind": kind, "value": value})
         self.state["routing_rules"] = validated
-        for item_id, item in self.state["items"].items():
-            feed = next((f for f in self.state["feeds"] if f["id"] == item["feed_id"]), None)
-            if feed is None or feed.get("muted"):
-                continue
-            if self._matches_routing_rule(item):
-                item["read"] = item["seen"] = True
+        # Re-apply rules to all items
+        for feed in self.state["feeds"]:
+            fresh, read_later_to_add = _apply_feed_rules_to_items(
+                feed, self.state["items"], self.state["routing_rules"], self.breaking_words)
+            for item_id in read_later_to_add:
                 if item_id not in self.state["read_later"]:
                     self.state["read_later"].append(item_id)
         self._save()
 
-    def _matches_routing_rule(self, item: dict[str, Any]) -> bool:
-        author = _normal(item.get("author", ""))
-        categories = [_normal(value) for value in item.get("categories", [])]
-        for rule in self.state.get("routing_rules", []):
-            value = _normal(rule.get("value", ""))
-            if rule.get("kind") == "author" and value and value in author:
-                return True
-            if rule.get("kind") == "category" and value and any(value in category for category in categories):
-                return True
-        return False
     def set_breaking_words(self, words: list[str]) -> None:
         cleaned = list(dict.fromkeys(word.strip() for word in words if word.strip()))
         self.breaking_words = cleaned
@@ -215,6 +342,11 @@ class FeedService:
 
     def _ingest(self, feed: dict[str, Any], entries: list[Any], now: datetime) -> int:
         fresh = 0
+        mute_cats = feed.get("mute_categories", [])
+        mute_auths = feed.get("mute_authors", [])
+        rl_cats = feed.get("read_later_categories", [])
+        rl_auths = feed.get("read_later_authors", [])
+
         for entry in entries:
             link = str(entry.get("link") or "").strip()
             identity = str(entry.get("id") or link or entry.get("title") or "").strip()
@@ -228,7 +360,7 @@ class FeedService:
             item = {"id": item_id, "feed_id": feed["id"],
                 "title": str(entry.get("title") or "(untitled)"), "link": link,
                 "summary": str(entry.get("summary") or ""),
-                "author": str(entry.get("author") or ""),
+                "author": _get_author(entry),
                 "categories": [str(t.get("term", "")) for t in entry.get("tags", [])],
                 "published": _iso(published) if published else None,
                 "seen": bool(old), "read": bool(old),
@@ -236,18 +368,41 @@ class FeedService:
             text = " ".join([item["title"], *item["categories"]])
             item["breaking"] = _whole_word_match(text, self.breaking_words)
             self.state["items"][item_id] = item
+
+            # Check per-feed mute/read-later rules first
+            is_muted, is_read_later = _matches_per_feed_rules(
+                item, mute_cats, mute_auths, rl_cats, rl_auths)
+
+            # Then check global routing rules
             routed = self._matches_routing_rule(item) and not feed.get("muted")
-            if not item["seen"] and not routed:
-                fresh += 1
-            if routed:
+
+            if is_muted:
                 item["read"] = item["seen"] = True
-                self.state["read_later"].append(item_id)
+                # Mute beats read-later - don't add to read_later
+            elif is_read_later or routed:
+                item["read"] = item["seen"] = True
+                if item_id not in self.state["read_later"]:
+                    self.state["read_later"].append(item_id)
+            elif not item["seen"]:
+                fresh += 1
+
         unread = sorted((i for i in self.state["items"].values() if not i["read"]),
                         key=lambda i: i.get("published") or "")
         for item in unread[:-500]:
             item["read"] = True
             item["seen"] = True
         return fresh
+
+    def _matches_routing_rule(self, item: dict[str, Any]) -> bool:
+        author = _normal(item.get("author", ""))
+        categories = [_normal(value) for value in item.get("categories", [])]
+        for rule in self.state.get("routing_rules", []):
+            value = _normal(rule.get("value", ""))
+            if rule.get("kind") == "author" and value and value in author:
+                return True
+            if rule.get("kind") == "category" and value and any(value in category for category in categories):
+                return True
+        return False
 
     def mark_read(self, item_id: str) -> None:
         item = self.state["items"][item_id]

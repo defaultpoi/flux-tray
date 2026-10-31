@@ -1,0 +1,40 @@
+{
+  "episodes": {},
+  "queue": [],
+  "sources": [
+    {
+      "enabled": true,
+      "id": "the-mob-2026",
+      "kind": "rss",
+      "last_check": null,
+      "last_error": "Invalid media feed: <unknown>:8:67: not well-formed (invalid token)",
+      "next_check": "2026-10-31T11:07:36.068731+00:00",
+      "sort": "oldest",
+      "title": "The Mob 2026 Online Subtitrat",
+      "url": "https://fsonline.one/serial/the-mob-2026-online-subtitrat/"
+    },
+    {
+      "enabled": true,
+      "id": "sitefilme-138262",
+      "kind": "rss",
+      "last_check": null,
+      "last_error": "Invalid media feed: <unknown>:2:0: syntax error",
+      "next_check": "2026-10-31T11:07:36.548366+00:00",
+      "sort": "newest",
+      "title": "",
+      "url": "https://sitefilme.com/online/138262/"
+    },
+    {
+      "enabled": true,
+      "id": "wag-the-dog-1997",
+      "kind": "rss",
+      "last_check": null,
+      "last_error": "Invalid media feed: <unknown>:8:67: not well-formed (invalid token)",
+      "next_check": "2026-10-31T11:07:36.758681+00:00",
+      "sort": "newest",
+      "title": "Wag The Dog 1997 Online Subtitrat",
+      "url": "https://fsonline.one/film/wag-the-dog-1997-online-subtitrat/"
+    }
+  ],
+  "watched": []
+}

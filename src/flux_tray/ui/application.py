@@ -57,7 +57,45 @@ class FluxTrayApplication(Gtk.Application):
         self.process = ProcessSupervisor()
         store = JsonStore(self.paths.data_dir / "feeds.json",
                           lambda: {"feeds": [], "items": {}, "read_later": []})
-        feeds = FeedService(store, default_interval=config.get_int("feeds", "interval", 60, minimum=60))
+        
+        # Load feeds from config using new pipe-delimited format
+        config_feeds = config.get_feeds()
+        default_interval = config.get_int("feeds", "interval", 60, minimum=60)
+        feeds = FeedService(store, default_interval=default_interval)
+        
+        # Add feeds from config
+        for feed_config in config_feeds:
+            try:
+                feeds.add_feed(
+                    feed_config["url"],
+                    name=feed_config["name"],
+                    interval=feed_config["interval"],
+                    mute_rules=feed_config.get("mute_rules"),
+                    read_later_rules=feed_config.get("read_later_rules"),
+                )
+            except ValueError:
+                # Feed already exists, skip
+                pass
+        
+        # Set global mute and highlight rules
+        global_mute_rules = config.get_mute_rules()
+        global_highlight_rules = config.get_highlight_rules()
+        
+        # Convert mute rules to routing rules format (category/author only)
+        routing_rules = []
+        for rule in global_mute_rules:
+            if rule.startswith("category:"):
+                routing_rules.append({"kind": "category", "value": rule[9:]})
+            elif rule.startswith("author:"):
+                routing_rules.append({"kind": "author", "value": rule[6:]})
+        if routing_rules:
+            feeds.set_routing_rules(routing_rules)
+        
+        # Set breaking words from highlight rules (non-category/author rules)
+        highlight_words = [r for r in global_highlight_rules if not r.startswith("category:") and not r.startswith("author:")]
+        if highlight_words:
+            feeds.set_breaking_words(highlight_words)
+
         timer_store = JsonStore(self.paths.data_dir / "timer.json", dict)
         timer = CountdownTimer(
             timer_store,
@@ -141,7 +179,7 @@ class FluxTrayApplication(Gtk.Application):
             quality=config.get("live", "quality", "best") or "best",
         )
         media_store = JsonStore(self.paths.data_dir / "media.json",
-                                lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
+                                default_factory=lambda: {"sources": [], "episodes": {}, "queue": [], "watched": []})
         media = MediaService(
             media_store, self.paths.plugin_dir,
             ahead=config.get_int("media", "ahead", 2, minimum=0),

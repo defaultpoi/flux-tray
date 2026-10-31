@@ -1,0 +1,15 @@
+{
+  "changes": [
+    {
+      "action": "update",
+      "architecture": "x86_64",
+      "download_size": "95937",
+      "installed_size": "215070",
+      "pkgver": "hyphen-en-26.8.2.2_1",
+      "repository": "https://repo-default.voidlinux.org/current"
+    }
+  ],
+  "checked_at": "2026-10-31T11:05:36.015037+00:00",
+  "scan_error": null,
+  "scan_output": "hyphen-en-26.8.2.2_1 update x86_64 https://repo-default.voidlinux.org/current 215070 95937\n"
+}
