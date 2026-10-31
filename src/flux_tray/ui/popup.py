@@ -9,7 +9,9 @@ from urllib.parse import urlsplit
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gdk, Gtk, Pango
+from gi.repository import Gdk, GLib, Gtk, Pango
+
+from flux_tray.ui.layout import clamp_scroll_value
 
 
 class FeedPopup:
@@ -34,6 +36,15 @@ class FeedPopup:
         self.root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.root.set_border_width(12)
         self.window.add(self.root)
+        self.scroller = Gtk.ScrolledWindow()
+        self.scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.scroller.set_min_content_height(120)
+        self.scroller.set_max_content_height(590)
+        self.root.pack_start(self.scroller, True, True, 0)
+        self.listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+        self.listing.set_border_width(2)
+        self.scroller.add(self.listing)
+        self._scroll_restore_generation = 0
         self._visible = False
         self.rebuild()
 
@@ -85,8 +96,13 @@ class FeedPopup:
         )
 
     def rebuild(self):
-        for child in self.root.get_children():
-            self.root.remove(child)
+        adjustment = self.scroller.get_vadjustment()
+        previous_scroll = adjustment.get_value()
+        self._scroll_restore_generation += 1
+        generation = self._scroll_restore_generation
+
+        for child in self.listing.get_children():
+            self.listing.remove(child)
             child.destroy()
 
         feeds = self.feeds.state.get("feeds", [])
@@ -95,31 +111,33 @@ class FeedPopup:
         for item in items:
             items_by_feed.setdefault(item.get("feed_id"), []).append(item)
 
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_min_content_height(120)
-        scroller.set_max_content_height(590)
-        self.root.pack_start(scroller, True, True, 0)
-
-        listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
-        listing.set_border_width(2)
-        scroller.add(listing)
-
         if not items:
             empty = Gtk.Label(label="You're all caught up.")
             empty.set_margin_top(24)
             empty.set_margin_bottom(24)
-            listing.pack_start(empty, False, False, 0)
+            self.listing.pack_start(empty, False, False, 0)
 
         for feed in feeds:
             feed_items = items_by_feed.get(feed["id"], [])
             if not feed_items:
                 continue
-            self._append_feed_title(listing, feed, len(feed_items))
+            self._append_feed_title(self.listing, feed, len(feed_items))
             for item in feed_items:
-                self._append_item(listing, item)
+                self._append_item(self.listing, item)
 
         self.root.show_all()
+
+        def restore_scroll():
+            if generation != self._scroll_restore_generation:
+                return GLib.SOURCE_REMOVE
+            adjustment = self.scroller.get_vadjustment()
+            adjustment.set_value(clamp_scroll_value(
+                previous_scroll, adjustment.get_lower(),
+                adjustment.get_upper(), adjustment.get_page_size(),
+            ))
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(restore_scroll)
 
     def _append_feed_title(self, listing, feed, count):
         title = Gtk.Label()
