@@ -22,7 +22,7 @@ def test_feed_url_validation_accepts_case_insensitive_http_scheme():
     assert validate_feed_url("HTTPS://example.test/feed") == "HTTPS://example.test/feed"
 
 
-@pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("timeout", [0, -1, True, float("nan"), float("inf"), -float("inf")])
 def test_feed_fetch_rejects_invalid_timeout_before_network(timeout, monkeypatch):
     def unexpected(*_args, **_kwargs):
         raise AssertionError("network should not be accessed")
