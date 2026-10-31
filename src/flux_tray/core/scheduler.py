@@ -32,7 +32,8 @@ class Scheduler:
         if not callable(callback):
             raise TypeError("job callback must be callable")
         try:
-            valid_interval = math.isfinite(interval) and interval > 0
+            valid_interval = (not isinstance(interval, bool)
+                             and math.isfinite(interval) and interval > 0)
         except TypeError as exc:
             raise ValueError("interval must be a finite positive number") from exc
         if not valid_interval:
@@ -41,7 +42,8 @@ class Scheduler:
             delay = interval
         else:
             try:
-                valid_delay = math.isfinite(initial_delay)
+                valid_delay = (not isinstance(initial_delay, bool)
+                              and math.isfinite(initial_delay))
             except TypeError as exc:
                 raise ValueError("initial delay must be a finite non-negative number") from exc
             if not valid_delay:
@@ -61,8 +63,8 @@ class Scheduler:
 
     def retry(self, name: str, delay: float) -> None:
         try:
-            valid_delay = math.isfinite(delay)
-        except TypeError as exc:
+            valid_delay = not isinstance(delay, bool) and math.isfinite(delay)
+        except (TypeError, OverflowError) as exc:
             raise ValueError("retry delay must be a finite non-negative number") from exc
         if not valid_delay:
             raise ValueError("retry delay must be a finite non-negative number")
