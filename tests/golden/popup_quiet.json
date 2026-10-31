@@ -1,0 +1,1003 @@
+{
+ "css": [
+  "list row { padding: 1px 3px; min-height: 0px; }",
+  "button { padding: 1px; }",
+  "list, viewport, scrolledwindow, overlay, .popup-content { background: #ffffff; }",
+  "list, list label { color: #000000; }",
+  ".weather-bar { background: #e8eef5; }",
+  "row.breaking-on { background: #ffc9c9; }",
+  ".offline-banner { background: #b3261e; color: #ffffff; padding: 3px 6px; font-weight: bold; }",
+  ".offline-banner label { color: #ffffff; font-weight: bold; }",
+  ".offline-banner button label { color: #000000; font-weight: normal; }",
+  ".schedule-warning { background: #b3261e; padding: 3px 6px; }",
+  ".schedule-warning label { color: #ffffff; font-weight: bold; }",
+  ".schedule-warning button label { color: #000000; font-weight: normal; }",
+  ".weather-bar label, .timer-bar label { color: #000000; }",
+  ".timer-bar { background: #ffffff; }",
+  ".menu-text { color: #000000; }",
+  ".menu-text:disabled { color: #8a8a8a; }",
+  ".timer-status { background: rgba(255, 255, 255, 0.9); border-radius: 4px; padding: 1px 6px; }",
+  ".missed-on { background: #ffc9c9; }",
+  ".timer-status label.missed-text, label.missed-text { color: #b3261e; font-weight: bold; }",
+  ".timer-status label { color: #333333; font-size: 11px; }"
+ ],
+ "tree": {
+  "children": [
+   {
+    "children": [
+     {
+      "children": [
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "hexpand": true,
+          "markup": true,
+          "sensitive": true,
+          "text": "<span size=\"large\">Weather unavailable<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></span>",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "hexpand": true,
+        "sensitive": true,
+        "type": "Box",
+        "visible": true
+       },
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "›",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "classes": [
+         "text-button"
+        ],
+        "sensitive": true,
+        "text": "›",
+        "tooltip": "Show 5-day forecast",
+        "type": "Button",
+        "visible": true
+       }
+      ],
+      "classes": [
+       "weather-bar"
+      ],
+      "margins": [
+       6,
+       6,
+       4,
+       4
+      ],
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "sensitive": true,
+      "type": "Separator",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": false,
+        "sensitive": true,
+        "text": "Offline",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "Reset network",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "classes": [
+         "text-button"
+        ],
+        "sensitive": true,
+        "text": "Reset network",
+        "type": "Button",
+        "visible": false
+       }
+      ],
+      "classes": [
+       "offline-banner"
+      ],
+      "sensitive": true,
+      "type": "Box",
+      "visible": false
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": false,
+        "sensitive": true,
+        "text": "",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.0
+       },
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "Cancel",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "classes": [
+         "text-button"
+        ],
+        "sensitive": true,
+        "text": "Cancel",
+        "type": "Button",
+        "visible": true
+       },
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "Snooze 30 min",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "classes": [
+         "text-button"
+        ],
+        "sensitive": true,
+        "text": "Snooze 30 min",
+        "type": "Button",
+        "visible": true
+       }
+      ],
+      "classes": [
+       "schedule-warning"
+      ],
+      "sensitive": true,
+      "type": "Box",
+      "visible": false
+     },
+     {
+      "children": [
+       {
+        "children": [
+         {
+          "children": [
+           {
+            "children": [
+             {
+              "children": [
+               {
+                "children": [
+                 {
+                  "activatable": false,
+                  "children": [
+                   {
+                    "ellipsize": "none",
+                    "margins": [
+                     0,
+                     0,
+                     8,
+                     8
+                    ],
+                    "markup": false,
+                    "sensitive": true,
+                    "text": "No unread items",
+                    "type": "Label",
+                    "visible": true,
+                    "wrap": false,
+                    "xalign": 0.5
+                   }
+                  ],
+                  "selectable": false,
+                  "sensitive": true,
+                  "type": "ListBoxRow",
+                  "visible": true
+                 },
+                 {
+                  "activatable": false,
+                  "children": [
+                   {
+                    "children": [
+                     {
+                      "ellipsize": "none",
+                      "markup": true,
+                      "sensitive": true,
+                      "text": "<span size=\"larger\" weight=\"bold\">Read later (1)</span>",
+                      "type": "Label",
+                      "visible": true,
+                      "wrap": false,
+                      "xalign": 0.5
+                     },
+                     {
+                      "hexpand": true,
+                      "sensitive": true,
+                      "type": "Separator",
+                      "visible": true
+                     }
+                    ],
+                    "classes": [
+                     "vertical"
+                    ],
+                    "margins": [
+                     4,
+                     4,
+                     0,
+                     2
+                    ],
+                    "sensitive": true,
+                    "type": "Box",
+                    "visible": true
+                   }
+                  ],
+                  "margins": [
+                   0,
+                   0,
+                   20,
+                   0
+                  ],
+                  "selectable": false,
+                  "sensitive": true,
+                  "type": "ListBoxRow",
+                  "visible": true
+                 },
+                 {
+                  "activatable": true,
+                  "attrs": {
+                   "link": "https://news.example/saved",
+                   "readlater_id": "s1"
+                  },
+                  "children": [
+                   {
+                    "children": [
+                     {
+                      "children": [
+                       {
+                        "sensitive": true,
+                        "type": "Image",
+                        "visible": true
+                       }
+                      ],
+                      "classes": [
+                       "flat"
+                      ],
+                      "sensitive": true,
+                      "text": null,
+                      "tooltip": "Remove from Read later",
+                      "type": "Button",
+                      "visible": true
+                     },
+                     {
+                      "ellipsize": "end",
+                      "hexpand": true,
+                      "markup": true,
+                      "sensitive": true,
+                      "text": "<span foreground=\"#000000\"><b>Saved for the weekend</b></span>",
+                      "type": "Label",
+                      "visible": true,
+                      "wrap": false,
+                      "xalign": 0.0
+                     }
+                    ],
+                    "margins": [
+                     3,
+                     3,
+                     0,
+                     0
+                    ],
+                    "sensitive": true,
+                    "type": "Box",
+                    "visible": true
+                   }
+                  ],
+                  "selectable": true,
+                  "sensitive": true,
+                  "type": "ListBoxRow",
+                  "visible": true
+                 }
+                ],
+                "sensitive": true,
+                "type": "ListBox",
+                "visible": true
+               },
+               {
+                "sensitive": true,
+                "type": "Box",
+                "visible": true
+               }
+              ],
+              "classes": [
+               "vertical"
+              ],
+              "sensitive": true,
+              "type": "Box",
+              "visible": true
+             }
+            ],
+            "classes": [
+             "popup-content"
+            ],
+            "sensitive": true,
+            "type": "EventBox",
+            "visible": true
+           }
+          ],
+          "sensitive": true,
+          "type": "Viewport",
+          "visible": true
+         }
+        ],
+        "sensitive": true,
+        "type": "ScrolledWindow",
+        "visible": true
+       },
+       {
+        "children": [
+         {
+          "children": [
+           {
+            "children": [
+             {
+              "active": true,
+              "children": [
+               {
+                "ellipsize": "none",
+                "markup": false,
+                "sensitive": true,
+                "text": "Countdown",
+                "type": "Label",
+                "visible": true,
+                "wrap": false,
+                "xalign": 0.5
+               }
+              ],
+              "classes": [
+               "text-button"
+              ],
+              "sensitive": true,
+              "text": "Countdown",
+              "type": "ToggleButton",
+              "visible": true
+             },
+             {
+              "active": false,
+              "children": [
+               {
+                "ellipsize": "none",
+                "markup": false,
+                "sensitive": true,
+                "text": "Schedule",
+                "type": "Label",
+                "visible": true,
+                "wrap": false,
+                "xalign": 0.5
+               }
+              ],
+              "classes": [
+               "text-button"
+              ],
+              "sensitive": true,
+              "text": "Schedule",
+              "type": "ToggleButton",
+              "visible": true
+             }
+            ],
+            "sensitive": true,
+            "type": "Box",
+            "visible": true
+           },
+           {
+            "ellipsize": "none",
+            "hexpand": true,
+            "markup": false,
+            "sensitive": true,
+            "text": "0 Hours, 00 Minutes and 00 Seconds",
+            "type": "Label",
+            "visible": true,
+            "wrap": false,
+            "xalign": 1.0
+           }
+          ],
+          "sensitive": true,
+          "type": "Box",
+          "visible": true
+         },
+         {
+          "children": [
+           {
+            "range": [
+             0.0,
+             7200.0,
+             0.0
+            ],
+            "sensitive": true,
+            "type": "Scale",
+            "visible": true
+           }
+          ],
+          "classes": [
+           "vertical"
+          ],
+          "sensitive": true,
+          "type": "Box",
+          "visible": true
+         },
+         {
+          "children": [
+           {
+            "children": [
+             {
+              "sensitive": true,
+              "type": "ComboBoxText",
+              "visible": true
+             },
+             {
+              "children": [
+               {
+                "ellipsize": "none",
+                "markup": false,
+                "sensitive": true,
+                "text": "+",
+                "type": "Label",
+                "visible": true,
+                "wrap": false,
+                "xalign": 0.5
+               }
+              ],
+              "classes": [
+               "text-button"
+              ],
+              "sensitive": true,
+              "text": "+",
+              "tooltip": "Add a schedule",
+              "type": "Button",
+              "visible": true
+             },
+             {
+              "children": [
+               {
+                "ellipsize": "none",
+                "markup": false,
+                "sensitive": true,
+                "text": "−",
+                "type": "Label",
+                "visible": true,
+                "wrap": false,
+                "xalign": 0.5
+               }
+              ],
+              "classes": [
+               "text-button"
+              ],
+              "sensitive": false,
+              "text": "−",
+              "tooltip": "Remove the selected schedule",
+              "type": "Button",
+              "visible": true
+             }
+            ],
+            "sensitive": true,
+            "type": "Box",
+            "visible": true
+           },
+           {
+            "children": [
+             {
+              "children": [
+               {
+                "active": false,
+                "children": [
+                 {
+                  "ellipsize": "none",
+                  "markup": false,
+                  "sensitive": true,
+                  "text": "On",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.0
+                 }
+                ],
+                "classes": [
+                 "text-button"
+                ],
+                "sensitive": true,
+                "text": "On",
+                "type": "CheckButton",
+                "visible": true
+               },
+               {
+                "ellipsize": "none",
+                "markup": false,
+                "sensitive": true,
+                "text": "at",
+                "type": "Label",
+                "visible": true,
+                "wrap": false,
+                "xalign": 0.5
+               },
+               {
+                "sensitive": true,
+                "text": "0",
+                "type": "SpinButton",
+                "visible": true
+               },
+               {
+                "ellipsize": "none",
+                "markup": false,
+                "sensitive": true,
+                "text": ":",
+                "type": "Label",
+                "visible": true,
+                "wrap": false,
+                "xalign": 0.5
+               },
+               {
+                "sensitive": true,
+                "text": "0",
+                "type": "SpinButton",
+                "visible": true
+               },
+               {
+                "sensitive": true,
+                "type": "ComboBoxText",
+                "visible": true
+               }
+              ],
+              "sensitive": true,
+              "type": "Box",
+              "visible": true
+             },
+             {
+              "children": [
+               {
+                "active": false,
+                "children": [
+                 {
+                  "ellipsize": "none",
+                  "markup": false,
+                  "sensitive": true,
+                  "text": "Mo",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.5
+                 }
+                ],
+                "classes": [
+                 "text-button"
+                ],
+                "sensitive": true,
+                "text": "Mo",
+                "tooltip": "Monday",
+                "type": "ToggleButton",
+                "visible": true
+               },
+               {
+                "active": false,
+                "children": [
+                 {
+                  "ellipsize": "none",
+                  "markup": false,
+                  "sensitive": true,
+                  "text": "Tu",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.5
+                 }
+                ],
+                "classes": [
+                 "text-button"
+                ],
+                "sensitive": true,
+                "text": "Tu",
+                "tooltip": "Tuesday",
+                "type": "ToggleButton",
+                "visible": true
+               },
+               {
+                "active": false,
+                "children": [
+                 {
+                  "ellipsize": "none",
+                  "markup": false,
+                  "sensitive": true,
+                  "text": "We",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.5
+                 }
+                ],
+                "classes": [
+                 "text-button"
+                ],
+                "sensitive": true,
+                "text": "We",
+                "tooltip": "Wednesday",
+                "type": "ToggleButton",
+                "visible": true
+               },
+               {
+                "active": false,
+                "children": [
+                 {
+                  "ellipsize": "none",
+                  "markup": false,
+                  "sensitive": true,
+                  "text": "Th",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.5
+                 }
+                ],
+                "classes": [
+                 "text-button"
+                ],
+                "sensitive": true,
+                "text": "Th",
+                "tooltip": "Thursday",
+                "type": "ToggleButton",
+                "visible": true
+               },
+               {
+                "active": false,
+                "children": [
+                 {
+                  "ellipsize": "none",
+                  "markup": false,
+                  "sensitive": true,
+                  "text": "Fr",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.5
+                 }
+                ],
+                "classes": [
+                 "text-button"
+                ],
+                "sensitive": true,
+                "text": "Fr",
+                "tooltip": "Friday",
+                "type": "ToggleButton",
+                "visible": true
+               },
+               {
+                "active": false,
+                "children": [
+                 {
+                  "ellipsize": "none",
+                  "markup": false,
+                  "sensitive": true,
+                  "text": "Sa",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.5
+                 }
+                ],
+                "classes": [
+                 "text-button"
+                ],
+                "sensitive": true,
+                "text": "Sa",
+                "tooltip": "Saturday",
+                "type": "ToggleButton",
+                "visible": true
+               },
+               {
+                "active": false,
+                "children": [
+                 {
+                  "ellipsize": "none",
+                  "markup": false,
+                  "sensitive": true,
+                  "text": "Su",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.5
+                 }
+                ],
+                "classes": [
+                 "text-button"
+                ],
+                "sensitive": true,
+                "text": "Su",
+                "tooltip": "Sunday",
+                "type": "ToggleButton",
+                "visible": true
+               },
+               {
+                "children": [
+                 {
+                  "ellipsize": "none",
+                  "markup": false,
+                  "sensitive": true,
+                  "text": "Snooze 30 min",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.5
+                 }
+                ],
+                "classes": [
+                 "text-button"
+                ],
+                "sensitive": false,
+                "text": "Snooze 30 min",
+                "tooltip": "Postpone the next run of this schedule",
+                "type": "Button",
+                "visible": true
+               }
+              ],
+              "sensitive": true,
+              "type": "Box",
+              "visible": true
+             }
+            ],
+            "classes": [
+             "vertical"
+            ],
+            "sensitive": false,
+            "type": "Box",
+            "visible": true
+           }
+          ],
+          "classes": [
+           "vertical"
+          ],
+          "sensitive": true,
+          "type": "Box",
+          "visible": false
+         }
+        ],
+        "classes": [
+         "timer-bar",
+         "vertical"
+        ],
+        "margins": [
+         8,
+         8,
+         3,
+         4
+        ],
+        "sensitive": true,
+        "type": "Box",
+        "visible": false
+       },
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 1.0
+         }
+        ],
+        "classes": [
+         "timer-status"
+        ],
+        "margins": [
+         0,
+         10,
+         0,
+         6
+        ],
+        "sensitive": true,
+        "type": "EventBox",
+        "visible": false
+       }
+      ],
+      "sensitive": true,
+      "type": "Overlay",
+      "visible": true
+     },
+     {
+      "sensitive": true,
+      "type": "Separator",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "Launch",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "classes": [
+         "text-button"
+        ],
+        "sensitive": true,
+        "text": "Launch",
+        "tooltip": "Run one of your [launcher] commands",
+        "type": "Button",
+        "visible": true
+       },
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "Timer",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "classes": [
+         "text-button"
+        ],
+        "sensitive": true,
+        "text": "Timer",
+        "tooltip": "Show/hide countdown timer",
+        "type": "Button",
+        "visible": true
+       },
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "Edit config",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "classes": [
+         "text-button"
+        ],
+        "sensitive": true,
+        "text": "Edit config",
+        "type": "Button",
+        "visible": true
+       },
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "Refresh",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "classes": [
+         "text-button"
+        ],
+        "sensitive": true,
+        "text": "Refresh",
+        "type": "Button",
+        "visible": true
+       },
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "Mark all read",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "classes": [
+         "text-button"
+        ],
+        "sensitive": true,
+        "text": "Mark all read",
+        "type": "Button",
+        "visible": true
+       },
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "markup": false,
+          "sensitive": true,
+          "text": "Quit",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "classes": [
+         "text-button"
+        ],
+        "sensitive": true,
+        "text": "Quit",
+        "type": "Button",
+        "visible": true
+       }
+      ],
+      "margins": [
+       6,
+       6,
+       4,
+       4
+      ],
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "vertical"
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   }
+  ],
+  "sensitive": true,
+  "type": "Window",
+  "visible": true
+ },
+ "window": {
+  "decorated": false,
+  "resizable": true,
+  "skip_taskbar": true,
+  "type_hint": "popup-menu"
+ }
+}
