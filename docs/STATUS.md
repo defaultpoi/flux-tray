@@ -6,7 +6,7 @@ This document is deliberately conservative. A service existing in the repository
 
 - Python package layout, GTK3 application composition root and X11 tray shell.
 - Human-editable INI configuration, atomic JSON storage and rotating logs.
-- Bounded task manager, monotonic scheduler and subprocess supervisor with process-group cleanup.
+- Bounded task manager, monotonic scheduler with finite timing/name/callback validation, and subprocess supervisor with process-group cleanup.
 - Shared mpv IPC controller, including reuse of an existing configured IPC socket.
 
 ## Partial feature implementations
@@ -25,7 +25,7 @@ This document is deliberately conservative. A service existing in the repository
 
 ## Verification status
 
-- GitHub Actions compiles `src` and `tests`, then runs the pytest suite on Python 3.14 only. The latest Python 3.14 CI run passed on 31 October 2026: **157 tests passed**. The workflow validates installer shell syntax, compiles `src` and `tests`, then runs pytest.
+- GitHub Actions compiles `src` and `tests`, then runs the pytest suite on Python 3.14 only. The latest Python 3.14 CI run passed on 31 October 2026: **169 tests passed**. The workflow validates installer shell syntax, compiles `src` and `tests`, then runs pytest.
 - CI does not exercise GTK interactions, real network providers, mpv, XBPS/Topgrade or the target desktop.
 - The code has **not** been run on the target Void Linux desktop in this development session; real XFCE/X11 integration remains unverified. A repeatable manual checklist is in [XFCE-VALIDATION.md](XFCE-VALIDATION.md).
 - Do not treat this branch as a release until the missing behavior is implemented, the test suite passes, and the application has been exercised on the target machine over an extended run.
