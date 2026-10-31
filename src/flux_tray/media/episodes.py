@@ -10,10 +10,30 @@ from typing import Any
 from urllib.parse import urlsplit
 
 
+def validate_http_url(url: str, description: str = "URL") -> str:
+    """Return a well-formed HTTP(S) URL or raise a useful validation error."""
+    if not isinstance(url, str) or not url or any(ord(char) < 32 or char.isspace() for char in url):
+        raise ValueError(f"{description} must be a valid HTTP or HTTPS URL")
+    try:
+        parsed = urlsplit(url)
+        valid = parsed.scheme.lower() in {"http", "https"} and bool(parsed.hostname)
+        port = parsed.port
+        if port is not None and not (1 <= port <= 65535):
+            valid = False
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError(f"{description} must be a valid HTTP or HTTPS URL")
+    return url
+
+
 def is_archive_org(url: str | None) -> bool:
     if not url:
         return False
-    host = (urlsplit(url).hostname or "").casefold().rstrip(".")
+    try:
+        host = (urlsplit(url).hostname or "").casefold().rstrip(".")
+    except ValueError:
+        return False
     return host == "archive.org" or host.endswith(".archive.org")
 
 _PATTERNS = (
@@ -100,8 +120,10 @@ def _normalize_subtitles(value: Any) -> dict[str, str]:
     for language, url in value.items():
         if not isinstance(language, str) or not language.strip():
             raise ValueError("Subtitle language cannot be empty")
-        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
-            raise ValueError(f"Subtitle {language!r} requires an HTTP(S) URL")
+        try:
+            validate_http_url(url, f"Subtitle {language!r}")
+        except ValueError as exc:
+            raise ValueError(f"Subtitle {language!r} requires a valid HTTP(S) URL") from exc
         result[language.strip()] = url
     return result
 
@@ -112,7 +134,9 @@ def normalize_episode(raw: dict[str, Any], source_id: str) -> MediaEpisode:
     title = str(raw.get("title") or raw.get("name") or "Untitled").strip() or "Untitled"
     candidates = (raw.get("webpage_url"), raw.get("url"))
     url = next((value for value in candidates if isinstance(value, str)
-                and value.startswith(("http://", "https://"))), None)
+                and value.lower().startswith(("http://", "https://"))), None)
+    if url is not None:
+        validate_http_url(url, "Episode URL")
     if is_archive_org(url):
         raise ValueError("Archive.org sources are intentionally unsupported")
     identity = str(raw.get("id") or url or raw.get("url") or title).strip()
