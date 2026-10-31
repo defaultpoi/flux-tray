@@ -44,7 +44,7 @@ class Scheduler:
             try:
                 valid_delay = (not isinstance(initial_delay, bool)
                               and math.isfinite(initial_delay))
-            except TypeError as exc:
+            except (TypeError, OverflowError) as exc:
                 raise ValueError("initial delay must be a finite non-negative number") from exc
             if not valid_delay:
                 raise ValueError("initial delay must be a finite non-negative number")
