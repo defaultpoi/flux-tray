@@ -28,23 +28,23 @@ class MediaPluginRegistry:
             sys.modules.pop(stale_name, None)
         self._module_names = current_names
         for path in paths:
-                module_name = f"flux_tray_user_plugin_{path.stem}"
-                try:
-                    spec = importlib.util.spec_from_file_location(module_name, path)
-                    if spec is None or spec.loader is None:
-                        raise ImportError("No module loader available")
-                    module = importlib.util.module_from_spec(spec)
-                    module.flux_tray_helpers = helpers
-                    sys.modules[module_name] = module
-                    # Bypass timestamp-based bytecode reuse so same-tick edits load.
-                    code = compile(path.read_bytes(), str(path), "exec")
-                    exec(code, module.__dict__)
-                    if not callable(getattr(module, "list_episodes", None)):
-                        raise TypeError("Plugin must define list_episodes(source)")
-                    loaded.append(module)
-                except Exception:
-                    sys.modules.pop(module_name, None)
-                    self.log.exception("Could not load media plugin %s", path)
+            module_name = f"flux_tray_user_plugin_{path.stem}"
+            try:
+                spec = importlib.util.spec_from_file_location(module_name, path)
+                if spec is None or spec.loader is None:
+                    raise ImportError("No module loader available")
+                module = importlib.util.module_from_spec(spec)
+                module.flux_tray_helpers = helpers
+                sys.modules[module_name] = module
+                # Bypass timestamp-based bytecode reuse so same-tick edits load.
+                code = compile(path.read_bytes(), str(path), "exec")
+                exec(code, module.__dict__)
+                if not callable(getattr(module, "list_episodes", None)):
+                    raise TypeError("Plugin must define list_episodes(source)")
+                loaded.append(module)
+            except Exception:
+                sys.modules.pop(module_name, None)
+                self.log.exception("Could not load media plugin %s", path)
         def order(plugin):
             try:
                 return int(getattr(plugin, "ORDER", 100))
