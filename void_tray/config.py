@@ -354,12 +354,11 @@ MIN_UPDATES_CHECK_HOURS = 1
 MIN_WEATHER_REFRESH_MINUTES = 5
 
 
-def load_launcher_entries():
-    """[(label, command)] from the [launcher] section, config order. A line is
-    'Label|command' (the command may itself contain '|'); a line without '|'
-    is used as both label and command."""
+def _load_commands(section):
+    """The `label|command` lines of a section as (label, command) pairs. A line
+    without a bar is both; a line with an empty command is skipped."""
     entries = []
-    for line in _read_config_sections()['launcher']:
+    for line in _read_config_sections()[section]:
         label, sep, command = line.partition('|')
         label, command = label.strip(), command.strip()
         if not sep:
@@ -367,6 +366,13 @@ def load_launcher_entries():
         if command:
             entries.append((label or command, command))
     return entries
+
+
+def load_launcher_entries():
+    """[(label, command)] from the [launcher] section, config order. A line is
+    'Label|command' (the command may itself contain '|'); a line without '|'
+    is used as both label and command."""
+    return _load_commands('launcher')
 
 
 def _load_interval(section, default_seconds, minimum, unit_seconds):
@@ -463,15 +469,7 @@ def load_network_reset_command():
 def load_actions():
     """[(label, command)] from [actions] (same 'Label|command' lines as the
     launcher), or the built-in Suspend / Power off if the section is empty."""
-    entries = []
-    for line in _read_config_sections()['actions']:
-        label, sep, command = line.partition('|')
-        label, command = label.strip(), command.strip()
-        if not sep:
-            command = label
-        if command:
-            entries.append((label or command, command))
-    return entries or list(DEFAULT_ACTIONS)
+    return _load_commands('actions') or list(DEFAULT_ACTIONS)
 
 
 def load_timer_settings():

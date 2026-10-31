@@ -134,7 +134,7 @@ class IconMixin:
                 text = str(count) if count < 100 else '99+'
                 ctx.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
                 ctx.set_font_size(12 if len(text) <= 2 else 8)
-                xb, yb, w, h, dx, dy = ctx.text_extents(text)
+                xb, yb, w, h = ctx.text_extents(text)[:4]
                 ctx.move_to(size / 2 - w / 2 - xb, size / 2 - h / 2 - yb)
                 ctx.show_text(text)
 

@@ -181,9 +181,6 @@ class FeedsMixin:
         self.show_popup(auto=True)  # auto-open whenever new unread items, updates, or live channels arrive
         return False
 
-    def _feed_display_name(self, feed_url):
-        return next((name or feed_url for url, name, _interval in load_feeds() if url == feed_url), feed_url)
-
     def _show_feed_menu(self, row, event):
         """Popover on a feed title: open every unread item as a tab, open its website
         or XML, and for each category or author seen in its unread items either mute

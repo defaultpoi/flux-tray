@@ -80,9 +80,15 @@ class LiveMixin:
             self._twitch_lock.release()
 
     def _on_twitch_checked(self, live_now):
+        return self._apply_live_result('live_channels', live_now)
+
+    def _apply_live_result(self, state_key, live_now):
+        """Stores the channels a check found live under state[state_key]. A channel that
+        was not live before announces itself like a new item; otherwise the icon and an
+        open popup are just brought up to date."""
         with self.lock:
-            was_live = {e['channel'] for e in self.state.get('live_channels', [])}
-            self.state['live_channels'] = [
+            was_live = {e['channel'] for e in self.state.get(state_key, [])}
+            self.state[state_key] = [
                 {'channel': ch, **live_now[ch]} for ch in sorted(live_now)
             ]
             save_state(self.state)
@@ -123,20 +129,7 @@ class LiveMixin:
             self._youtube_lock.release()
 
     def _on_youtube_checked(self, live_now):
-        with self.lock:
-            was_live = {e['channel'] for e in self.state.get('live_youtube_channels', [])}
-            self.state['live_youtube_channels'] = [
-                {'channel': ch, **live_now[ch]} for ch in sorted(live_now)
-            ]
-            save_state(self.state)
-        newly_live = set(live_now) - was_live
-        if newly_live:
-            self.on_new_items()
-        else:
-            self.update_icon()
-            if self.popup and self.popup.get_visible():
-                self.refresh_list()
-        return False
+        return self._apply_live_result('live_youtube_channels', live_now)
 
     def _build_live_row(self, entry, site, color, name=None):
         """Shared by the Twitch and YouTube rows: '<user> - <category> -

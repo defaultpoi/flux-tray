@@ -79,6 +79,19 @@ row.breaking-on { background: #ffc9c9; }
 """
 
 
+def _title_label(full_title):
+    """The bold, black, end-ellipsized label of a news or update row, its text cut
+    at MAX_TITLE_LEN. Returns the label and whether the title was cut."""
+    truncated = len(full_title) > MAX_TITLE_LEN
+    title = full_title[:MAX_TITLE_LEN - 1] + '\u2026' if truncated else full_title
+    label = Gtk.Label()
+    label.set_markup(f'<span foreground="#000000"><b>{GLib.markup_escape_text(title)}</b></span>')
+    label.set_xalign(0)
+    label.set_ellipsize(Pango.EllipsizeMode.END)
+    label.set_hexpand(True)
+    return label, truncated
+
+
 class PopupMixin:
     def maybe_auto_show_startup(self):
         if self.has_anything_to_show():
@@ -774,14 +787,7 @@ class PopupMixin:
             box.pack_start(status_label, False, False, 0)
 
         full_title = entry['title']
-        truncated = len(full_title) > MAX_TITLE_LEN
-        title = full_title[:MAX_TITLE_LEN - 1] + '\u2026' if truncated else full_title
-        text = GLib.markup_escape_text(title)
-        label = Gtk.Label()
-        label.set_markup(f'<span foreground="#000000"><b>{text}</b></span>')
-        label.set_xalign(0)
-        label.set_ellipsize(Pango.EllipsizeMode.END)
-        label.set_hexpand(True)
+        label, truncated = _title_label(full_title)
         if truncated:
             label.set_tooltip_text(full_title)
             row.set_tooltip_text(full_title)
@@ -816,14 +822,7 @@ class PopupMixin:
         box.pack_start(front_btn, False, False, 0)
 
         full_title = entry['title']
-        truncated = len(full_title) > MAX_TITLE_LEN
-        title = full_title[:MAX_TITLE_LEN - 1] + '\u2026' if truncated else full_title
-        text = GLib.markup_escape_text(title)
-        label = Gtk.Label()
-        label.set_markup(f'<span foreground="#000000"><b>{text}</b></span>')
-        label.set_xalign(0)
-        label.set_ellipsize(Pango.EllipsizeMode.END)
-        label.set_hexpand(True)
+        label, truncated = _title_label(full_title)
         tooltip = '\n'.join(part for part in (full_title if truncated else '', item_detail_text(entry)) if part)
         if tooltip:
             row.set_tooltip_text(tooltip)
