@@ -84,6 +84,9 @@ class FeedPopup:
             self.show()
 
     def close(self):
+        # Invalidate a queued scroll-restore idle callback before destroying
+        # the widgets it would otherwise access.
+        self._scroll_restore_generation += 1
         self.hide()
         self.window.destroy()
 
