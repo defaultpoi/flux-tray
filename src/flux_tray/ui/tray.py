@@ -14,6 +14,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk
 
 from flux_tray.ui.popup import FeedPopup
+from flux_tray.ui.links import is_valid_web_url
 
 
 class TrayController:
@@ -622,7 +623,7 @@ class TrayController:
     def _open_item(self, item):
         was_unread = any(current["id"] == item["id"]
                          for current in self.feeds.unread_items())
-        if item.get("link"):
+        if is_valid_web_url(item.get("link")):
             try:
                 webbrowser.open(item["link"])
             except Exception:
@@ -875,7 +876,8 @@ class TrayController:
             future.result()
         except Exception:
             self.log.exception("Streamlink/mpv playback failed; opening browser fallback")
-            webbrowser.open(fallback_url)
+            if is_valid_web_url(fallback_url):
+                webbrowser.open(fallback_url)
         return GLib.SOURCE_REMOVE
     def _media_tick(self, *, force: bool = False):
         if self.media is None:
@@ -969,7 +971,7 @@ class TrayController:
             future.result()
         except Exception:
             self.log.exception("Media playback failed")
-            if fallback_url:
+            if is_valid_web_url(fallback_url):
                 webbrowser.open(fallback_url)
         return GLib.SOURCE_REMOVE
 
