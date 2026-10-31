@@ -7,7 +7,7 @@ This document is deliberately conservative. A service existing in the repository
 - Python package layout, GTK3 application composition root and X11 tray shell.
 - Human-editable INI configuration, atomic JSON storage and rotating logs.
 - Bounded task manager with positive worker-count, task-key and callable validation, monotonic scheduler with finite non-boolean timing, name and callback validation, and subprocess supervisor with finite positive timeout validation (including overflow-safe rejection of oversized values); feed, plugin HTTP and HLS timeout validation also rejects booleans and overflowing integers, process-group cleanup on timeout/shutdown, and descendant cleanup after synchronous command exit, and bounded stdout/stderr capture (1 MiB tail per stream).
-- Shared mpv IPC controller, including reuse of an existing configured IPC socket; GTK-independent popup scroll-bound helper with regression tests.
+- Shared mpv IPC controller, including reuse of an existing configured IPC socket; GTK-independent popup scroll-bound and HTTP(S) link-validation helpers with regression tests.
 
 ## Partial feature implementations
 
@@ -25,7 +25,7 @@ This document is deliberately conservative. A service existing in the repository
 
 ## Verification status
 
-- GitHub Actions compiles `src` and `tests`, then runs the pytest suite on Python 3.14 only. The latest Python 3.14 CI run passed on 31 October 2026: **253 tests passed**. The workflow validates installer shell syntax, compiles `src` and `tests`, then runs pytest.
+- GitHub Actions compiles `src` and `tests`, then runs the pytest suite on Python 3.14 only. The latest Python 3.14 CI run passed on 31 October 2026: **265 tests passed**. The workflow validates installer shell syntax, compiles `src` and `tests`, then runs pytest.
 - CI does not exercise GTK interactions, real network providers, mpv, XBPS/Topgrade or the target desktop.
 - The code has **not** been run on the target Void Linux desktop in this development session; real XFCE/X11 integration remains unverified. A repeatable manual checklist is in [XFCE-VALIDATION.md](XFCE-VALIDATION.md).
 - Do not treat this branch as a release until the missing behavior is implemented, the test suite passes, and the application has been exercised on the target machine over an extended run.
