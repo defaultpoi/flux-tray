@@ -366,6 +366,16 @@ class TestHeaderClicks(unittest.TestCase):
         for other in (stub._show_feed_menu, stub.on_mark_read_clicked, stub.remove_read_later, opened, tab):
             other.assert_not_called()
 
+    def test_a_media_menu_that_fails_is_still_a_handled_click_and_is_logged(self):
+        """Not handled would let the click reach 'right-click on empty space: close the popup'."""
+        stub = self.Stub()
+        stub._show_media_menu.side_effect = RuntimeError('no room')
+        row = mock.Mock(spec=['media_source'], media_source='https://archive.org/details/show')
+        with mock.patch.object(rt, '_log') as log:
+            handled, _opened, _tab = self.press(stub, row, button=3)
+        self.assertTrue(handled)
+        self.assertIn('no room', log.call_args[0][0])
+
     def test_other_buttons_on_a_media_row_are_left_to_the_row(self):
         stub = self.Stub()
         row = mock.Mock(spec=['media_source'], media_source='https://archive.org/details/show')
