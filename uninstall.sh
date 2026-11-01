@@ -1,12 +1,12 @@
 #!/bin/sh
-# Removes what install.sh made. Leaves ~/.config/void-tray alone.
+# Removes what install.sh made. Leaves ~/.config/flux-tray alone.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd -P)
-link="${HOME}/.local/bin/void-tray"
-entry="${XDG_CONFIG_HOME:-${HOME}/.config}/autostart/void-tray.desktop"
+link="${HOME}/.local/bin/flux-tray"
+entry="${XDG_CONFIG_HOME:-${HOME}/.config}/autostart/flux-tray.desktop"
 
-if [ -L "$link" ] && [ "$(readlink "$link")" = "$here/void-tray" ]; then
+if [ -L "$link" ] && [ "$(readlink "$link")" = "$here/flux-tray" ]; then
     rm -f "$link"
     echo "removed $link"
 elif [ -e "$link" ] || [ -L "$link" ]; then

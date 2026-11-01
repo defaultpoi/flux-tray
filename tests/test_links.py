@@ -58,7 +58,7 @@ class TestUnreadItemWithAnUnsafeLink(unittest.TestCase):
         stub = mock.Mock(online=True)
         row = rt.types.SimpleNamespace(entry_id='e1', link='file:///etc/passwd')
         with mock.patch.object(rt.webbrowser, 'open') as opened:
-            rt.RssTray.on_row_activated(stub, None, row)
+            rt.FluxTray.on_row_activated(stub, None, row)
         opened.assert_not_called()
         stub._remove_unread.assert_called_once_with('e1')
 

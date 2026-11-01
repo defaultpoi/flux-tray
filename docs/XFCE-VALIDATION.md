@@ -11,10 +11,9 @@ Tick an item only after doing it, and write down what was not done in
 - [ ] `echo "$XDG_SESSION_TYPE"` prints `x11`.
 - [ ] `python3 -c 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk'` works, and `feedparser` imports.
 - [ ] The panel's notification area (or a status notifier host) is running.
-- [ ] `VOID_TRAY_DEBUG=1 void-tray` in a terminal starts without a traceback.
-- [ ] `./install.sh --autostart` makes `~/.local/bin/void-tray` and `~/.config/autostart/void-tray.desktop`; after logging out and in the tray is there without a terminal.
-- [ ] `./install.sh --no-autostart` removes the entry only; `./uninstall.sh` removes the link and the entry and leaves `~/.config/void-tray`.
-- [ ] With a `~/.config/rss-tray` and no `~/.config/void-tray`, the first start copies config, state and sound.
+- [ ] `FLUX_TRAY_DEBUG=1 flux-tray` in a terminal starts without a traceback.
+- [ ] `./install.sh --autostart` makes `~/.local/bin/flux-tray` and `~/.config/autostart/flux-tray.desktop`; after logging out and in the tray is there without a terminal.
+- [ ] `./install.sh --no-autostart` removes the entry only; `./uninstall.sh` removes the link and the entry and leaves `~/.config/flux-tray`.
 
 ## 2. Tray icon and popup
 
@@ -51,9 +50,9 @@ Tick an item only after doing it, and write down what was not done in
 - [ ] A countdown survives a restart of the app and a reboot (the remaining time is right).
 - [ ] Suspend past a countdown's end, resume: it is shown as missed, pulses, and acknowledging stops it.
 - [ ] A scheduled action fires once for its local date, with the warning slide before it and Snooze.
-- [ ] Leave it running for 24 hours with `VOID_TRAY_DEBUG=1` going to a file: no repeated exceptions, no drift in the timer, no duplicate notifications.
+- [ ] Leave it running for 24 hours with `FLUX_TRAY_DEBUG=1` going to a file: no repeated exceptions, no drift in the timer, no duplicate notifications.
 - [ ] Restart the XFCE panel: the tray icon returns without restarting the app.
 
 ## Evidence
 
-Date, void-tray commit, Void package versions, XFCE, GTK3, Python, the panel's tray host, results, and the log lines that matter go in `docs/STATUS.md`.
+Date, Flux Tray commit, Void package versions, XFCE, GTK3, Python, the panel's tray host, results, and the log lines that matter go in `docs/STATUS.md`.

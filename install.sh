@@ -1,16 +1,16 @@
 #!/bin/sh
-# Links this checkout into ~/.local/bin so `void-tray` starts it, and
+# Links this checkout into ~/.local/bin so `flux-tray` starts it, and
 # optionally starts it with the desktop session. `git pull` is the update.
 #   ./install.sh                   link only
-#   ./install.sh --autostart       link and add ~/.config/autostart/void-tray.desktop
+#   ./install.sh --autostart       link and add ~/.config/autostart/flux-tray.desktop
 #   ./install.sh --no-autostart    link and remove that entry
-# Never touches ~/.config/void-tray (config.conf, state.json, media.json).
+# Never touches ~/.config/flux-tray (config.conf, state.json, media.json).
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd -P)
 bin_dir="${HOME}/.local/bin"
-link="${bin_dir}/void-tray"
-entry="${XDG_CONFIG_HOME:-${HOME}/.config}/autostart/void-tray.desktop"
+link="${bin_dir}/flux-tray"
+entry="${XDG_CONFIG_HOME:-${HOME}/.config}/autostart/flux-tray.desktop"
 autostart=keep
 
 for argument in "$@"; do
@@ -26,8 +26,8 @@ if [ -e "$link" ] && [ ! -L "$link" ]; then
     echo "$link exists and is not a link; leaving it alone" >&2
     exit 1
 fi
-ln -sf "$here/void-tray" "$link"
-echo "linked $link -> $here/void-tray"
+ln -sf "$here/flux-tray" "$link"
+echo "linked $link -> $here/flux-tray"
 
 case "$autostart" in
     yes)
@@ -35,7 +35,7 @@ case "$autostart" in
         cat > "$entry" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=void-tray
+Name=Flux Tray
 Comment=News, live streams, updates, weather and media in the tray
 Exec=$link
 Terminal=false

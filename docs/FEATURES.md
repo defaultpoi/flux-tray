@@ -1,6 +1,6 @@
 # Feature parity matrix
 
-Every behaviour void-tray has is a row here, with the tests that pin it.
+Every behaviour flux-tray has is a row here, with the tests that pin it.
 `tests/test_parity.py` fails when a row names no test, when a named test class
 does not exist, or when a test module is named by no row. So a feature cannot
 be dropped by deleting its tests without this file changing in the same commit,
@@ -42,6 +42,7 @@ window, a real network).
 | F27 | Playing downloaded media: local playback, what counts as watched | test_playback.TestCountsAsWatched, test_playback.TestWatchLocalPlayback, test_playback.TestPlayMediaFile | 3 |
 | F28 | State files: state.json and media.json load, repair, set aside when corrupt, are written whole by one writer at a time | test_state.TestState, test_state.TestMediaState, test_constants.TestConfigEncoding | 4 |
 | F29 | config.conf: one writer, edits from different threads take turns, comments and other sections kept | test_config.TestConfigEditsFromSeveralThreads | - |
-| F30 | Migration from rss-tray and the debug environment variables | test_migration.TestLegacyConfigMigration, test_migration.TestDebugEnvironmentNames, test_config.TestDebugLogging | 1 |
+| F30 | Debug logging to stderr, switched on by an environment variable | test_config.TestDebugLogging | 1 |
 | F31 | Notification sound, SIGINT and SIGTERM leave the main loop cleanly | test_desktop.TestNotificationSound, test_app.TestUnixSignalAdd | 4 |
+| F33 | Runs on Python 3.14 only, and says so | test_python_version.TestPythonVersion | 1 |
 | F32 | Installing: link into ~/.local/bin, optional autostart entry, uninstall that keeps the config | test_install.TestInstallScripts | 1 |

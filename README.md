@@ -1,6 +1,6 @@
-# void-tray
+# flux-tray
 
-A minimal tray-based RSS/Atom reader for Linux, built with Python and GTK3 as a lightweight replacement for QuiteRSS. It also shows weather, Void package updates, Twitch and YouTube live channels, and a countdown timer in the same popup. Written for XFCE on Void Linux; it should work on any desktop with a `Gtk.StatusIcon`-compatible tray. This is the modular layout of the former single-file `rss-tray`: same behaviour, split into small modules (see [Project layout](#project-layout)).
+Flux Tray is a personal tray application for XFCE on Void Linux, written for Python 3.14 and GTK3 and for no other setup. It takes in what several services have to say (news feeds, Twitch and YouTube live channels, weather and its alerts, podcasts and series, package updates), keeps track of it, and shows it in one tray icon and one popup. What is muted, saved for later, highlighted or announced is decided by rules of your own in `config.conf`; today that covers feeds, highlights and the schedules of live channels, and extending it to everything is the direction of [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Features
 
@@ -35,13 +35,13 @@ A minimal tray-based RSS/Atom reader for Linux, built with Python and GTK3 as a 
 
 ### Media plugins
 
-A plugin is a Python file in `~/.config/void-tray/media-plugins/` (create the folder) that teaches the Media section a site. It is loaded at the next check after you save it, with no restart, and a plugin that does not load is named on the row of any source that needed it. A plugin runs inside the app with your permissions, like the scripts in `[launcher]`, so only keep files there that you wrote or read.
+A plugin is a Python file in `~/.config/flux-tray/media-plugins/` (create the folder) that teaches the Media section a site. It is loaded at the next check after you save it, with no restart, and a plugin that does not load is named on the row of any source that needed it. A plugin runs inside the app with your permissions, like the scripts in `[launcher]`, so only keep files there that you wrote or read.
 
 A `[media]` line reaches a plugin in one of two ways: the plugin's `matches(line)` returns true for it (plugins are asked before the built-in drivers, so one can also take over a site they handle), or the line starts with the plugin's name and a colon, `retrotv:the-show|Retro TV`, and the plugin gets what follows the colon.
 
 ```python
-# ~/.config/void-tray/media-plugins/retrotv.py
-from void_tray.media import fetch_json      # get JSON with a timeout; see "Helpers" below
+# ~/.config/flux-tray/media-plugins/retrotv.py
+from flux_tray.media import fetch_json      # get JSON with a timeout; see "Helpers" below
 
 NAME = 'retrotv'     # optional: the name for `retrotv:...` lines (default: the file name)
 ORDER = 'oldest'     # optional: 'oldest' for a series, 'newest' for a podcast (default)
@@ -68,15 +68,15 @@ That is a complete plugin: the app downloads each `url` (resuming, with the subt
 
 Two more functions are optional. Give episodes no `url` and define **`resolve(episode)`** to look the file up only when it is about to be downloaded (the way archive.org collections work, so that a check does not make a request per episode); it returns `{'video': {'url': ..., 'ext': '.mp4', 'headers': {...}}, 'subs': [...]}` (`headers` optional). A video whose url is an **HLS playlist** (`.m3u8`, a master or a media playlist) needs nothing more: it is downloaded with ffmpeg, which copies the version that suits the screen (see Downloads above) without re-encoding into an `.mkv` (or `.ts` or `.mp4` if `ext` says so). Progress is real, since the length is read from the playlist; a live stream is refused; the file appears under its final name only when complete; and a subtitle that fails to download is skipped instead of failing the episode. Or define **`download(episode, base, progress, cancelled)`** to fetch the files yourself (a command-line downloader, a site that needs a session): save the video as `base` plus its extension and each subtitle as `base.<lang>.<ext>`, call `progress(done_bytes, total_bytes_or_None)` now and then, stop when `cancelled()` is true, and return `{'video': path, 'subs': [paths]}`. This is how the yt-dlp driver, which is built the same way, works.
 
-**Helpers** you can import from `void_tray.media`: `fetch_json(url)` (a GET with a User-Agent and a timeout, returns the parsed JSON), `download_file(url, dest, progress=None, cancelled=None)` (resumable) and `season_episode(title)`. Do your own requests with a timeout: a plugin that hangs stops the checks of every source until it returns. Whatever a plugin raises is shown on its source's row, so `raise ValueError('the site changed its layout')` is a fine way to say what went wrong.
+**Helpers** you can import from `flux_tray.media`: `fetch_json(url)` (a GET with a User-Agent and a timeout, returns the parsed JSON), `download_file(url, dest, progress=None, cancelled=None)` (resumable) and `season_episode(title)`. Do your own requests with a timeout: a plugin that hangs stops the checks of every source until it returns. Whatever a plugin raises is shown on its source's row, so `raise ValueError('the site changed its layout')` is a fine way to say what went wrong.
 
 To try a plugin without waiting for a check, run this in a terminal with the line you would put in `[media]`:
 
 ```
-cd ~/projects/void-tray-v2 && python3 -c "
+cd ~/projects/flux-tray && python3 -c "
 import sys
-from void_tray.constants import MEDIA_PLUGIN_DIR
-from void_tray.mediasources import MediaSources
+from flux_tray.constants import MEDIA_PLUGIN_DIR
+from flux_tray.mediasources import MediaSources
 sources = MediaSources(MEDIA_PLUGIN_DIR); sources.refresh(); print('not loaded:', sources.errors or 'none')
 driver, given = sources.driver_for(sys.argv[1]); title, episodes = driver.list_episodes(given)
 print(driver.name, '-', title, '-', len(episodes), 'episodes'); [print(e) for e in episodes[:3]]" 'retrotv:the-show'
@@ -104,13 +104,13 @@ print(driver.name, '-', title, '-', len(episodes), 'episodes'); [print(e) for e 
 
 - **Offline indicator:** a red "Offline" banner appears under the weather bar when the internet stops working, and goes away when it is back.
   - **Detection:** a probe runs every 10 s and when the popup opens. It checks that a public address accepts a connection **and** that a hostname resolves, so a DNS-only outage (the link looks fine, but nothing with a name works) counts too. A failed probe is re-checked after 3 s, and a failing feed, weather or live-channel request triggers a probe at once (at most one every 5 s), so the banner shows up within seconds. It takes two failed probes in a row to go offline, so one dropped probe doesn't flash it.
-  - **Cause:** hover the banner for what failed and since when: DNS lookups failing, the router answering but the internet being unreachable (provider or upstream), the router not answering, or no default route (the link is down). The same line goes to the debug log (`VOID_TRAY_DEBUG=1`).
+  - **Cause:** hover the banner for what failed and since when: DNS lookups failing, the router answering but the internet being unreachable (provider or upstream), the router not answering, or no default route (the link is down). The same line goes to the debug log (`FLUX_TRAY_DEBUG=1`).
   - **Reset network button:** if `reset=<command>` is set in `[network]` (for example `reset=~/.local/bin/reset-network.sh`), the banner gets a "Reset network" button that runs it. It only runs when you click it; the button is disabled for 20 s while the connection comes back.
   - **While it shows:** left-clicking news items, saved items, feed headers, live channels and the "Updates available" header does nothing (and so do the menu's open buttons); right-clicking a news item still dismisses it (as does "Mark all read"). On the first successful probe the banner goes away and feeds, weather and live channels refresh immediately instead of waiting out their intervals.
 
 ## Requirements
 
-- Python 3, PyGObject (GTK3), pycairo, `feedparser`
+- Python 3.14 (older versions are refused at start), PyGObject (GTK3), pycairo, `feedparser`
 - `xbps-install` / `xbps-query` for update detection (Void Linux only)
 - `topgrade` (optional, `sudo xbps-install topgrade`) to install updates with it; see [Passwordless updates](#passwordless-updates-optional)
 - `streamlink` and `mpv` for Twitch and YouTube Live streams; `mpv` also plays the podcasts, series and movies
@@ -124,28 +124,26 @@ sudo xbps-install -S python3-gobject python3-cairo python3-feedparser streamlink
 ## Installation
 
 ```bash
-git clone https://github.com/defaultpoi/void-tray.git ~/projects/void-tray
-ln -sf ~/projects/void-tray/void-tray ~/.local/bin/void-tray
-void-tray   # run once in the foreground to see any tracebacks
+git clone https://github.com/defaultpoi/flux-tray.git ~/projects/flux-tray
+ln -sf ~/projects/flux-tray/flux-tray ~/.local/bin/flux-tray
+flux-tray   # run once in the foreground to see any tracebacks
 ```
 
 `./install.sh` does the `ln -sf` for you (`--autostart` also adds the autostart entry, `--no-autostart` removes it; `./uninstall.sh` undoes both and leaves your config alone). The launcher resolves the symlink, so updating is `git pull` and a restart of the app; there is no copy step.
 
-Coming from the single-file `rss-tray`: on its first start without a config of its own, void-tray copies `config.conf`, `state.json` and `notification.wav` from `~/.config/rss-tray/` (the old directory is left untouched), so feeds, read state and the sound carry over.
-
-Autostart: create `~/.config/autostart/void-tray.desktop`:
+Autostart: create `~/.config/autostart/flux-tray.desktop`:
 
 ```ini
 [Desktop Entry]
 Type=Application
-Name=Void Tray
-Exec=/home/YOUR_USER/.local/bin/void-tray
+Name=Flux Tray
+Exec=/home/YOUR_USER/.local/bin/flux-tray
 Terminal=false
 ```
 
 ## Configuration
 
-Everything lives in `~/.config/void-tray/`:
+Everything lives in `~/.config/flux-tray/`:
 
 | File | Purpose |
 |------|---------|
@@ -329,7 +327,7 @@ Nothing in a tray app can type a password, so installs must be allowed in sudoer
 **With topgrade** (the default once it is installed) the `system` step runs `sudo xbps-install -Su xbps -y` and then `sudo xbps-install -u -y`. One command that writes a rule for exactly those two, checks it with `visudo` and only then installs it:
 
 ```bash
-t=$(mktemp) && echo "$USER ALL=(root) NOPASSWD: /usr/bin/xbps-install -Su xbps -y, /usr/bin/xbps-install -u -y" > "$t" && sudo visudo -cf "$t" && sudo install -m 440 -o root -g root "$t" /etc/sudoers.d/zz-void-tray; rm -f "$t"
+t=$(mktemp) && echo "$USER ALL=(root) NOPASSWD: /usr/bin/xbps-install -Su xbps -y, /usr/bin/xbps-install -u -y" > "$t" && sudo visudo -cf "$t" && sudo install -m 440 -o root -g root "$t" /etc/sudoers.d/zz-flux-tray; rm -f "$t"
 ```
 
 This rule only allows upgrading what is already installed; it cannot install arbitrary packages. Other steps (for example a system-wide flatpak update) need their own rule, or they fail instead of asking. If `doas` is installed, topgrade prefers it over `sudo`; set `sudo_command = "sudo"` under `[misc]` in `~/.config/topgrade.toml` to pin it.
@@ -337,7 +335,7 @@ This rule only allows upgrading what is already installed; it cannot install arb
 **Without topgrade** (`installer=xbps`, or topgrade is not installed) installs run `sudo -n xbps-install -Su -y <pkg>`, which fails immediately if a password would be needed. Allow it with a scoped rule:
 
 ```bash
-sudo visudo -f /etc/sudoers.d/zz-void-tray
+sudo visudo -f /etc/sudoers.d/zz-flux-tray
 ```
 
 ```
@@ -351,7 +349,7 @@ The `zz-` prefix matters: sudoers uses the last matching rule, so the file must 
 **Removing orphaned packages** runs `sudo -n xbps-remove -o -y` and, with the cache option, `sudo -n xbps-remove -O -y`. Without a rule they fail at once and the row shows "Failed". One command that writes a rule for exactly those two:
 
 ```bash
-t=$(mktemp) && echo "$USER ALL=(root) NOPASSWD: /usr/bin/xbps-remove -o -y, /usr/bin/xbps-remove -O -y" > "$t" && sudo visudo -cf "$t" && sudo install -m 440 -o root -g root "$t" /etc/sudoers.d/zz-void-tray-remove; rm -f "$t"
+t=$(mktemp) && echo "$USER ALL=(root) NOPASSWD: /usr/bin/xbps-remove -o -y, /usr/bin/xbps-remove -O -y" > "$t" && sudo visudo -cf "$t" && sudo install -m 440 -o root -g root "$t" /etc/sudoers.d/zz-flux-tray-remove; rm -f "$t"
 ```
 
 To run every topgrade step interactively, put it in the Launch list, for example `Topgrade|xfce4-terminal -e topgrade` under `[launcher]`.
@@ -374,9 +372,9 @@ To run every topgrade step interactively, put it in the Launch list, for example
 ## Project layout
 
 ```
-void-tray              launcher (symlink it into ~/.local/bin)
-void_tray/
-  app.py               RssTray (assembled from the mixins below), signals, main()
+flux-tray              launcher (symlink it into ~/.local/bin)
+flux_tray/
+  app.py               FluxTray (assembled from the mixins below), signals, main()
   constants.py         constants shared by several modules
   config.py            config.conf: creation, every section reader, the single writer
   state.py             state.json load/save

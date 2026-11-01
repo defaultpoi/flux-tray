@@ -1,4 +1,4 @@
-"""The RssTray application class, signal handling and main()."""
+"""The FluxTray application class, signal handling and main()."""
 
 import signal
 import socket
@@ -11,7 +11,6 @@ from .config import (
     load_twitch_check_interval,
     load_weather_refresh_interval,
     load_youtube_check_interval,
-    migrate_legacy_config,
 )
 from .constants import DEFAULT_HIGHLIGHT_WORDS, MEDIA_PLUGIN_DIR
 from .state import load_media, load_state
@@ -27,7 +26,7 @@ from .ui.updates import UpdatesMixin
 from .ui.weather import WeatherMixin
 
 
-class RssTray(ConnectivityMixin, FeedsMixin, IconMixin, LiveMixin, MediaMixin, PopupMixin, TimerMixin, UpdatesMixin, WeatherMixin):
+class FluxTray(ConnectivityMixin, FeedsMixin, IconMixin, LiveMixin, MediaMixin, PopupMixin, TimerMixin, UpdatesMixin, WeatherMixin):
     def __init__(self):
         ensure_config()
         self.state = load_state()
@@ -184,7 +183,6 @@ def _install_quit_signal_handlers():
 
 
 def main():
-    migrate_legacy_config()
-    RssTray()
+    FluxTray()
     _install_quit_signal_handlers()
     Gtk.main()

@@ -6,8 +6,8 @@ from facade import rt
 
 class TestLiveScheduleTick(unittest.TestCase):
     class Stub:
-        _live_schedule_tick = rt.RssTray._live_schedule_tick
-        _current_scheduled_active = staticmethod(rt.RssTray._current_scheduled_active)
+        _live_schedule_tick = rt.FluxTray._live_schedule_tick
+        _current_scheduled_active = staticmethod(rt.FluxTray._current_scheduled_active)
 
         def __init__(self, before):
             self._scheduled_active = before
@@ -22,8 +22,8 @@ class TestLiveScheduleTick(unittest.TestCase):
 
     def _tick(self, before, now_active):
         stub = self.Stub(before)
-        with mock.patch.object(rt.RssTray, '_current_scheduled_active', staticmethod(lambda now=None: now_active)):
-            stub._current_scheduled_active = rt.RssTray._current_scheduled_active
+        with mock.patch.object(rt.FluxTray, '_current_scheduled_active', staticmethod(lambda now=None: now_active)):
+            stub._current_scheduled_active = rt.FluxTray._current_scheduled_active
             self.assertTrue(stub._live_schedule_tick())
         return stub
 

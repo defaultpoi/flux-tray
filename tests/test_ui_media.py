@@ -63,29 +63,29 @@ class FakeRegistry:
 
 
 class Stub:
-    _effective_order = rt.RssTray._effective_order
-    _check_media_guarded = rt.RssTray._check_media_guarded
-    start_media_check = rt.RssTray.start_media_check
-    watch_media_config = rt.RssTray.watch_media_config
-    _on_media_config_event = rt.RssTray._on_media_config_event
-    _media_config_changed = rt.RssTray._media_config_changed
-    _file_size = staticmethod(rt.RssTray._file_size)
-    _check_media = rt.RssTray._check_media
-    _on_media_new = rt.RssTray._on_media_new
-    _media_file_ready = staticmethod(rt.RssTray._media_file_ready)
-    _plan_media_downloads = rt.RssTray._plan_media_downloads
-    _enqueue_media = rt.RssTray._enqueue_media
-    _media_worker = rt.RssTray._media_worker
-    _media_display_name = rt.RssTray._media_display_name
-    _download_media_episode = rt.RssTray._download_media_episode
-    _media_source_order = rt.RssTray._media_source_order
-    on_media_row_clicked = rt.RssTray.on_media_row_clicked
-    _on_media_played = rt.RssTray._on_media_played
-    mark_media_watched = rt.RssTray.mark_media_watched
-    media_source_urls = rt.RssTray.media_source_urls
-    build_media_row = rt.RssTray.build_media_row
-    _update_media_row = rt.RssTray._update_media_row
-    _refresh_media_rows = rt.RssTray._refresh_media_rows
+    _effective_order = rt.FluxTray._effective_order
+    _check_media_guarded = rt.FluxTray._check_media_guarded
+    start_media_check = rt.FluxTray.start_media_check
+    watch_media_config = rt.FluxTray.watch_media_config
+    _on_media_config_event = rt.FluxTray._on_media_config_event
+    _media_config_changed = rt.FluxTray._media_config_changed
+    _file_size = staticmethod(rt.FluxTray._file_size)
+    _check_media = rt.FluxTray._check_media
+    _on_media_new = rt.FluxTray._on_media_new
+    _media_file_ready = staticmethod(rt.FluxTray._media_file_ready)
+    _plan_media_downloads = rt.FluxTray._plan_media_downloads
+    _enqueue_media = rt.FluxTray._enqueue_media
+    _media_worker = rt.FluxTray._media_worker
+    _media_display_name = rt.FluxTray._media_display_name
+    _download_media_episode = rt.FluxTray._download_media_episode
+    _media_source_order = rt.FluxTray._media_source_order
+    on_media_row_clicked = rt.FluxTray.on_media_row_clicked
+    _on_media_played = rt.FluxTray._on_media_played
+    mark_media_watched = rt.FluxTray.mark_media_watched
+    media_source_urls = rt.FluxTray.media_source_urls
+    build_media_row = rt.FluxTray.build_media_row
+    _update_media_row = rt.FluxTray._update_media_row
+    _refresh_media_rows = rt.FluxTray._refresh_media_rows
 
     def __init__(self):
         self.media = {'sources': {}}
@@ -645,7 +645,7 @@ class TestWatchingWhileItDownloads(MediaCase):
 class TestMeasuringTheScreen(MediaCase):
     def test_the_monitor_is_measured_at_the_start_and_again_when_monitors_change(self):
         stub = Stub()
-        stub._measure_screen = rt.RssTray._measure_screen.__get__(stub)
+        stub._measure_screen = rt.FluxTray._measure_screen.__get__(stub)
         with mock.patch.object(rt, 'primary_monitor_size', side_effect=[(1366, 768), (1920, 1080)]), mock.patch.object(rt, 'remember_screen_size') as remember, \
                 mock.patch.object(rt.Gdk.Screen, 'get_default') as get_screen:
             stub._measure_screen()
@@ -657,7 +657,7 @@ class TestMeasuringTheScreen(MediaCase):
 
     def test_without_a_screen_object_nothing_is_connected_and_nothing_breaks(self):
         stub = Stub()
-        stub._measure_screen = rt.RssTray._measure_screen.__get__(stub)
+        stub._measure_screen = rt.FluxTray._measure_screen.__get__(stub)
         with mock.patch.object(rt, 'primary_monitor_size', return_value=None), mock.patch.object(rt, 'remember_screen_size') as remember, \
                 mock.patch.object(rt.Gdk.Screen, 'get_default', return_value=None):
             stub._measure_screen()
@@ -678,13 +678,13 @@ class TestPeriodicCheck(MediaCase):
         stub = Stub()
         stub.start_media_check = mock.Mock()
         with mock.patch.object(rt, 'run_when_online') as run, mock.patch.object(rt, 'is_online') as probe:
-            self.assertFalse(rt.RssTray.initial_media_check(stub))
+            self.assertFalse(rt.FluxTray.initial_media_check(stub))
         run.assert_called_once_with(stub.start_media_check)
         probe.assert_not_called()
 
 
 def stub_periodic(stub):
-    stub.periodic_media_check = rt.RssTray.periodic_media_check.__get__(stub)
+    stub.periodic_media_check = rt.FluxTray.periodic_media_check.__get__(stub)
     return stub.periodic_media_check()
 
 
@@ -1152,7 +1152,7 @@ class TestWatched(MediaCase):
 
     def test_marking_moves_the_next_episode_on(self):
         stub = self.stub(ep('a', 1), ep('b', 2))
-        stub._plan_media_downloads = rt.RssTray._plan_media_downloads.__get__(stub)
+        stub._plan_media_downloads = rt.FluxTray._plan_media_downloads.__get__(stub)
         stub._enqueue_media = mock.Mock()
         stub.mark_media_watched(URL, 'a')
         stub._enqueue_media.assert_called_once_with([(URL, 'b')])

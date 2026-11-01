@@ -168,7 +168,7 @@ class TestFeedMuteRules(TmpConfigCase):
         self.conf('[feeds]\nhttps://a.example/feed|||category=sports\nhttps://b.example/feed\n')
 
         class Stub:
-            check_feeds = rt.RssTray.check_feeds
+            check_feeds = rt.FluxTray.check_feeds
 
             def __init__(self):
                 self.online = True
@@ -201,7 +201,7 @@ class TestFeedMuteRules(TmpConfigCase):
         self.assertEqual(len(rt.load_feeds()), 4)
 
     class LaterStub:
-        check_feeds = rt.RssTray.check_feeds
+        check_feeds = rt.FluxTray.check_feeds
 
         def __init__(self):
             self.online = True
@@ -277,7 +277,7 @@ class TestFeedMuteRules(TmpConfigCase):
         self.conf('[feeds]\nhttps://a.example/feed|||category=plants\n[mute]\nwinter\n')
 
         class Stub:
-            check_feeds = rt.RssTray.check_feeds
+            check_feeds = rt.FluxTray.check_feeds
 
             def __init__(self):
                 self.online = True
@@ -337,7 +337,7 @@ class TestBreakingHighlight(TmpConfigCase):
 
 class TestHeaderClicks(unittest.TestCase):
     class Stub:
-        on_listbox_button_press = rt.RssTray.on_listbox_button_press
+        on_listbox_button_press = rt.FluxTray.on_listbox_button_press
 
         def __init__(self):
             self.popup = mock.MagicMock()

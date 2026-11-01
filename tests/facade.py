@@ -1,4 +1,4 @@
-"""Gives the tests one namespace over the whole void_tray package.
+"""Gives the tests one namespace over the whole flux_tray package.
 
 The suite was written against a single module and patches names on it with
 mock.patch.object(rt, 'name', ...). The code now lives in many modules, and a
@@ -18,12 +18,12 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import void_tray  # noqa: E402
+import flux_tray  # noqa: E402
 
 
 def _load_modules():
-    mods = [void_tray]
-    for info in pkgutil.walk_packages(void_tray.__path__, 'void_tray.'):
+    mods = [flux_tray]
+    for info in pkgutil.walk_packages(flux_tray.__path__, 'flux_tray.'):
         if info.name.endswith('.__main__'):
             continue  # the entry point, not part of the namespace
         mods.append(importlib.import_module(info.name))
@@ -70,7 +70,7 @@ def _find_clashes(mods):
     `import datetime` in one module and `from datetime import datetime` in
     another) silently gives one of them the wrong thing, and tests of unrelated
     code break or, worse, pass. A package's attribute for its own submodule
-    (`void_tray.live`, put there by the import system) is structural and only
+    (`flux_tray.live`, put there by the import system) is structural and only
     counts when something else also uses the name."""
     regular, structural = {}, {}
     for module in mods:
@@ -92,7 +92,7 @@ def _find_clashes(mods):
 
 
 def _clash_message(clashes):
-    lines = ['void_tray modules bind the same name to different things, which the test namespace (rt) cannot '
+    lines = ['flux_tray modules bind the same name to different things, which the test namespace (rt) cannot '
              'tell apart: rt.<name> answers from one of them and mock.patch.object(rt, "<name>") rebinds all of '
              'them, so unrelated tests break or pass for the wrong reason. Rename one, or import both the same way:']
     for name, where in sorted(clashes.items()):

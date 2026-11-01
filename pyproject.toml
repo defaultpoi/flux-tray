@@ -1,0 +1,7 @@
+# Metadata for the tools; Flux Tray is run from a checkout (see README), not installed from here.
+[project]
+name = "flux-tray"
+description = "A tray dispatcher for news, live streams, weather, media and package updates, for XFCE on Void Linux"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = ["feedparser", "PyGObject", "pycairo"]

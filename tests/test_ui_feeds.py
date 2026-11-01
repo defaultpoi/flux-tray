@@ -7,7 +7,7 @@ from helpers import TmpConfigCase
 
 class TestFeedCheckRobustness(TmpConfigCase):
     class Stub:
-        check_feeds = rt.RssTray.check_feeds
+        check_feeds = rt.FluxTray.check_feeds
 
         def __init__(self, online=True):
             self.online = online
@@ -59,7 +59,7 @@ class TestUnreadCap(TmpConfigCase):
         self.conf('[feeds]\nhttps://a.example/feed\n')
 
         class Stub:
-            check_feeds = rt.RssTray.check_feeds
+            check_feeds = rt.FluxTray.check_feeds
 
             def __init__(self):
                 self.online = True
@@ -82,8 +82,8 @@ class TestUnreadCap(TmpConfigCase):
 
 class TestFeedMenuActions(unittest.TestCase):
     class Stub:
-        _feed_menu_mute = rt.RssTray._feed_menu_mute
-        _feed_menu_open = rt.RssTray._feed_menu_open
+        _feed_menu_mute = rt.FluxTray._feed_menu_mute
+        _feed_menu_open = rt.FluxTray._feed_menu_open
 
         def __init__(self):
             self.lock = rt.threading.Lock()
@@ -129,11 +129,11 @@ class TestFeedMenuActions(unittest.TestCase):
 
 class TestSaveForLater(unittest.TestCase):
     class Stub:
-        save_for_later = rt.RssTray.save_for_later
-        on_save_clicked = rt.RssTray.on_save_clicked
-        remove_read_later = rt.RssTray.remove_read_later
-        on_read_later_remove_clicked = rt.RssTray.on_read_later_remove_clicked
-        open_read_later = rt.RssTray.open_read_later
+        save_for_later = rt.FluxTray.save_for_later
+        on_save_clicked = rt.FluxTray.on_save_clicked
+        remove_read_later = rt.FluxTray.remove_read_later
+        on_read_later_remove_clicked = rt.FluxTray.on_read_later_remove_clicked
+        open_read_later = rt.FluxTray.open_read_later
 
         def __init__(self, read_later=()):
             self.lock = rt.threading.Lock()
@@ -204,8 +204,8 @@ class TestSaveForLater(unittest.TestCase):
 
 class TestOpenAllAsTabs(unittest.TestCase):
     class Stub:
-        _feed_menu_open_all = rt.RssTray._feed_menu_open_all
-        _open_tabs = staticmethod(rt.RssTray._open_tabs)
+        _feed_menu_open_all = rt.FluxTray._feed_menu_open_all
+        _open_tabs = staticmethod(rt.FluxTray._open_tabs)
 
         def __init__(self):
             self.lock = rt.threading.Lock()
@@ -248,7 +248,7 @@ class TestOpenAllAsTabs(unittest.TestCase):
         events = []
         with mock.patch.object(rt.webbrowser, 'open_new_tab', side_effect=lambda l: events.append(('tab', l))), \
                 mock.patch.object(rt.time_module, 'sleep', side_effect=lambda s: events.append(('sleep', s))):
-            rt.RssTray._open_tabs(['https://x.example/a', 'https://x.example/b'])
+            rt.FluxTray._open_tabs(['https://x.example/a', 'https://x.example/b'])
         self.assertEqual(events, [('tab', 'https://x.example/a'), ('sleep', rt.OPEN_TABS_DELAY_SECONDS),
                                   ('tab', 'https://x.example/b'), ('sleep', rt.OPEN_TABS_DELAY_SECONDS)])
 
@@ -256,13 +256,13 @@ class TestOpenAllAsTabs(unittest.TestCase):
         events = []
         with mock.patch.object(rt.webbrowser, 'open_new_tab', side_effect=lambda l: events.append(('tab', l))), \
                 mock.patch.object(rt.time_module, 'sleep', side_effect=lambda s: events.append(('sleep', s))):
-            rt.RssTray._open_tabs(['file:///etc/passwd', 'https://x.example/b'])
+            rt.FluxTray._open_tabs(['file:///etc/passwd', 'https://x.example/b'])
         self.assertEqual(events, [('tab', 'https://x.example/b'), ('sleep', rt.OPEN_TABS_DELAY_SECONDS)])
 
 
 class TestFeedMenuReadLater(unittest.TestCase):
     class Stub:
-        _feed_menu_later = rt.RssTray._feed_menu_later
+        _feed_menu_later = rt.FluxTray._feed_menu_later
         save_for_later = mock.Mock()
 
         def __init__(self):
@@ -310,8 +310,8 @@ class TestFeedMenuReadLater(unittest.TestCase):
 
 class TestFeedMenuLayout(unittest.TestCase):
     class Stub:
-        _show_feed_menu = rt.RssTray._show_feed_menu
-        _feed_menu_room = rt.RssTray._feed_menu_room
+        _show_feed_menu = rt.FluxTray._show_feed_menu
+        _feed_menu_room = rt.FluxTray._feed_menu_room
 
         def __init__(self, online=True):
             self.online = online
@@ -452,7 +452,7 @@ class TestFeedMenuLayout(unittest.TestCase):
 
 class TestFeedMenuRoom(unittest.TestCase):
     class Stub:
-        _feed_menu_room = rt.RssTray._feed_menu_room
+        _feed_menu_room = rt.FluxTray._feed_menu_room
 
         def __init__(self, window_height=400):
             self.popup = mock.MagicMock()

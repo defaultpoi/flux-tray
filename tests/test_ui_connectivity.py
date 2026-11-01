@@ -7,11 +7,11 @@ from helpers import TmpConfigCase
 
 class TestOfflineBehavior(unittest.TestCase):
     class Stub:
-        on_row_activated = rt.RssTray.on_row_activated
-        _on_probe_result = rt.RssTray._on_probe_result
-        _set_online = rt.RssTray._set_online
-        _offline_tooltip = rt.RssTray._offline_tooltip
-        probe_connectivity = rt.RssTray.probe_connectivity
+        on_row_activated = rt.FluxTray.on_row_activated
+        _on_probe_result = rt.FluxTray._on_probe_result
+        _set_online = rt.FluxTray._set_online
+        _offline_tooltip = rt.FluxTray._offline_tooltip
+        probe_connectivity = rt.FluxTray.probe_connectivity
 
         def __init__(self, online=True):
             self.online = online
@@ -121,8 +121,8 @@ class TestOfflineBehavior(unittest.TestCase):
 
     def test_offline_right_click_still_dismisses(self):
         stub = self.Stub(online=False)
-        stub.on_listbox_button_press = rt.RssTray.on_listbox_button_press.__get__(stub)
-        stub.on_mark_read_clicked = rt.RssTray.on_mark_read_clicked.__get__(stub)
+        stub.on_listbox_button_press = rt.FluxTray.on_listbox_button_press.__get__(stub)
+        stub.on_mark_read_clicked = rt.FluxTray.on_mark_read_clicked.__get__(stub)
         listbox = mock.Mock()
         listbox.get_row_at_y.return_value = self._news_row()
         event = mock.Mock(button=3, y=10.0)
@@ -176,12 +176,12 @@ class TestReconnectCatchUp(unittest.TestCase):
 
 class TestImmediateProbes(unittest.TestCase):
     class Stub:
-        request_probe = rt.RssTray.request_probe
-        note_request_failure = rt.RssTray.note_request_failure
-        _on_probe_result = rt.RssTray._on_probe_result
-        _confirm_probe = rt.RssTray._confirm_probe
-        _set_online = rt.RssTray._set_online
-        _offline_tooltip = rt.RssTray._offline_tooltip
+        request_probe = rt.FluxTray.request_probe
+        note_request_failure = rt.FluxTray.note_request_failure
+        _on_probe_result = rt.FluxTray._on_probe_result
+        _confirm_probe = rt.FluxTray._confirm_probe
+        _set_online = rt.FluxTray._set_online
+        _offline_tooltip = rt.FluxTray._offline_tooltip
 
         def __init__(self, online=True):
             self.online = online
@@ -268,9 +268,9 @@ class TestNetworkReset(TmpConfigCase):
         self.conf('[network]\nreset=reset-network.sh\n')
 
         class Stub:
-            on_network_reset_clicked = rt.RssTray.on_network_reset_clicked
-            _end_network_reset = rt.RssTray._end_network_reset
-            _probe_after_reset = rt.RssTray._probe_after_reset
+            on_network_reset_clicked = rt.FluxTray.on_network_reset_clicked
+            _end_network_reset = rt.FluxTray._end_network_reset
+            _probe_after_reset = rt.FluxTray._probe_after_reset
 
             def __init__(self):
                 self.reset_btn = mock.MagicMock()
@@ -289,7 +289,7 @@ class TestNetworkReset(TmpConfigCase):
 
     def test_without_a_command_the_click_does_nothing(self):
         class Stub:
-            on_network_reset_clicked = rt.RssTray.on_network_reset_clicked
+            on_network_reset_clicked = rt.FluxTray.on_network_reset_clicked
         with mock.patch.object(rt, 'run_launcher_command') as run:
             Stub().on_network_reset_clicked(None)
         run.assert_not_called()

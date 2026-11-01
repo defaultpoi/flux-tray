@@ -4,7 +4,7 @@ Usage: render_popup.py full|quiet. `full` shows every section; `quiet` has only 
 saved item, so the popup says there is nothing unread.
 
 Run by tests/test_golden_popup.py in a child process, under a display, with its
-own HOME: the paths are fixed when void_tray is imported. Nothing here touches
+own HOME: the paths are fixed when flux_tray is imported. Nothing here touches
 the network: timers are not scheduled and the checks that start threads are
 replaced.
 
@@ -22,10 +22,9 @@ import tempfile
 import time
 
 NOW = 1_793_000_000  # a fixed 'now' (late October 2026) so elapsed times read the same every run
-HOME = tempfile.mkdtemp(prefix='void-tray-golden-')
+HOME = tempfile.mkdtemp(prefix='flux-tray-golden-')
 os.environ['HOME'] = HOME
-os.environ.pop('VOID_TRAY_DEBUG', None)
-os.environ.pop('RSS_TRAY_DEBUG', None)
+os.environ.pop('FLUX_TRAY_DEBUG', None)
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 CONFIG = """\
@@ -96,7 +95,7 @@ if SCENARIO == 'quiet':
 elif SCENARIO != 'full':
     raise SystemExit(f'unknown scenario {SCENARIO!r}')
 
-config_dir = pathlib.Path(HOME, '.config', 'void-tray')
+config_dir = pathlib.Path(HOME, '.config', 'flux-tray')
 config_dir.mkdir(parents=True)
 (config_dir / 'config.conf').write_text(CONFIG)
 (config_dir / 'state.json').write_text(json.dumps(STATE))
@@ -104,13 +103,13 @@ config_dir.mkdir(parents=True)
 
 time.time = lambda: NOW
 
-from void_tray.gi_env import GLib, Gtk  # noqa: E402
-import void_tray.app as app_module  # noqa: E402
+from flux_tray.gi_env import GLib, Gtk  # noqa: E402
+import flux_tray.app as app_module  # noqa: E402
 
 GLib.timeout_add = lambda *a, **k: 0
 GLib.timeout_add_seconds = lambda *a, **k: 0
 for name in ('probe_connectivity', 'check_orphans_if_due', 'watch_media_config', '_measure_screen'):
-    setattr(app_module.RssTray, name, lambda self, *a, **k: None)
+    setattr(app_module.FluxTray, name, lambda self, *a, **k: None)
 
 SIMPLE = (str, int, float, bool)
 _fresh_cache = {}
@@ -166,8 +165,8 @@ def describe(widget):
 
 
 def main():
-    from void_tray.ui.popup import POPUP_CSS
-    tray = app_module.RssTray()
+    from flux_tray.ui.popup import POPUP_CSS
+    tray = app_module.FluxTray()
     tray.show_popup()
     for _ in range(50):
         while Gtk.events_pending():

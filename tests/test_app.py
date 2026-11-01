@@ -11,8 +11,8 @@ from helpers import TmpConfigCase
 
 class TestRunTopgrade(unittest.TestCase):
     class Stub:
-        _run_update_all = rt.RssTray._run_update_all
-        _run_topgrade = rt.RssTray._run_topgrade
+        _run_update_all = rt.FluxTray._run_update_all
+        _run_topgrade = rt.FluxTray._run_topgrade
 
         def __init__(self):
             self._xbps_lock = rt.threading.Lock()
@@ -180,7 +180,7 @@ class TestRunTopgrade(unittest.TestCase):
 
 class TestRunUpdateAll(unittest.TestCase):
     class Stub:
-        _run_update_all = rt.RssTray._run_update_all
+        _run_update_all = rt.FluxTray._run_update_all
 
         def __init__(self):
             self._xbps_lock = rt.threading.Lock()
@@ -264,7 +264,7 @@ class TestFailureTriggers(TmpConfigCase):
         self.conf('[twitch]\nchan\n')
 
         class Stub:
-            _check_twitch_guarded = rt.RssTray._check_twitch_guarded
+            _check_twitch_guarded = rt.FluxTray._check_twitch_guarded
 
             def __init__(self):
                 self.lock = rt.threading.Lock()
@@ -282,7 +282,7 @@ class TestFailureTriggers(TmpConfigCase):
         self.conf('[twitch]\nchan\n')
 
         class Stub:
-            _check_twitch_guarded = rt.RssTray._check_twitch_guarded
+            _check_twitch_guarded = rt.FluxTray._check_twitch_guarded
 
             def __init__(self):
                 self.lock = rt.threading.Lock()
@@ -298,7 +298,7 @@ class TestFailureTriggers(TmpConfigCase):
 
     def test_weather_failure_only_counts_when_weather_is_configured(self):
         class Stub:
-            _fetch_weather_bg = rt.RssTray._fetch_weather_bg
+            _fetch_weather_bg = rt.FluxTray._fetch_weather_bg
 
             def __init__(self):
                 self.note_request_failure = mock.Mock()
@@ -318,7 +318,7 @@ class TestFailureTriggers(TmpConfigCase):
 
 class TestUpdatesDue(TmpConfigCase):
     class Stub:
-        check_updates_if_due = rt.RssTray.check_updates_if_due
+        check_updates_if_due = rt.FluxTray.check_updates_if_due
 
         def __init__(self, last_checked):
             self.lock = rt.threading.Lock()

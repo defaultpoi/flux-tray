@@ -18,7 +18,7 @@ from .hls import DownloadCancelled, download_hls, is_hls
 
 
 ARCHIVE_BASE = 'https://archive.org'
-USER_AGENT = 'void-tray (+https://github.com/defaultpoi/void-tray)'
+USER_AGENT = 'flux-tray (+https://github.com/defaultpoi/flux-tray)'
 HTTP_TIMEOUT_SECONDS = 30
 ARCHIVE_MAX_ITEMS = 1000  # episodes read from one archive.org collection
 

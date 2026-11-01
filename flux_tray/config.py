@@ -3,10 +3,9 @@
 import os
 import re
 import shlex
-import shutil
 import threading
 
-from .constants import CONFIG_DIR, CONFIG_FILE, DEFAULT_HIGHLIGHT_WORDS, LEGACY_CONFIG_DIR
+from .constants import CONFIG_DIR, CONFIG_FILE, DEFAULT_HIGHLIGHT_WORDS
 from .fileutil import write_atomic
 from .log import _log
 from .textutil import _fold_text
@@ -23,26 +22,6 @@ TWITCH_CHECK_INTERVAL_SECONDS = 900  # how often to poll Twitch live status
 
 
 WEATHER_REFRESH_SECONDS = 1800  # default: 30 minutes (weather and alerts share this cycle)
-
-
-def migrate_legacy_config():
-    """Copies config.conf, state.json and notification.wav from the single-file
-    version's directory the first time this app starts without a config of its
-    own, so feeds, read state and sound carry over. The old directory is left
-    untouched. Returns True when something was copied."""
-    if os.path.exists(CONFIG_FILE) or not os.path.isdir(LEGACY_CONFIG_DIR):
-        return False
-    copied = False
-    try:
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        for name in ('config.conf', 'state.json', 'notification.wav'):
-            source = os.path.join(LEGACY_CONFIG_DIR, name)
-            if os.path.isfile(source):
-                shutil.copy2(source, os.path.join(CONFIG_DIR, name))
-                copied = True
-    except OSError as error:
-        _log(f'could not copy the old configuration: {error}')
-    return copied
 
 
 def ensure_config():
@@ -122,7 +101,7 @@ def ensure_config():
             "#   url: an archive.org collection or item (https://archive.org/details/...),\n"
             "#        a YouTube channel, playlist or video, or any podcast / video RSS or Atom feed.\n"
             "#        yt-dlp:<url> reads any other site yt-dlp supports, and a plugin in\n"
-            "#        ~/.config/void-tray/media-plugins can add more (see the README)\n"
+            "#        ~/.config/flux-tray/media-plugins can add more (see the README)\n"
             "#   order: oldest (a series, from its first episode; the default for archive.org)\n"
             "#          or newest (a podcast, from the latest; the default for feeds)\n"
             "# https://archive.org/details/some-collection|Some Series\n"
@@ -269,7 +248,7 @@ def _load_live_entries(section, fold_case):
 
 def _entry_schedules(entries):
     """{channel: windows} for the entries that have a valid schedule; an
-    invalid one is reported (RSS_TRAY_DEBUG) and ignored, i.e. that channel is
+    invalid one is reported (FLUX_TRAY_DEBUG) and ignored, i.e. that channel is
     then checked all the time rather than never."""
     schedules = {}
     for channel, _name, _quality, text in entries:

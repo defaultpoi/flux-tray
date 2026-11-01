@@ -8,7 +8,7 @@ the stylesheet. This test compares that with popup_<scenario>.json.
 
 A difference is not always a mistake: after an intended change to how the popup
 looks, look at the diff, then rewrite the files with
-    VOID_TRAY_UPDATE_GOLDEN=1 xvfb-run -a python3 -m unittest test_golden_popup
+    FLUX_TRAY_UPDATE_GOLDEN=1 xvfb-run -a python3 -m unittest test_golden_popup
 and commit them with the change. Needs real GTK and a display, so it is skipped
 in the GTK-stubbed run and without DISPLAY.
 """
@@ -29,7 +29,7 @@ STUBBED = isinstance(sys.modules.get('gi'), mock.Mock)
 @unittest.skipUnless(os.environ.get('DISPLAY'), 'needs a display (run under xvfb-run)')
 class TestPopupAppearance(unittest.TestCase):
     def render(self, scenario):
-        env = {k: v for k, v in os.environ.items() if k not in ('GTK_THEME', 'VOID_TRAY_DEBUG', 'RSS_TRAY_DEBUG')}
+        env = {k: v for k, v in os.environ.items() if k not in ('GTK_THEME', 'FLUX_TRAY_DEBUG')}
         done = subprocess.run([sys.executable, '-W', 'ignore', str(GOLDEN / 'render_popup.py'), scenario],
                               capture_output=True, text=True, timeout=120, env=env)
         self.assertEqual(done.returncode, 0, done.stderr[-2000:])
@@ -38,7 +38,7 @@ class TestPopupAppearance(unittest.TestCase):
     def check(self, scenario):
         actual = self.render(scenario)
         path = GOLDEN / f'popup_{scenario}.json'
-        if os.environ.get('VOID_TRAY_UPDATE_GOLDEN'):
+        if os.environ.get('FLUX_TRAY_UPDATE_GOLDEN'):
             path.write_text(actual)
             self.skipTest(f'rewrote {path.name}')
         expected = path.read_text()

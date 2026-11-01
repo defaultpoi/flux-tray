@@ -3,11 +3,7 @@
 import os
 
 
-CONFIG_DIR = os.path.expanduser('~/.config/void-tray')
-
-
-# Where the single-file rss-tray kept its files; copied once on first start.
-LEGACY_CONFIG_DIR = os.path.expanduser('~/.config/rss-tray')
+CONFIG_DIR = os.path.expanduser('~/.config/flux-tray')
 
 
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.conf')

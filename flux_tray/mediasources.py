@@ -221,7 +221,7 @@ class MediaSources:
 
     def _load(self, name, path):
         stem = name[:-3]
-        module_name = 'void_tray_media_plugin_' + re.sub(r'\W', '_', stem)
+        module_name = 'flux_tray_media_plugin_' + re.sub(r'\W', '_', stem)
         sys.modules.pop(module_name, None)
         try:
             spec = importlib.util.spec_from_file_location(module_name, path)

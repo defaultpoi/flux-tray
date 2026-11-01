@@ -27,8 +27,8 @@ class FakeLock:
 
 class TestCheckOrphans(unittest.TestCase):
     class Stub:
-        check_orphans_if_due = rt.RssTray.check_orphans_if_due
-        _orphans_changed = rt.RssTray._orphans_changed
+        check_orphans_if_due = rt.FluxTray.check_orphans_if_due
+        _orphans_changed = rt.FluxTray._orphans_changed
 
         def __init__(self, orphans=(), last_checked=0, lock_free=True):
             self.lock = threading.RLock()
@@ -112,11 +112,11 @@ class TestCheckOrphans(unittest.TestCase):
 
 class TestRemoveOrphans(unittest.TestCase):
     class Stub:
-        remove_orphans = rt.RssTray.remove_orphans
-        _run_orphan_removal = rt.RssTray._run_orphan_removal
-        _finish_orphan_removal = rt.RssTray._finish_orphan_removal
-        _clear_orphan_status = rt.RssTray._clear_orphan_status
-        _end_install = rt.RssTray._end_install
+        remove_orphans = rt.FluxTray.remove_orphans
+        _run_orphan_removal = rt.FluxTray._run_orphan_removal
+        _finish_orphan_removal = rt.FluxTray._finish_orphan_removal
+        _clear_orphan_status = rt.FluxTray._clear_orphan_status
+        _end_install = rt.FluxTray._end_install
 
         def __init__(self, active=0):
             self.lock = threading.RLock()
@@ -219,9 +219,9 @@ class TestRemoveOrphans(unittest.TestCase):
 
 class TestUpdateSummaryState(unittest.TestCase):
     class Stub:
-        _show_update_summary = rt.RssTray._show_update_summary
-        _clear_update_summary = rt.RssTray._clear_update_summary
-        install_all_updates = rt.RssTray.install_all_updates
+        _show_update_summary = rt.FluxTray._show_update_summary
+        _clear_update_summary = rt.FluxTray._clear_update_summary
+        install_all_updates = rt.FluxTray.install_all_updates
 
         def __init__(self, summary=None, popup=True):
             self.update_summary = summary

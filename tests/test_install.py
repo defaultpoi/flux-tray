@@ -12,9 +12,9 @@ class TestInstallScripts(unittest.TestCase):
     def setUp(self):
         self.home = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
-        self.link = self.home / '.local' / 'bin' / 'void-tray'
-        self.entry = self.home / '.config' / 'autostart' / 'void-tray.desktop'
-        self.config = self.home / '.config' / 'void-tray'
+        self.link = self.home / '.local' / 'bin' / 'flux-tray'
+        self.entry = self.home / '.config' / 'autostart' / 'flux-tray.desktop'
+        self.config = self.home / '.config' / 'flux-tray'
         self.config.mkdir(parents=True)
         (self.config / 'config.conf').write_text('[feeds]\n')
 
@@ -26,7 +26,7 @@ class TestInstallScripts(unittest.TestCase):
     def test_installing_links_the_checkout_and_adds_no_autostart_entry(self):
         done = self.run_script('install.sh')
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(os.readlink(self.link), str(ROOT / 'void-tray'))
+        self.assertEqual(os.readlink(self.link), str(ROOT / 'flux-tray'))
         self.assertFalse(self.entry.exists())
 
     def test_autostart_writes_an_entry_that_runs_the_link_and_can_be_removed(self):
@@ -43,7 +43,7 @@ class TestInstallScripts(unittest.TestCase):
         before = self.entry.read_text()
         self.assertEqual(self.run_script('install.sh').returncode, 0)  # no flag keeps the entry as it was
         self.assertEqual(self.entry.read_text(), before)
-        self.assertEqual(os.readlink(self.link), str(ROOT / 'void-tray'))
+        self.assertEqual(os.readlink(self.link), str(ROOT / 'flux-tray'))
 
     def test_a_real_file_in_the_way_is_not_overwritten(self):
         self.link.parent.mkdir(parents=True)

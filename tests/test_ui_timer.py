@@ -37,9 +37,9 @@ class TestTimerCountdownText(unittest.TestCase):
 
 class TestTimerLabelUpdates(unittest.TestCase):
     class Stub:
-        _update_timer_widgets = rt.RssTray._update_timer_widgets
-        on_timer_slider_changed = rt.RssTray.on_timer_slider_changed
-        _clear_timer_missed = rt.RssTray._clear_timer_missed
+        _update_timer_widgets = rt.FluxTray._update_timer_widgets
+        on_timer_slider_changed = rt.FluxTray.on_timer_slider_changed
+        _clear_timer_missed = rt.FluxTray._clear_timer_missed
 
         def __init__(self):
             self.timer_scale = mock.Mock()
@@ -76,21 +76,21 @@ class TestTimerLabelUpdates(unittest.TestCase):
 
 class TestScheduleRuntime(TmpConfigCase):
     class Stub:
-        _schedule_settings = rt.RssTray._schedule_settings
-        _prune_schedule_state = rt.RssTray._prune_schedule_state
-        _schedule_state = rt.RssTray._schedule_state
-        _schedule_tick = rt.RssTray._schedule_tick
-        _mark_schedule_handled = rt.RssTray._mark_schedule_handled
-        _skip_missed_schedule = rt.RssTray._skip_missed_schedule
-        _fire_schedule = rt.RssTray._fire_schedule
-        _set_schedule_warning = rt.RssTray._set_schedule_warning
-        on_schedule_cancel = rt.RssTray.on_schedule_cancel
-        on_schedule_snooze = rt.RssTray.on_schedule_snooze
-        on_schedule_snooze_selected = rt.RssTray.on_schedule_snooze_selected
-        _snooze_schedule = rt.RssTray._snooze_schedule
-        _selected_schedule = rt.RssTray._selected_schedule
-        _schedule_summary = rt.RssTray._schedule_summary
-        _refresh_schedule_ui = rt.RssTray._refresh_schedule_ui
+        _schedule_settings = rt.FluxTray._schedule_settings
+        _prune_schedule_state = rt.FluxTray._prune_schedule_state
+        _schedule_state = rt.FluxTray._schedule_state
+        _schedule_tick = rt.FluxTray._schedule_tick
+        _mark_schedule_handled = rt.FluxTray._mark_schedule_handled
+        _skip_missed_schedule = rt.FluxTray._skip_missed_schedule
+        _fire_schedule = rt.FluxTray._fire_schedule
+        _set_schedule_warning = rt.FluxTray._set_schedule_warning
+        on_schedule_cancel = rt.FluxTray.on_schedule_cancel
+        on_schedule_snooze = rt.FluxTray.on_schedule_snooze
+        on_schedule_snooze_selected = rt.FluxTray.on_schedule_snooze_selected
+        _snooze_schedule = rt.FluxTray._snooze_schedule
+        _selected_schedule = rt.FluxTray._selected_schedule
+        _schedule_summary = rt.FluxTray._schedule_summary
+        _refresh_schedule_ui = rt.FluxTray._refresh_schedule_ui
 
         def __init__(self):
             self.lock = rt.threading.Lock()
@@ -328,7 +328,7 @@ class TestFormatScheduleTime(unittest.TestCase):
 
 class TestTimerStatusLines(unittest.TestCase):
     class Stub:
-        _timer_status_lines = rt.RssTray._timer_status_lines
+        _timer_status_lines = rt.FluxTray._timer_status_lines
 
         def __init__(self, remaining=0, running=False, schedules=(), overrides=None):
             self.timer_remaining_seconds = remaining
@@ -396,9 +396,9 @@ class TestTimerStatusLines(unittest.TestCase):
 
 class TestTimerStatusWidget(unittest.TestCase):
     class Stub:
-        _update_timer_status = rt.RssTray._update_timer_status
-        on_timer_toggle_clicked = rt.RssTray.on_timer_toggle_clicked
-        _timer_tick = rt.RssTray._timer_tick
+        _update_timer_status = rt.FluxTray._update_timer_status
+        on_timer_toggle_clicked = rt.FluxTray.on_timer_toggle_clicked
+        _timer_tick = rt.FluxTray._timer_tick
 
         def __init__(self, lines=(), slide_open=False):
             self.timer_status_label = mock.Mock()
@@ -503,10 +503,10 @@ class TestFormatMissedAgo(unittest.TestCase):
 
 class TestMissedCountdown(unittest.TestCase):
     class Stub:
-        _timer_tick = rt.RssTray._timer_tick
-        _timer_missed = rt.RssTray._timer_missed
-        _timer_missed_text = rt.RssTray._timer_missed_text
-        _timer_status_lines = rt.RssTray._timer_status_lines
+        _timer_tick = rt.FluxTray._timer_tick
+        _timer_missed = rt.FluxTray._timer_missed
+        _timer_missed_text = rt.FluxTray._timer_missed_text
+        _timer_status_lines = rt.FluxTray._timer_status_lines
 
         def __init__(self, seconds=3600, started=1000.0):
             self.timer_running = True
@@ -590,10 +590,10 @@ class TestMissedCountdown(unittest.TestCase):
 
 class TestAcknowledgingAMiss(unittest.TestCase):
     class Stub:
-        on_timer_slider_changed = rt.RssTray.on_timer_slider_changed
-        on_timer_status_clicked = rt.RssTray.on_timer_status_clicked
-        _clear_timer_missed = rt.RssTray._clear_timer_missed
-        _apply_missed_style = rt.RssTray._apply_missed_style
+        on_timer_slider_changed = rt.FluxTray.on_timer_slider_changed
+        on_timer_status_clicked = rt.FluxTray.on_timer_status_clicked
+        _clear_timer_missed = rt.FluxTray._clear_timer_missed
+        _apply_missed_style = rt.FluxTray._apply_missed_style
 
         def __init__(self, missed=5000.0):
             self.timer_missed_boot = missed
@@ -666,13 +666,13 @@ class TestCountdownLeftAfterRestart(unittest.TestCase):
 
 class TestCountdownSurvivesARestart(TmpConfigCase):
     class Stub:
-        _persist_countdown = rt.RssTray._persist_countdown
-        _restore_countdown = rt.RssTray._restore_countdown
-        _timer_tick = rt.RssTray._timer_tick
-        _timer_missed = rt.RssTray._timer_missed
-        _timer_missed_text = rt.RssTray._timer_missed_text
-        on_timer_slider_changed = rt.RssTray.on_timer_slider_changed
-        _clear_timer_missed = rt.RssTray._clear_timer_missed
+        _persist_countdown = rt.FluxTray._persist_countdown
+        _restore_countdown = rt.FluxTray._restore_countdown
+        _timer_tick = rt.FluxTray._timer_tick
+        _timer_missed = rt.FluxTray._timer_missed
+        _timer_missed_text = rt.FluxTray._timer_missed_text
+        on_timer_slider_changed = rt.FluxTray.on_timer_slider_changed
+        _clear_timer_missed = rt.FluxTray._clear_timer_missed
 
         def __init__(self, state=None):
             import threading

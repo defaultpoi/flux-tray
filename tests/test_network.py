@@ -41,11 +41,11 @@ class TestRunWhenOnline(unittest.TestCase):
 
     def test_main_thread_returns_immediately(self):
         class Stub:
-            initial_check = rt.RssTray.initial_check
-            initial_twitch_check = rt.RssTray.initial_twitch_check
-            initial_youtube_check = rt.RssTray.initial_youtube_check
-            initial_weather_check = rt.RssTray.initial_weather_check
-            initial_media_check = rt.RssTray.initial_media_check
+            initial_check = rt.FluxTray.initial_check
+            initial_twitch_check = rt.FluxTray.initial_twitch_check
+            initial_youtube_check = rt.FluxTray.initial_youtube_check
+            initial_weather_check = rt.FluxTray.initial_weather_check
+            initial_media_check = rt.FluxTray.initial_media_check
         stub = Stub()
         stub.start_check_thread = stub.start_twitch_check = stub.start_youtube_check = stub.start_weather_fetch = stub.start_media_check = mock.Mock()
         with mock.patch.object(rt, 'run_when_online') as run, mock.patch.object(rt, 'is_online') as probe:
@@ -267,7 +267,7 @@ class TestLiveRowStats(unittest.TestCase):
     def build(self, entry, name=None):
         """Runs the real row builder with GTK widgets mocked, collecting the labels' markup."""
         class Stub:
-            _build_live_row = rt.RssTray._build_live_row
+            _build_live_row = rt.FluxTray._build_live_row
         labels = []
 
         def make_label(*a, **k):

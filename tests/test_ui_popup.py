@@ -39,7 +39,7 @@ class TestPopupCss(unittest.TestCase):
 
 class TestEmptyAreaClick(unittest.TestCase):
     class Stub:
-        on_empty_area_button_press = rt.RssTray.on_empty_area_button_press
+        on_empty_area_button_press = rt.FluxTray.on_empty_area_button_press
 
         def __init__(self):
             self.popup = mock.MagicMock()
@@ -57,7 +57,7 @@ class TestEmptyAreaClick(unittest.TestCase):
 
 class TestPopupRebuildRules(unittest.TestCase):
     class Stub:
-        show_popup = rt.RssTray.show_popup
+        show_popup = rt.FluxTray.show_popup
 
         def __init__(self, visible):
             self.popup = mock.MagicMock()
@@ -105,9 +105,9 @@ class TestPopupRebuildRules(unittest.TestCase):
 
 class TestBreakingPulse(unittest.TestCase):
     class Stub:
-        _breaking_pulse_tick = rt.RssTray._breaking_pulse_tick
-        _apply_breaking_state = rt.RssTray._apply_breaking_state
-        build_row = rt.RssTray.build_row
+        _breaking_pulse_tick = rt.FluxTray._breaking_pulse_tick
+        _apply_breaking_state = rt.FluxTray._apply_breaking_state
+        build_row = rt.FluxTray.build_row
 
         def __init__(self, visible=True):
             self.popup = mock.MagicMock()
@@ -207,7 +207,7 @@ def with_real_popup_builders(app):
     """A mock app whose popup builder methods are the real ones, so that
     build_popup_window runs against mocked widgets."""
     for name in POPUP_BUILDERS:
-        setattr(app, name, rt.types.MethodType(getattr(rt.RssTray, name), app))
+        setattr(app, name, rt.types.MethodType(getattr(rt.FluxTray, name), app))
     return app
 
 
@@ -223,7 +223,7 @@ class TestPopupReservesRoomForTheScheduleSlide(unittest.TestCase):
         app.timer_visible = True
         with mock.patch.object(rt, 'Gtk', gtk), mock.patch.object(rt, 'Gdk', mock.MagicMock()), \
                 mock.patch.object(rt, 'load_timer_settings', return_value={'max_seconds': 7200, 'step_seconds': 60}):
-            rt.RssTray.build_popup_window(app)
+            rt.FluxTray.build_popup_window(app)
         return gtk.ScrolledWindow.return_value
 
     def test_the_list_area_is_at_least_as_tall_as_the_schedule_slide_plus_a_row(self):
@@ -241,7 +241,7 @@ class TestPopupReservesRoomForTheScheduleSlide(unittest.TestCase):
         app.timer_visible = False
         with mock.patch.object(rt, 'Gtk', gtk), mock.patch.object(rt, 'Gdk', mock.MagicMock()), \
                 mock.patch.object(rt, 'load_timer_settings', return_value={'max_seconds': 7200, 'step_seconds': 60}):
-            rt.RssTray.build_popup_window(app)
+            rt.FluxTray.build_popup_window(app)
         overlay = gtk.Overlay.return_value
         overlay.set_overlay_pass_through.assert_called_once()
         self.assertIs(app.timer_status_box, gtk.EventBox.return_value)
@@ -256,8 +256,8 @@ class TestPopupReservesRoomForTheScheduleSlide(unittest.TestCase):
 
 class TestOrphansHeader(unittest.TestCase):
     class Stub:
-        build_orphans_header = rt.RssTray.build_orphans_header
-        _plural = staticmethod(rt.RssTray._plural)
+        build_orphans_header = rt.FluxTray.build_orphans_header
+        _plural = staticmethod(rt.FluxTray._plural)
 
         def __init__(self, status=None):
             self.orphan_status = status
@@ -304,13 +304,13 @@ class TestOrphansHeader(unittest.TestCase):
 
 class TestRefreshListOrphans(unittest.TestCase):
     class Stub:
-        refresh_list = rt.RssTray.refresh_list
-        build_orphans_header = rt.RssTray.build_orphans_header
-        add_orphan_rows = rt.RssTray.add_orphan_rows
-        add_update_summary_rows = rt.RssTray.add_update_summary_rows
-        _orphan_info_row = rt.RssTray._orphan_info_row
-        _plural = staticmethod(rt.RssTray._plural)
-        _name_list = staticmethod(rt.RssTray._name_list)
+        refresh_list = rt.FluxTray.refresh_list
+        build_orphans_header = rt.FluxTray.build_orphans_header
+        add_orphan_rows = rt.FluxTray.add_orphan_rows
+        add_update_summary_rows = rt.FluxTray.add_update_summary_rows
+        _orphan_info_row = rt.FluxTray._orphan_info_row
+        _plural = staticmethod(rt.FluxTray._plural)
+        _name_list = staticmethod(rt.FluxTray._name_list)
 
         def __init__(self, state, popup_visible=False, status=None, expanded=False):
             self.lock = threading.RLock()
@@ -426,9 +426,9 @@ class TestRefreshListOrphans(unittest.TestCase):
 
 class TestOrphansStayOutOfTheAlerts(unittest.TestCase):
     class Stub:
-        total_badge_count = rt.RssTray.total_badge_count
-        has_anything_to_show = rt.RssTray.has_anything_to_show
-        has_pkg_update = rt.RssTray.has_pkg_update
+        total_badge_count = rt.FluxTray.total_badge_count
+        has_anything_to_show = rt.FluxTray.has_anything_to_show
+        has_pkg_update = rt.FluxTray.has_pkg_update
 
         def __init__(self, state):
             self.lock = threading.RLock()
@@ -448,7 +448,7 @@ class TestOrphansStayOutOfTheAlerts(unittest.TestCase):
 
 class TestOrphanRowActivation(unittest.TestCase):
     class Stub:
-        on_row_activated = rt.RssTray.on_row_activated
+        on_row_activated = rt.FluxTray.on_row_activated
 
         def __init__(self, online=True, active=0, status=None, expanded=False):
             self.online = online
@@ -763,7 +763,7 @@ class TestSummaryInTheList(unittest.TestCase):
 
 class TestSummaryRowActivation(unittest.TestCase):
     class Stub:
-        on_row_activated = rt.RssTray.on_row_activated
+        on_row_activated = rt.FluxTray.on_row_activated
 
         def __init__(self, online=True):
             self.online = online
@@ -802,8 +802,8 @@ class TestAvailableIcon(unittest.TestCase):
 
 class TestRowFrontButton(unittest.TestCase):
     class Stub:
-        build_row = rt.RssTray.build_row
-        _apply_breaking_state = rt.RssTray._apply_breaking_state
+        build_row = rt.FluxTray.build_row
+        _apply_breaking_state = rt.FluxTray._apply_breaking_state
 
         def __init__(self):
             self._breaking_rows = []
@@ -912,7 +912,7 @@ class TestReadLaterSection(unittest.TestCase):
         stub.listbox.add.side_effect = added.append
         rows = []
         stub.build_row = mock.Mock(side_effect=lambda e, saved=False: rows.append((e['id'], saved)) or mock.MagicMock())
-        real = rt.RssTray.add_read_later_rows
+        real = rt.FluxTray.add_read_later_rows
         with mock.patch.object(rt.Gtk, 'ListBoxRow'), mock.patch.object(rt.Gtk, 'Label'):
             real(stub, self.entries(3), is_first=True)
         self.assertEqual(stub.headers, ['__readlater__'])
@@ -923,7 +923,7 @@ class TestReadLaterSection(unittest.TestCase):
         stub = self.Stub({})
         built = []
         stub.build_row = mock.Mock(side_effect=lambda e, saved=False: built.append(e) or mock.MagicMock())
-        real = rt.RssTray.add_read_later_rows
+        real = rt.FluxTray.add_read_later_rows
         with mock.patch.object(rt.Gtk, 'ListBoxRow'), mock.patch.object(rt.Gtk, 'Label') as label:
             real(stub, self.entries(rt.MAX_LIST_ITEMS + 3))
         self.assertEqual(len(built), rt.MAX_LIST_ITEMS)
@@ -935,14 +935,14 @@ class TestReadLaterSection(unittest.TestCase):
         stub.build_header_row = lambda feed_url, title, **kw: titles.append((feed_url, title, kw)) or mock.MagicMock()
         stub.build_row = mock.Mock(return_value=mock.MagicMock())
         with mock.patch.object(rt.Gtk, 'ListBoxRow'), mock.patch.object(rt.Gtk, 'Label'):
-            rt.RssTray.add_read_later_rows(stub, self.entries(4))
+            rt.FluxTray.add_read_later_rows(stub, self.entries(4))
         self.assertEqual(titles[0][:2], ('__readlater__', 'Read later (4)'))
         self.assertFalse(titles[0][2]['clickable'])
 
 
 class TestSavedRowActivation(unittest.TestCase):
     class Stub:
-        on_row_activated = rt.RssTray.on_row_activated
+        on_row_activated = rt.FluxTray.on_row_activated
 
         def __init__(self, online=True):
             self.online = online
@@ -1044,9 +1044,9 @@ class TestPopupWidth(unittest.TestCase):
     never pushes it past the screen's right edge."""
 
     class Stub:
-        _fit_popup_width = rt.RssTray._fit_popup_width
-        _refit_open_popup = rt.RssTray._refit_open_popup
-        position_popup = rt.RssTray.position_popup
+        _fit_popup_width = rt.FluxTray._fit_popup_width
+        _refit_open_popup = rt.FluxTray._refit_open_popup
+        position_popup = rt.FluxTray.position_popup
 
         def __init__(self, widths, view='today', visible=True):
             self.widths = widths  # the weather bar's width per view

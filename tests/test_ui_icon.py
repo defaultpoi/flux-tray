@@ -51,15 +51,15 @@ class FakeContext:
 
 class TestAlertIconText(unittest.TestCase):
     class Stub:
-        render_icon = rt.RssTray.render_icon
-        _draw_temperature = rt.RssTray._draw_temperature
-        _current_temperature = rt.RssTray._current_temperature
-        total_badge_count = rt.RssTray.total_badge_count
-        _should_show_weather_icon = rt.RssTray._should_show_weather_icon
-        has_pkg_update = rt.RssTray.has_pkg_update
-        has_active_alerts = rt.RssTray.has_active_alerts
-        _worst_alert_color = rt.RssTray._worst_alert_color
-        _pulse_on_for = rt.RssTray._pulse_on_for
+        render_icon = rt.FluxTray.render_icon
+        _draw_temperature = rt.FluxTray._draw_temperature
+        _current_temperature = rt.FluxTray._current_temperature
+        total_badge_count = rt.FluxTray.total_badge_count
+        _should_show_weather_icon = rt.FluxTray._should_show_weather_icon
+        has_pkg_update = rt.FluxTray.has_pkg_update
+        has_active_alerts = rt.FluxTray.has_active_alerts
+        _worst_alert_color = rt.FluxTray._worst_alert_color
+        _pulse_on_for = rt.FluxTray._pulse_on_for
 
     def render(self, temp=24.6, color='red', unread=0, updates=0, pulse=0, alert=True):
         stub = self.Stub()

@@ -38,7 +38,7 @@ def reverse_geocode_region(lat, lon):
         f"{NOMINATIM_REVERSE_URL}?lat={lat}&lon={lon}"
         "&format=jsonv2&zoom=8&accept-language=en"
     )
-    req = urllib.request.Request(url, headers={'User-Agent': 'void-tray/1.0 (personal use)'})
+    req = urllib.request.Request(url, headers={'User-Agent': 'flux-tray/1.0 (personal use)'})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode('utf-8'))

@@ -75,16 +75,16 @@ class TestWeatherCoords(TmpConfigCase):
 
 
 class TestDebugLogging(unittest.TestCase):
-    def test_silent_by_default(self):
-        with mock.patch.dict(rt.os.environ, {}, clear=False), mock.patch('builtins.print') as p:
-            rt.os.environ.pop('RSS_TRAY_DEBUG', None)
+    def output(self, env):
+        with mock.patch.dict(rt.os.environ, env, clear=True), mock.patch('builtins.print') as p:
             rt._log('hello')
-        p.assert_not_called()
+        return p.call_args[0][0] if p.called else None
 
-    def test_prints_when_debug_env_set(self):
-        with mock.patch.dict(rt.os.environ, {'RSS_TRAY_DEBUG': '1'}), mock.patch('builtins.print') as p:
-            rt._log('hello')
-        self.assertIn('hello', p.call_args[0][0])
+    def test_silent_by_default(self):
+        self.assertIsNone(self.output({}))
+
+    def test_prints_with_the_app_name_when_the_debug_variable_is_set(self):
+        self.assertEqual(self.output({'FLUX_TRAY_DEBUG': '1'}), 'flux-tray: hello')
 
 
 class TestLauncher(TmpConfigCase):
@@ -124,7 +124,7 @@ class TestLauncher(TmpConfigCase):
 
     def test_popup_stays_open_while_the_launch_list_has_focus(self):
         class Stub:
-            on_popup_focus_out = rt.RssTray.on_popup_focus_out
+            on_popup_focus_out = rt.FluxTray.on_popup_focus_out
             _launcher_open = True
         win = mock.MagicMock()
         Stub().on_popup_focus_out(win, None)
@@ -172,8 +172,8 @@ class TestDefaultStreamQuality(TmpConfigCase):
         self.conf('[twitch]\nquality=720p,best\nplain\nown||480p\n[youtube]\nquality=360p,best\n@a\n@b||1080p\n')
 
         class Stub:
-            build_twitch_row = rt.RssTray.build_twitch_row
-            build_youtube_row = rt.RssTray.build_youtube_row
+            build_twitch_row = rt.FluxTray.build_twitch_row
+            build_youtube_row = rt.FluxTray.build_youtube_row
 
             def _build_live_row(self, entry, site, color, name=None):
                 return mock.Mock()
@@ -380,8 +380,8 @@ class TestLiveDisplayNames(TmpConfigCase):
         seen = []
 
         class Stub:
-            build_twitch_row = rt.RssTray.build_twitch_row
-            build_youtube_row = rt.RssTray.build_youtube_row
+            build_twitch_row = rt.FluxTray.build_twitch_row
+            build_youtube_row = rt.FluxTray.build_youtube_row
 
             def _build_live_row(self, entry, site, color, name=None):
                 seen.append((site, entry['channel'], name))
@@ -485,7 +485,7 @@ class TestDisableWeatherAlerts(TmpConfigCase):
 
 class TestFetchAlertsBg(TmpConfigCase):
     class Stub:
-        _fetch_alerts_bg = rt.RssTray._fetch_alerts_bg
+        _fetch_alerts_bg = rt.FluxTray._fetch_alerts_bg
 
     def test_non_meteoalarm_country_disables_alerts_in_config(self):
         self.conf('[weather]\n10.0|20.0\nalerts=true\n')

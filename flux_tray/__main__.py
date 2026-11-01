@@ -1,4 +1,4 @@
-"""`python3 -m void_tray` starts the tray app."""
+"""`python3 -m flux_tray` starts the tray app."""
 
 from .app import main
 

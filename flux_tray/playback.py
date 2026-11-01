@@ -21,7 +21,7 @@ from .log import _log
 # own) and tells the running mpv to `loadfile` that URL, so a new channel
 # replaces whatever is playing in the *same* window instead of opening another.
 MPV_IPC_SOCKET = os.path.join(
-    os.environ.get('XDG_RUNTIME_DIR') or '/tmp', f'void-tray-mpv-{os.getuid()}.sock')
+    os.environ.get('XDG_RUNTIME_DIR') or '/tmp', f'flux-tray-mpv-{os.getuid()}.sock')
 
 
 STREAMLINK_READY_TIMEOUT_SECONDS = 30

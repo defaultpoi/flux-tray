@@ -567,7 +567,7 @@ class TestDownloads(SiteCase):
         rt.download_file(self.url, self.dest, headers={'Referer': 'https://embed.example/', 'X-Token': 'abc'})
         sent = self.site.header_log[-1]
         self.assertEqual((sent.get('Referer'), sent.get('X-Token')), ('https://embed.example/', 'abc'))
-        self.assertIn('void-tray', sent['User-Agent'])  # ours unless the caller sets one
+        self.assertIn('flux-tray', sent['User-Agent'])  # ours unless the caller sets one
 
     def test_a_user_agent_in_the_headers_replaces_ours(self):
         rt.download_file(self.url, self.dest, headers={'User-Agent': 'Mozilla/5.0 (test)'})

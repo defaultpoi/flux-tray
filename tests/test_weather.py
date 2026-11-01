@@ -6,8 +6,8 @@ from facade import rt
 
 class TestTodayGlyph(unittest.TestCase):
     class Stub:
-        build_today_weather_segments = rt.RssTray.build_today_weather_segments
-        _pulse_on_for = rt.RssTray._pulse_on_for
+        build_today_weather_segments = rt.FluxTray.build_today_weather_segments
+        _pulse_on_for = rt.FluxTray._pulse_on_for
         _alert_pulse_counter = 0
 
         def __init__(self, alerts=None):
@@ -89,7 +89,7 @@ class TestRiseSpacer(unittest.TestCase):
 
     def test_forecast_segments_are_padded_too(self):
         class Stub:
-            build_forecast_weather_segments = rt.RssTray.build_forecast_weather_segments
+            build_forecast_weather_segments = rt.FluxTray.build_forecast_weather_segments
             weather_data = {'forecast_days': [{'max_temp': 5.0, 'min_temp': 1.0, 'rain_prob': 0}]}
         with mock.patch.object(rt.GLib, 'markup_escape_text', side_effect=lambda x: x):
             seg = Stub().build_forecast_weather_segments()[0]
@@ -244,7 +244,7 @@ class TestAlertSeverityAndTiming(unittest.TestCase):
 
     def test_pulse_speed_ratios(self):
         class Stub:
-            _pulse_on_for = rt.RssTray._pulse_on_for
+            _pulse_on_for = rt.FluxTray._pulse_on_for
         s = Stub()
         def flips(color):
             states = []

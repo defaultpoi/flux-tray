@@ -161,7 +161,7 @@ class PluginCase(unittest.TestCase):
         self.addCleanup(self.cleanup_modules)
 
     def cleanup_modules(self):
-        for name in [n for n in sys.modules if n.startswith('void_tray_media_plugin_')]:
+        for name in [n for n in sys.modules if n.startswith('flux_tray_media_plugin_')]:
             del sys.modules[name]
 
     def plugin(self, name, source, bump=False):
@@ -298,7 +298,7 @@ class TestLoadingPlugins(PluginCase):
     def test_a_plugin_may_use_dataclasses_and_the_apps_own_helpers(self):
         self.plugin('fancy.py', '''
             from dataclasses import dataclass
-            from void_tray.media import season_episode
+            from flux_tray.media import season_episode
 
             @dataclass
             class Item:

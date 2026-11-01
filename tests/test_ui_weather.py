@@ -6,7 +6,7 @@ from facade import rt
 
 class TestForecastSegments(unittest.TestCase):
     class Stub:
-        build_forecast_weather_segments = rt.RssTray.build_forecast_weather_segments
+        build_forecast_weather_segments = rt.FluxTray.build_forecast_weather_segments
 
     def _segments(self, weather_data):
         s = self.Stub()
@@ -39,10 +39,10 @@ class TestForecastSegments(unittest.TestCase):
 
 class TestPulseRedraws(unittest.TestCase):
     class Stub:
-        _alert_pulse_tick = rt.RssTray._alert_pulse_tick
-        _pulse_signature = rt.RssTray._pulse_signature
-        _pulse_on_for = rt.RssTray._pulse_on_for
-        has_active_alerts = rt.RssTray.has_active_alerts
+        _alert_pulse_tick = rt.FluxTray._alert_pulse_tick
+        _pulse_signature = rt.FluxTray._pulse_signature
+        _pulse_on_for = rt.FluxTray._pulse_on_for
+        has_active_alerts = rt.FluxTray.has_active_alerts
 
         def __init__(self, colors):
             self.active_alerts = [{'severity_color': c} for c in colors]
@@ -82,7 +82,7 @@ class TestMonoGlyph(unittest.TestCase):
 
     def test_forecast_umbrella_is_monochrome(self):
         class Stub:
-            build_forecast_weather_segments = rt.RssTray.build_forecast_weather_segments
+            build_forecast_weather_segments = rt.FluxTray.build_forecast_weather_segments
             weather_data = {'forecast_days': [{'max_temp': 5.0, 'min_temp': 1.0, 'rain_prob': 50}]}
         with mock.patch.object(rt.GLib, 'markup_escape_text', side_effect=lambda x: x):
             seg = Stub().build_forecast_weather_segments()[0]
@@ -92,8 +92,8 @@ class TestMonoGlyph(unittest.TestCase):
 
 class TestWeatherArrowStaysInPlace(unittest.TestCase):
     class Stub:
-        rebuild_weather_bar = rt.RssTray.rebuild_weather_bar
-        on_weather_arrow_clicked = rt.RssTray.on_weather_arrow_clicked
+        rebuild_weather_bar = rt.FluxTray.rebuild_weather_bar
+        on_weather_arrow_clicked = rt.FluxTray.on_weather_arrow_clicked
 
         def __init__(self, view):
             self.weather_view = view
@@ -128,7 +128,7 @@ class TestWeatherArrowStaysInPlace(unittest.TestCase):
 
 class TestWeatherFetchedRefitsThePopup(unittest.TestCase):
     class Stub:
-        _on_weather_fetched = rt.RssTray._on_weather_fetched
+        _on_weather_fetched = rt.FluxTray._on_weather_fetched
 
         def __init__(self):
             self.calls = []
