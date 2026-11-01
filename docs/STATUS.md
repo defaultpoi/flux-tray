@@ -14,6 +14,7 @@ the tests' place.
 | yt-dlp and ffmpeg | the real binaries in the tests that use them (ffmpeg 6.1) | pass |
 | `install.sh`, `uninstall.sh` | tests with a temporary HOME | pass |
 | Python 3.14 only | an older version number is refused at import with a message; the metadata says `>=3.14` | pass |
+| CI on GitHub | `.github/workflows/ci.yml`: uv, Python 3.14, PyGObject built from source, both test modes; runs for commits `ae91f8a`, `36aed96` and `e50d623` (on `next` and on `main`) | pass |
 
 ## What was NOT checked
 
@@ -22,9 +23,7 @@ host, a real mpv window, Twitch, YouTube, Open-Meteo, Meteoalarm and archive.org
 answering, `xbps`, `topgrade` and `sudo` installs, suspend and resume, a 24-hour
 run. The golden files were made on Ubuntu 24.04 with GTK 3.24 under Xvfb; they
 leave out pixel sizes and icon names, but a different GTK major version may
-differ in the classes it adds. The CI workflow was written to run the same
-commands as the sandbox does (uv, Python 3.14, PyGObject built from source) but
-has not run on GitHub yet.
+differ in the classes it adds.
 
 ## What changed since the baseline
 
