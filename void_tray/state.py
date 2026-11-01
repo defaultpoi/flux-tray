@@ -135,3 +135,43 @@ def load_media():
 
 def save_media(media):
     _write_json(MEDIA_FILE, media)
+
+
+MAX_UNREAD_ITEMS = 500  # stored unread items; the oldest beyond this are dropped (they stay 'seen')
+
+
+SEEN_RETENTION_SECONDS = 30 * 24 * 3600  # prune seen-item records older than this
+
+
+def merge_feed_check(state, now, newly_seen_ids, last_checked, feed_links, new_items, later_items):
+    """Applies the result of one round of feed checks to `state`, in place: the ids
+    seen (older records are pruned), when each feed was last checked, the feeds' site
+    links, the items to read later and the new unread ones (at most MAX_UNREAD_ITEMS,
+    the newest first). Items already stored are not added twice. Returns the new
+    items and the read-later items that were really added, which may be fewer than
+    were given."""
+    merged_seen = dict(state.get('seen', {}))
+    for eid in newly_seen_ids:
+        merged_seen.setdefault(eid, now)
+    cutoff = now - SEEN_RETENTION_SECONDS
+    merged_seen = {eid: ts for eid, ts in merged_seen.items() if ts >= cutoff}
+
+    merged_last_checked = dict(state.get('last_checked', {}))
+    merged_last_checked.update(last_checked)
+
+    state['seen'] = merged_seen
+    state['last_checked'] = merged_last_checked
+    if feed_links:
+        links = state.get('feed_links')
+        state['feed_links'] = {**(links if isinstance(links, dict) else {}), **feed_links}
+
+    if later_items:
+        known = {e['id'] for e in state.get('read_later', [])}
+        later_items = [dict(e, saved=now) for e in later_items if e['id'] not in known]
+        state['read_later'] = later_items + state.get('read_later', [])
+    if new_items:
+        existing_ids = {e['id'] for e in state.get('unread', [])}
+        new_items = [e for e in new_items if e['id'] not in existing_ids]
+        if new_items:
+            state['unread'] = (new_items + state.get('unread', []))[:MAX_UNREAD_ITEMS]
+    return new_items, later_items

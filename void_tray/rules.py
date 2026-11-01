@@ -293,3 +293,61 @@ def entry_age_seconds(entry):
         return time_module.time() - entry_time
     except Exception:
         return None
+
+
+FEED_RETRY_SECONDS = 120  # retry a feed this soon after a failed fetch (instead of a full interval)
+
+
+MAX_ITEM_AGE_SECONDS = 24 * 3600  # ignore entries older than this on first sight
+
+
+def feeds_due(feeds, last_checked, now, force=False):
+    """[(url, interval_seconds)] of the feeds to fetch now: every one when forced,
+    otherwise those not checked for a full interval (a feed never checked is due)."""
+    return [(url, interval) for url, _name, interval in feeds
+            if force or (now - last_checked.get(url, 0)) >= interval]
+
+
+def failed_fetch_checked_at(now, interval_seconds):
+    """The 'last checked' time to record for a feed whose fetch failed, so that it is
+    due again in FEED_RETRY_SECONDS (or sooner, for an interval shorter than that)."""
+    return now - interval_seconds + min(interval_seconds, FEED_RETRY_SECONDS)
+
+
+def items_from_entries(entries, feed_url, seen_ids, mute_phrases, mute_rules, later_rules):
+    """Turns the entries of one fetched feed into (new_items, later_items, newly_seen_ids).
+    An entry whose id is in `seen_ids` is skipped; every other one is added to `seen_ids`
+    (the set is changed in place, so a second feed in the same round sees it too) and
+    counts as seen, but is not surfaced when it matches a mute phrase or rule or is
+    older than MAX_ITEM_AGE_SECONDS. What is left goes to later_items when a read-later
+    rule matches it (no badge, sound or popup for those), otherwise to new_items."""
+    new_items, later_items, newly_seen_ids = [], [], set()
+    for entry in entries:
+        eid = entry_id(entry, feed_url)
+        if eid in seen_ids:
+            continue
+        seen_ids.add(eid)
+        newly_seen_ids.add(eid)
+        title = entry.get('title', '(untitled)')
+        if is_muted(title, mute_phrases) or entry_matches_mute_rules(entry, mute_rules):
+            continue  # matches mute filters — mark as seen, don't surface
+        age = entry_age_seconds(entry)
+        if age is not None and age > MAX_ITEM_AGE_SECONDS:
+            continue  # too old — mark as seen, don't surface
+        item = {
+            'id': eid,
+            'title': title,
+            'link': entry.get('link', ''),
+            'feed_url': feed_url,
+            'pkg_match': None,
+        }
+        tags, author = entry_tag_terms(entry), entry_author_name(entry)
+        if tags:
+            item['tags'] = tags
+        if author:
+            item['author'] = author
+        if entry_matches_mute_rules(entry, later_rules):
+            later_items.append(item)
+        else:
+            new_items.append(item)
+    return new_items, later_items, newly_seen_ids

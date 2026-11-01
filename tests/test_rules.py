@@ -488,3 +488,96 @@ class TestGroupUnreadByFeed(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestFeedsDue(unittest.TestCase):
+    FEEDS = [('https://a.example', 'A', 600), ('https://b.example', 'B', 3600)]
+    NOW = 1_700_000_000  # a real clock: a feed never checked counts as checked at 0, long ago
+
+    def urls(self, last_checked, now, force=False):
+        return [url for url, _interval in rt.feeds_due(self.FEEDS, last_checked, now, force)]
+
+    def test_a_feed_never_checked_is_due(self):
+        self.assertEqual(self.urls({}, now=self.NOW), ['https://a.example', 'https://b.example'])
+
+    def test_only_feeds_not_checked_for_a_full_interval_are_due(self):
+        last = {'https://a.example': self.NOW - 600, 'https://b.example': self.NOW - 3599}
+        self.assertEqual(self.urls(last, now=self.NOW), ['https://a.example'])
+
+    def test_the_interval_of_each_due_feed_comes_with_it(self):
+        self.assertEqual(rt.feeds_due(self.FEEDS, {}, self.NOW), [('https://a.example', 600), ('https://b.example', 3600)])
+
+    def test_force_makes_every_feed_due(self):
+        last = {'https://a.example': self.NOW - 1, 'https://b.example': self.NOW - 1}
+        self.assertEqual(self.urls(last, now=self.NOW, force=True), ['https://a.example', 'https://b.example'])
+
+
+class TestFailedFetchCheckedAt(unittest.TestCase):
+    def test_a_long_interval_is_retried_after_the_short_retry_time(self):
+        now, interval = 1_000_000.0, 1800
+        due_in = interval - (now - rt.failed_fetch_checked_at(now, interval))
+        self.assertEqual(due_in, rt.FEED_RETRY_SECONDS)
+
+    def test_an_interval_shorter_than_the_retry_time_is_kept(self):
+        now, interval = 1_000_000.0, 60
+        self.assertEqual(rt.failed_fetch_checked_at(now, interval), now)  # due again after its own 60 s
+
+
+class TestItemsFromEntries(unittest.TestCase):
+    URL = 'https://a.example/feed'
+
+    def run_entries(self, entries, seen=None, phrases=(), mute_rules=(), later_rules=()):
+        seen_ids = set() if seen is None else seen
+        return rt.items_from_entries(entries, self.URL, seen_ids, list(phrases), mute_rules, later_rules), seen_ids
+
+    def test_a_new_entry_becomes_an_unread_item_with_its_details(self):
+        entry = {'id': 'e1', 'title': 'Hello', 'link': 'https://a.example/1', 'tags': [{'term': 'World'}], 'author': 'A. Writer'}
+        (new, later, newly_seen), seen_ids = self.run_entries([entry])
+        eid = rt.entry_id(entry, self.URL)
+        self.assertEqual(new, [{'id': eid, 'title': 'Hello', 'link': 'https://a.example/1', 'feed_url': self.URL,
+                                'pkg_match': None, 'tags': ['World'], 'author': 'A. Writer'}])
+        self.assertEqual((later, newly_seen, seen_ids), ([], {eid}, {eid}))
+
+    def test_an_entry_without_a_title_or_link_still_gets_an_item(self):
+        (new, _later, _seen), _ = self.run_entries([{'id': 'e1'}])
+        self.assertEqual((new[0]['title'], new[0]['link']), ('(untitled)', ''))
+        self.assertNotIn('tags', new[0])
+        self.assertNotIn('author', new[0])
+
+    def test_an_entry_already_seen_is_skipped_entirely(self):
+        entry = {'id': 'e1', 'title': 'Hello'}
+        (new, later, newly_seen), _ = self.run_entries([entry], seen={rt.entry_id(entry, self.URL)})
+        self.assertEqual((new, later, newly_seen), ([], [], set()))
+
+    def test_the_same_entry_twice_in_one_feed_is_one_item(self):
+        entry = {'id': 'e1', 'title': 'Hello'}
+        (new, _later, newly_seen), _ = self.run_entries([entry, dict(entry)])
+        self.assertEqual((len(new), len(newly_seen)), (1, 1))
+
+    def test_a_muted_entry_counts_as_seen_but_is_not_surfaced(self):
+        (new, later, newly_seen), seen_ids = self.run_entries([{'id': 'e1', 'title': 'Sports roundup'}], phrases=['sports'])
+        self.assertEqual((new, later), ([], []))
+        self.assertEqual(len(newly_seen), 1)
+        self.assertEqual(seen_ids, newly_seen)
+
+    def test_an_entry_older_than_a_day_counts_as_seen_but_is_not_surfaced(self):
+        old = time.gmtime(time.time() - rt.MAX_ITEM_AGE_SECONDS - 3600)
+        fresh = time.gmtime(time.time() - 3600)
+        (new, _later, newly_seen), _ = self.run_entries([
+            {'id': 'old', 'title': 'Old', 'published_parsed': old},
+            {'id': 'fresh', 'title': 'Fresh', 'published_parsed': fresh},
+        ])
+        self.assertEqual([item['title'] for item in new], ['Fresh'])
+        self.assertEqual(len(newly_seen), 2)
+
+    def test_a_read_later_rule_sends_the_item_to_the_later_list_not_the_unread_one(self):
+        entries = [{'id': 'e1', 'title': 'Long read', 'author': 'Pat'}, {'id': 'e2', 'title': 'News', 'author': 'Sam'}]
+        rules = rt.parse_mute_rules('author=Pat')
+        (new, later, _seen), _ = self.run_entries(entries, later_rules=rules)
+        self.assertEqual(([i['title'] for i in new], [i['title'] for i in later]), (['News'], ['Long read']))
+
+    def test_a_mute_rule_wins_over_a_read_later_rule(self):
+        entry = {'id': 'e1', 'title': 'Both', 'author': 'Pat'}
+        rules = rt.parse_mute_rules('author=Pat')
+        (new, later, newly_seen), _ = self.run_entries([entry], mute_rules=rules, later_rules=rules)
+        self.assertEqual((new, later, len(newly_seen)), ([], [], 1))

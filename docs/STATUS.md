@@ -30,6 +30,30 @@ differ in the classes it adds.
 - `config.conf` edits take turns and write through `write_atomic` (a weather write and a Mute click could lose one change; a failed write left `config.conf.tmp`).
 - `_parse_default_gateway` no longer raises on a short line.
 - Golden files for the popup, the parity matrix and its test, the real-desktop checklist, the install scripts.
+- Cleanup, found by measuring (below): dead and duplicated code removed, `build_popup_window` (223 lines) and `check_feeds` (the most complex function) split into parts that can be read and tested on their own.
+
+## Code health, measured
+
+Measured on the baseline with `vulture`, `coverage`, `radon` and a six-line duplicate scan, before and after the cleanup.
+
+| | Baseline | Now |
+|---|---|---|
+| Unused code (vulture, >= 60%) | 3 (an unused method, two unused variables) | 0 |
+| Duplicated blocks of 6+ lines | 3 | 0 |
+| Functions over 60 lines | 9 of 468 | 7 of 482 |
+| Longest function | `build_popup_window`, 223 lines | `ensure_config`, 135 lines (a config template) |
+| Most complex function | `check_feeds`, rank E (38) | `refresh_list`, rank F (42) |
+| Line coverage by the tests | 85% overall | the same, plus the golden test and 22 direct tests of the feed logic |
+
+The cleanup was checked three ways: the 1233 original tests unchanged, the golden popup files byte for byte unchanged, and, for `check_feeds`, the old and the new function run on 400 randomised scenarios (failed fetches, muted and old entries, read-later rules, a full unread list, retention) with identical resulting state and callbacks every time.
+
+Still the largest and least tested, and so where a rewrite would pay off most:
+
+- `ui/popup.py` `refresh_list` (113 lines, rank F) and `on_row_activated` (rank D): one long chain of `if hasattr(row, ...)` over row kinds, where each row kind could own what a click on it does.
+- `ui/timer.py` (66% covered, 530 statements), `ui/icon.py` (68%), `ui/live.py` (67%), `ui/weather.py` (70%): the least tested widget code.
+- `app.py` `__init__` (112 lines): 83 attributes set in one place for nine mixins to share.
+- The download functions `download_hls`, `download_ytdlp`, `list_ytdlp` (rank D) and `load_state` (rank D).
+- `twitch` and `youtube` checkers differ in one respect, kept as it was: only a failed Twitch check notes a request failure for the connectivity logic. That may be intended or an inconsistency.
 
 ## Taken from flux-tray, and what was left
 

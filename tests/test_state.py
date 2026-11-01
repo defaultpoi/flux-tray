@@ -303,3 +303,62 @@ class TestMediaState(TmpConfigCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestMergeFeedCheck(unittest.TestCase):
+    NOW = 10_000_000.0
+
+    def item(self, eid):
+        return {'id': eid, 'title': eid, 'link': '', 'feed_url': 'u'}
+
+    def merge(self, state, **given):
+        arguments = dict(newly_seen_ids=set(), last_checked={}, feed_links={}, new_items=[], later_items=[])
+        arguments.update(given)
+        return rt.merge_feed_check(state, self.NOW, **arguments)
+
+    def test_new_items_go_in_front_of_the_unread_ones(self):
+        state = {'unread': [self.item('old')]}
+        new, later = self.merge(state, new_items=[self.item('a'), self.item('b')])
+        self.assertEqual([e['id'] for e in state['unread']], ['a', 'b', 'old'])
+        self.assertEqual(([e['id'] for e in new], later), (['a', 'b'], []))
+
+    def test_an_item_already_unread_is_not_added_twice_and_is_not_reported(self):
+        state = {'unread': [self.item('a')]}
+        new, _later = self.merge(state, new_items=[self.item('a')])
+        self.assertEqual(([e['id'] for e in state['unread']], new), (['a'], []))
+
+    def test_the_unread_list_keeps_the_newest_items_up_to_the_cap(self):
+        state = {'unread': [self.item(f'old{i}') for i in range(rt.MAX_UNREAD_ITEMS)]}
+        self.merge(state, new_items=[self.item('new1'), self.item('new2')])
+        ids = [e['id'] for e in state['unread']]
+        self.assertEqual((len(ids), ids[:2], ids[-1]), (rt.MAX_UNREAD_ITEMS, ['new1', 'new2'], f'old{rt.MAX_UNREAD_ITEMS - 3}'))
+
+    def test_read_later_items_are_stamped_and_not_duplicated(self):
+        state = {'read_later': [self.item('known')]}
+        _new, later = self.merge(state, later_items=[self.item('known'), self.item('fresh')])
+        self.assertEqual([e['id'] for e in later], ['fresh'])
+        self.assertEqual([e['id'] for e in state['read_later']], ['fresh', 'known'])
+        self.assertEqual(state['read_later'][0]['saved'], self.NOW)
+
+    def test_ids_are_remembered_and_old_ones_forgotten(self):
+        state = {'seen': {'stale': self.NOW - rt.SEEN_RETENTION_SECONDS - 1, 'kept': self.NOW - 5}}
+        self.merge(state, newly_seen_ids={'a', 'kept'})
+        self.assertEqual(state['seen'], {'kept': self.NOW - 5, 'a': self.NOW})  # 'kept' keeps its first-seen time
+
+    def test_last_checked_times_are_merged_not_replaced(self):
+        state = {'last_checked': {'x': 1, 'y': 2}}
+        self.merge(state, last_checked={'y': 5, 'z': 6})
+        self.assertEqual(state['last_checked'], {'x': 1, 'y': 5, 'z': 6})
+
+    def test_feed_links_are_merged_and_a_damaged_value_is_replaced(self):
+        state = {'feed_links': {'a': 'https://a.example', 'b': 'https://old.example'}}
+        self.merge(state, feed_links={'b': 'https://b.example'})
+        self.assertEqual(state['feed_links'], {'a': 'https://a.example', 'b': 'https://b.example'})
+        damaged = {'feed_links': 'oops'}
+        self.merge(damaged, feed_links={'b': 'https://b.example'})
+        self.assertEqual(damaged['feed_links'], {'b': 'https://b.example'})
+
+    def test_nothing_to_add_leaves_an_empty_state_with_just_the_bookkeeping(self):
+        state = {}
+        self.assertEqual(self.merge(state), ([], []))
+        self.assertEqual(state, {'seen': {}, 'last_checked': {}})

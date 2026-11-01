@@ -12,38 +12,24 @@ from ..network import run_when_online
 from ..rules import (
     add_feed_mute_rule,
     add_feed_readlater_rule,
-    entry_age_seconds,
-    entry_author_name,
-    entry_id,
     entry_matches_mute_rules,
-    entry_tag_terms,
     escape_mute_value,
+    failed_fetch_checked_at,
     feed_source_url,
-    is_muted,
+    feeds_due,
+    items_from_entries,
     load_feed_mute_rules,
     load_feed_readlater_rules,
     parse_mute_rules,
     unread_feed_terms,
 )
-from ..state import save_state
-
-
-FEED_RETRY_SECONDS = 120  # retry a feed this soon after a failed fetch (instead of a full interval)
-
-
-MAX_UNREAD_ITEMS = 500  # stored unread items; the oldest beyond this are dropped (they stay 'seen')
+from ..state import merge_feed_check, save_state
 
 
 OPEN_TABS_DELAY_SECONDS = 0.2  # between the tabs of Open all, so the browser takes them in order
 TERM_NAME_MAX_CHARS = 26  # category / author names in the feed menu are cut here
 FEED_MENU_EDGE_PX = 30  # kept free of the popup's edge for the menu's arrow and padding
 FEED_MENU_MIN_HEIGHT_PX = 80  # the menu is never squeezed below this, however little room there is
-
-
-MAX_ITEM_AGE_SECONDS = 24 * 3600  # ignore entries older than this on first sight
-
-
-SEEN_RETENTION_SECONDS = 30 * 24 * 3600  # prune seen-item records older than this
 
 
 FEED_MENU_MAX_HEIGHT_PX = 280  # so does the feed menu
@@ -76,92 +62,35 @@ class FeedsMixin:
             return  # offline: nothing could be fetched, and a failed fetch must not count as a check
         feeds = load_feeds()
         mute_phrases = load_mute_filters()
-        new_items = []
         now = time_module.time()
         with self.lock:
             seen_ids = set(self.state.get('seen', {}).keys())
             last_checked = dict(self.state.get('last_checked', {}))
-        newly_seen_ids = set()
         feed_mute_rules = load_feed_mute_rules()
         feed_later_rules = load_feed_readlater_rules()
-        later_items = []  # new items a read-later rule sends straight to the Read later list
-        feed_links = {}
-        due_urls = []
-        intervals = {}
-        for url, _custom_name, interval_seconds in feeds:
-            intervals[url] = interval_seconds
-            last = last_checked.get(url, 0)
-            if force or (now - last) >= interval_seconds:
-                due_urls.append(url)
-        for url in due_urls:
-            retry_soon = now - intervals[url] + min(intervals[url], FEED_RETRY_SECONDS)
+        newly_seen_ids, new_items, later_items, feed_links = set(), [], [], {}
+        for url, interval in feeds_due(feeds, last_checked, now, force):
             try:
                 parsed = feedparser.parse(url)
             except Exception:
-                last_checked[url] = retry_soon
-                self.note_request_failure()
-                continue
-            if getattr(parsed, 'bozo', False) and not parsed.entries:
-                last_checked[url] = retry_soon  # fetch/parse failed
+                parsed = None
+            if parsed is None or (getattr(parsed, 'bozo', False) and not parsed.entries):
+                last_checked[url] = failed_fetch_checked_at(now, interval)  # fetch/parse failed
                 self.note_request_failure()
                 continue
             last_checked[url] = now
             site_link = (getattr(parsed, 'feed', None) or {}).get('link')
             if isinstance(site_link, str) and site_link:
                 feed_links[url] = site_link
-            for entry in parsed.entries:
-                eid = entry_id(entry, url)
-                if eid in seen_ids:
-                    continue
-                seen_ids.add(eid)
-                newly_seen_ids.add(eid)
-                title = entry.get('title', '(untitled)')
-                if is_muted(title, mute_phrases) or entry_matches_mute_rules(entry, feed_mute_rules.get(url, ())):
-                    continue  # matches mute filters — mark as seen, don't surface
-                age = entry_age_seconds(entry)
-                if age is not None and age > MAX_ITEM_AGE_SECONDS:
-                    continue  # too old — mark as seen, don't surface
-                item = {
-                    'id': eid,
-                    'title': title,
-                    'link': entry.get('link', ''),
-                    'feed_url': url,
-                    'pkg_match': None,
-                }
-                tags, author = entry_tag_terms(entry), entry_author_name(entry)
-                if tags:
-                    item['tags'] = tags
-                if author:
-                    item['author'] = author
-                if entry_matches_mute_rules(entry, feed_later_rules.get(url, ())):
-                    later_items.append(item)  # not unread: no badge, sound or popup for it
-                else:
-                    new_items.append(item)
+            fresh, later, seen = items_from_entries(
+                parsed.entries, url, seen_ids, mute_phrases,
+                feed_mute_rules.get(url, ()), feed_later_rules.get(url, ()))
+            new_items += fresh
+            later_items += later
+            newly_seen_ids |= seen
         with self.lock:
-            merged_seen = dict(self.state.get('seen', {}))
-            for eid in newly_seen_ids:
-                merged_seen.setdefault(eid, now)
-            cutoff = now - SEEN_RETENTION_SECONDS
-            merged_seen = {eid: ts for eid, ts in merged_seen.items() if ts >= cutoff}
-
-            merged_last_checked = dict(self.state.get('last_checked', {}))
-            merged_last_checked.update(last_checked)
-
-            self.state['seen'] = merged_seen
-            self.state['last_checked'] = merged_last_checked
-            if feed_links:
-                links = self.state.get('feed_links')
-                self.state['feed_links'] = {**(links if isinstance(links, dict) else {}), **feed_links}
-
-            if later_items:
-                known = {e['id'] for e in self.state.get('read_later', [])}
-                later_items = [dict(e, saved=now) for e in later_items if e['id'] not in known]
-                self.state['read_later'] = later_items + self.state.get('read_later', [])
-            if new_items:
-                existing_ids = {e['id'] for e in self.state.get('unread', [])}
-                new_items = [e for e in new_items if e['id'] not in existing_ids]
-                if new_items:
-                    self.state['unread'] = (new_items + self.state.get('unread', []))[:MAX_UNREAD_ITEMS]
+            new_items, later_items = merge_feed_check(
+                self.state, now, newly_seen_ids, last_checked, feed_links, new_items, later_items)
             save_state(self.state)
         if new_items:
             GLib.idle_add(self.on_new_items)
