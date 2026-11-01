@@ -27,8 +27,8 @@ behaves the same. What was added on top is what fixed something real (links,
 playlists, the config writer, the install scripts, the real-desktop checklist,
 the parity matrix) and what nothing had: golden files for the popup. An
 earlier rewrite from a written description is not part of it; what was and was
-not taken from it, and why, is in [STATUS.md](STATUS.md). Where the design goes
-next is in [DESIGN.md](DESIGN.md).
+not taken from it, and why, is in [STATUS.md](STATUS.md). What the app already does, and what could be done inside it, is in
+[DESIGN.md](DESIGN.md).
 
 ## Tests
 

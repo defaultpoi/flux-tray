@@ -1,6 +1,6 @@
 # flux-tray
 
-Flux Tray is a personal tray application for XFCE on Void Linux, written for Python 3.14 and GTK3 and for no other setup. It takes in what several services have to say (news feeds, Twitch and YouTube live channels, weather and its alerts, podcasts and series, package updates), keeps track of it, and shows it in one tray icon and one popup. What is muted, saved for later, highlighted or announced is decided by rules of your own in `config.conf`; today that covers feeds, highlights and the schedules of live channels, and extending it to everything is the direction of [docs/DESIGN.md](docs/DESIGN.md).
+Flux Tray is a personal tray application for XFCE on Void Linux, written for Python 3.14 and GTK3 and for no other setup. It takes in what several services have to say (news feeds, Twitch and YouTube live channels, weather and its alerts, podcasts and series, package updates), keeps track of it, and shows it in one tray icon and one popup. What is muted, saved for later, highlighted or checked, and when, is decided by rules of your own in `config.conf`; what the app does and does not do yet in that respect is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Features
 
