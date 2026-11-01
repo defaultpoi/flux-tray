@@ -625,21 +625,46 @@ def load_media_settings():
     return {'path': os.path.expanduser(path), 'interval': minutes * 60, 'ahead': ahead, 'ytdlp': ytdlp, 'screen': screen}
 
 
+def _media_source_line(line):
+    """(source, display name or None, order or None) when a line of [media] names a
+    source, None for a setting or anything else. A source is an http(s) URL or a
+    `name:...` line for a driver or plugin."""
+    key, sep, _val = line.partition('=')
+    if sep and key.strip().lower() in _MEDIA_SETTINGS:
+        return None
+    parts = [p.strip() for p in line.split('|', 2)]
+    url = parts[0]
+    if not _MEDIA_SOURCE_RE.match(url):
+        return None
+    name = parts[1] if len(parts) > 1 and parts[1] else None
+    order = parts[2].lower() if len(parts) > 2 and parts[2].lower() in ('oldest', 'newest') else None
+    return url, name, order
+
+
 def load_media_sources():
     """[(source, display name or None, order or None)] from [media], de-duplicated
-    (first line wins). A source is an http(s) URL or a `name:...` line for a driver
-    or plugin; the settings and anything that does not start like that are not."""
+    (first line wins). The settings and anything that does not name a source are not."""
     sources, seen = [], set()
     for line in _read_config_sections()['media']:
-        key, sep, _val = line.partition('=')
-        if sep and key.strip().lower() in _MEDIA_SETTINGS:
+        parsed = _media_source_line(line)
+        if parsed is None or parsed[0] in seen:
             continue
-        parts = [p.strip() for p in line.split('|', 2)]
-        url = parts[0]
-        if not _MEDIA_SOURCE_RE.match(url) or url in seen:
-            continue
-        seen.add(url)
-        name = parts[1] if len(parts) > 1 and parts[1] else None
-        order = parts[2].lower() if len(parts) > 2 and parts[2].lower() in ('oldest', 'newest') else None
-        sources.append((url, name, order))
+        seen.add(parsed[0])
+        sources.append(parsed)
     return sources
+
+
+def remove_media_sources(urls):
+    """Takes every line of the given sources out of [media]. The settings, the
+    comments, the blank lines and the other sources stay as they were."""
+    wanted = set(urls)
+    if not wanted & {url for url, _name, _order in load_media_sources()}:
+        return  # nothing to take out; do not touch the file (or add an empty [media])
+
+    def transform(lines):
+        def is_wanted(line):
+            parsed = None if line.lstrip().startswith('#') else _media_source_line(line.strip())
+            return parsed is not None and parsed[0] in wanted
+        return [line for line in lines if not is_wanted(line)]
+
+    _edit_config_section('media', transform)

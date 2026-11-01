@@ -6,7 +6,7 @@ import threading
 import time as time_module
 
 from ..gi_env import GLib, Gdk, Gio, Gtk, Pango
-from ..config import load_media_settings, load_media_sources
+from ..config import load_media_settings, load_media_sources, remove_media_sources
 from ..constants import CONFIG_FILE
 from ..desktop import primary_monitor_size
 from ..hls import is_hls
@@ -363,6 +363,134 @@ class MediaMixin:
             save_media(self.media)
         self._plan_media_downloads()  # keeps the next ones ready
         self._refresh_media_rows()
+
+    # ---- taking watched sources off the list ----------------------------------
+
+    def _consumed_media_sources(self):
+        """[(source, display name)] of the configured sources that have been read and
+        have nothing unwatched left, in config order."""
+        configured = [(url, name) for url, name, _order in load_media_sources()]
+        with self._media_data_lock:
+            sources = self.media['sources']
+            return [(url, name or sources[url].get('title') or url) for url, name in configured
+                    if sources.get(url, {}).get('episodes') and unwatched_count(sources[url]) == 0]
+
+    def remove_consumed_media(self, urls):
+        """Takes sources whose episodes are all watched off the list: their lines go out of
+        [media] in config.conf and what is known of them is forgotten. Downloaded files
+        stay on disk. A source that has something unwatched left, or that is not
+        configured any more, is left alone (decided now, not when a menu was drawn).
+        If the config cannot be written the source and what is known of it stay, so
+        nothing is half done. Returns the sources taken off."""
+        consumed = {url for url, _name in self._consumed_media_sources()}
+        wanted = [url for url in urls if url in consumed]
+        if not wanted:
+            return []
+        remove_media_sources(wanted)
+        still_configured = {u for u, _n, _o in load_media_sources()}
+        gone = [url for url in wanted if url not in still_configured]
+        if not gone:
+            return []
+        with self._media_data_lock:
+            for url in gone:
+                self.media['sources'].pop(url, None)
+            save_media(self.media)
+        with self._media_queue_lock:
+            self._media_queue = [key for key in self._media_queue if key[0] not in gone]
+        for url in gone:
+            self.media_errors.pop(url, None)
+        for key in [k for k in self.media_status if k[0] in gone]:
+            del self.media_status[key]
+        self._media_known_sources -= set(gone)  # adding the source again later reads it as new
+        self._media_rows_removed(gone)
+        return gone
+
+    def _media_rows_removed(self, gone):
+        """Brings the list in line with sources that were taken off it. With unread items or
+        updates showing, the list is rebuilt as usual. Without them a rebuild would
+        replace the media with 'No unread items' (media never fill a popup that is
+        showing), so the rows go one by one, the heading with the last of them."""
+        if not self.popup:
+            return
+        with self.lock:
+            others = bool(self.state.get('unread') or self.state.get('available_updates'))
+        if others:
+            self.refresh_list(keep_open=True)
+            return
+        for row in self.listbox.get_children():
+            if getattr(row, 'media_source', None) in gone:
+                self.listbox.remove(row)
+        remaining = self.listbox.get_children()
+        if self._media_header_row is not None and not any(hasattr(row, 'media_source') for row in remaining):
+            if self._media_header_row in remaining:
+                self.listbox.remove(self._media_header_row)
+            self._media_header_row = None
+        if not self.listbox.get_children():
+            self.refresh_list(keep_open=True)  # nothing left at all: say so
+
+    def _media_menu_remove(self, _button, popover, urls):
+        popover.popdown()
+        self.remove_consumed_media(urls)
+
+    def _media_menu_content(self, url, popover):
+        """What the right-click menu of a media row holds: removal of this source when
+        everything in it is watched (the button says why when it is not), and, when
+        more than one source is finished, removal of all of those at once."""
+        consumed = self._consumed_media_sources()
+        with self._media_data_lock:
+            entry = self.media['sources'].get(url)
+            read = bool(entry and entry.get('episodes'))
+            left = unwatched_count(entry) if read else 0
+            title = self._media_display_name(url, entry or {})
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        for margin in ('start', 'end', 'top', 'bottom'):
+            getattr(box, f'set_margin_{margin}')(4)
+        heading = Gtk.Label()
+        heading.set_markup(f'<b>{GLib.markup_escape_text(title)}</b>')
+        heading.set_xalign(0)
+        heading.set_ellipsize(Pango.EllipsizeMode.END)
+        heading.set_max_width_chars(40)
+        heading.get_style_context().add_class('menu-text')  # dark text: the menu sits on a white scroller
+        box.pack_start(heading, False, False, 0)
+
+        one = Gtk.Button(label='Remove from list')
+        if any(u == url for u, _n in consumed):
+            one.set_tooltip_text('Takes this source out of [media] in config.conf. Downloaded files stay on disk.')
+            one.connect('clicked', self._media_menu_remove, popover, [url])
+        else:
+            one.set_sensitive(False)
+            one.set_tooltip_text(f'{left} unwatched episode{"" if left == 1 else "s"} left' if read
+                                 else 'This source has not been read yet')
+        box.pack_start(one, False, False, 0)
+
+        if len(consumed) > 1:
+            names = [name for _u, name in consumed]
+            listed = ', '.join(names[:8]) + (f' and {len(names) - 8} more' if len(names) > 8 else '')
+            every = Gtk.Button(label=f'Remove all {len(consumed)} fully watched')
+            every.set_tooltip_text(f'Takes these out of [media]: {listed}. Downloaded files stay on disk.')
+            every.connect('clicked', self._media_menu_remove, popover, [u for u, _n in consumed])
+            box.pack_start(every, False, False, 0)
+        return box
+
+    def _show_media_menu(self, row, event):
+        """Popover on a media row (right-click), placed the way the feed menu is."""
+        popover = Gtk.Popover.new(row)
+        allocation = row.get_allocation()
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = max(int(event.x) - allocation.x, 0), 0, 1, allocation.height
+        popover.set_pointing_to(rect)
+        position, max_height = self._feed_menu_room(row)
+        popover.set_position(position)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_max_content_height(max_height)
+        scroller.add(self._media_menu_content(row.media_source, popover))
+        popover.add(scroller)
+        popover.connect('closed', self.on_launcher_closed)
+        self._launcher_open = True  # the guard the Launch list and the feed menu use: the popup stays under it
+        scroller.show_all()
+        popover.popup()
 
     # ---- the popup's rows ----------------------------------------------------
 

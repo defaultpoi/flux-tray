@@ -1,7 +1,11 @@
 """Builds the real popup from fixed data and prints its widget tree as JSON.
 
-Usage: render_popup.py full|quiet. `full` shows every section; `quiet` has only a
-saved item, so the popup says there is nothing unread.
+Usage: render_popup.py full|quiet|media_menu|media_removed. `full` shows every
+section; `quiet` has only a saved item, so the popup says there is nothing unread;
+`media_menu` has a podcast with an episode left, a series and a film that are all
+watched, and prints the right-click menu of each of their rows; `media_removed`
+presses "Remove all 2 fully watched" in the series' menu and prints what is left
+(the popup, config.conf, the sources in media.json).
 
 Run by tests/test_golden_popup.py in a child process, under a display, with its
 own HOME: the paths are fixed when flux_tray is imported. Nothing here touches
@@ -92,6 +96,15 @@ SCENARIO = sys.argv[1] if len(sys.argv) > 1 else 'full'
 if SCENARIO == 'quiet':
     STATE = {'seen': {}, 'unread': [], 'read_later': STATE['read_later']}
     MEDIA = {'sources': {}}
+elif SCENARIO in ('media_menu', 'media_removed'):
+    import copy
+    CONFIG += 'https://media.example/film.xml|Example Film|oldest\n'
+    STATE = {'seen': {}, 'unread': [], 'read_later': STATE['read_later']}
+    MEDIA = copy.deepcopy(MEDIA)
+    MEDIA['sources']['https://media.example/series.xml']['watched'] = ['ep1', 'ep2']
+    MEDIA['sources']['https://media.example/film.xml'] = {
+        'title': 'Example Film', 'baselined': True, 'episodes': [episode(1, 'Example Film', '2026-08-01')],
+        'known': ['ep1'], 'new': [], 'watched': ['ep1'], 'files': {}, 'last_watched': None}
 elif SCENARIO != 'full':
     raise SystemExit(f'unknown scenario {SCENARIO!r}')
 
@@ -164,13 +177,41 @@ def describe(widget):
     return node
 
 
+def pump():
+    for _ in range(50):
+        while Gtk.events_pending():
+            Gtk.main_iteration()
+
+
+def walk(widget):
+    yield widget
+    if isinstance(widget, Gtk.Container):
+        for child in widget.get_children():
+            yield from walk(child)
+
+
+def media_scenario(tray):
+    series = 'https://media.example/series.xml'
+    if SCENARIO == 'media_menu':
+        return {'menus': {url: describe(tray._media_menu_content(url, Gtk.Popover())) for url in MEDIA['sources']}}
+    menu = tray._media_menu_content(series, Gtk.Popover())
+    button = next(w for w in walk(menu) if isinstance(w, Gtk.Button) and (w.get_label() or '').startswith('Remove all'))
+    button.clicked()
+    pump()
+    return {'config': (config_dir / 'config.conf').read_text(),
+            'media_json_sources': sorted(json.loads((config_dir / 'media.json').read_text())['sources']),
+            'popup': describe(tray.popup)}
+
+
 def main():
     from flux_tray.ui.popup import POPUP_CSS
     tray = app_module.FluxTray()
     tray.show_popup()
-    for _ in range(50):
-        while Gtk.events_pending():
-            Gtk.main_iteration()
+    pump()
+    if SCENARIO in ('media_menu', 'media_removed'):
+        json.dump(media_scenario(tray), sys.stdout, indent=1, sort_keys=True, ensure_ascii=False)
+        sys.stdout.write('\n')
+        return
     window = tray.popup
     result = {
         'window': {'decorated': window.get_decorated(), 'resizable': window.get_resizable(),

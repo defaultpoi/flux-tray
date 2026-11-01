@@ -44,5 +44,6 @@ window, a real network).
 | F29 | config.conf: one writer, edits from different threads take turns, comments and other sections kept | test_config.TestConfigEditsFromSeveralThreads | - |
 | F30 | Debug logging to stderr, switched on by an environment variable | test_config.TestDebugLogging | 1 |
 | F31 | Notification sound, SIGINT and SIGTERM leave the main loop cleanly | test_desktop.TestNotificationSound, test_app.TestUnixSignalAdd | 4 |
-| F33 | Runs on Python 3.14 only, and says so | test_python_version.TestPythonVersion | 1 |
 | F32 | Installing: link into ~/.local/bin, optional autostart entry, uninstall that keeps the config | test_install.TestInstallScripts | 1 |
+| F33 | Runs on Python 3.14 only, and says so | test_python_version.TestPythonVersion | 1 |
+| F34 | Taking fully watched sources off the Media list: right-click menu for one or all, the line leaves [media], the state is forgotten, the files stay, the list is updated in place | test_config.TestRemoveMediaSources, test_ui_media.TestRemovingWatchedSources, test_rules.TestHeaderClicks, test_golden_popup.TestPopupAppearance | 2 |

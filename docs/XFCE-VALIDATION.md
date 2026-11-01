@@ -24,6 +24,7 @@ Tick an item only after doing it, and write down what was not done in
 - [ ] Left click on a row opens it in the browser and marks it read; right click marks it read only; the bookmark icon saves it; a feed header click marks the feed read; the feed menu (open, open all as tabs, mute, send to Read later).
 - [ ] A feed whose item link is `file:///etc/hostname` or `ssh://x`: clicking the item marks it read and opens nothing.
 - [ ] A breaking item pulses until it is read; an item sent to Read later makes no sound and no badge.
+- [ ] Right-click a Media row: the menu opens beside it and the popup stays open; *Remove from list* is greyed (with the count in its tooltip) while episodes are unwatched and works when all are watched, taking the row (and the Media heading with the last one) out without the popup closing or the other rows moving; *Remove all N fully watched* appears with two or more such sources; the line is gone from `[media]` and the downloaded files are still there.
 - [ ] Launch opens the configured entries; Edit config opens the file in the editor.
 - [ ] Weather: today and forecast, the arrow button, the popup refits when data arrives; an alert changes the icon.
 

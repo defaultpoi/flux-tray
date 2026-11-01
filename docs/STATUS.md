@@ -34,6 +34,7 @@ differ in the classes it adds.
 - `config.conf` edits take turns and write through `write_atomic` (a weather write and a Mute click could lose one change; a failed write left `config.conf.tmp`).
 - `_parse_default_gateway` no longer raises on a short line.
 - Golden files for the popup, the parity matrix and its test, the real-desktop checklist, the install scripts.
+- Fully watched sources can be taken off the Media list from a right-click menu (one, or all of them); not tried on a real desktop yet. `.coverage` is no longer tracked.
 - Cleanup found by measuring (below): dead and duplicated code removed, `build_popup_window` (223 lines) and `check_feeds` (the most complex function) split into parts that can be read and tested on their own.
 
 ## Code health, measured

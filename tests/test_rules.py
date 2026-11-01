@@ -344,6 +344,7 @@ class TestHeaderClicks(unittest.TestCase):
             self._show_feed_menu = mock.Mock()
             self.on_mark_read_clicked = mock.Mock()
             self.remove_read_later = mock.Mock()
+            self._show_media_menu = mock.Mock()
 
     def press(self, stub, row, button):
         listbox = mock.Mock()
@@ -354,6 +355,24 @@ class TestHeaderClicks(unittest.TestCase):
 
     def header(self, url='https://a.example/feed.xml'):
         return mock.Mock(spec=['header_feed_url'], header_feed_url=url)
+
+    def test_right_click_on_a_media_row_opens_its_menu_and_nothing_else(self):
+        stub = self.Stub()
+        row = mock.Mock(spec=['media_source'], media_source='https://archive.org/details/show')
+        handled, opened, tab = self.press(stub, row, button=3)
+        self.assertTrue(handled)
+        stub._show_media_menu.assert_called_once()
+        self.assertIs(stub._show_media_menu.call_args[0][0], row)
+        for other in (stub._show_feed_menu, stub.on_mark_read_clicked, stub.remove_read_later, opened, tab):
+            other.assert_not_called()
+
+    def test_other_buttons_on_a_media_row_are_left_to_the_row(self):
+        stub = self.Stub()
+        row = mock.Mock(spec=['media_source'], media_source='https://archive.org/details/show')
+        for button in (1, 2):
+            handled, _opened, _tab = self.press(stub, row, button=button)
+            self.assertFalse(handled)
+        stub._show_media_menu.assert_not_called()
 
     def test_middle_click_on_a_feed_title_no_longer_opens_anything(self):
         stub = self.Stub()

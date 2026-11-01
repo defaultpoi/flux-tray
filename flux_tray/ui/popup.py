@@ -533,6 +533,7 @@ class PopupMixin:
         unless keep_open is set (refreshes the person did not ask for, such as a
         finished orphan scan) or an orphan removal is showing its result."""
         self._breaking_rows = []
+        self._media_header_row = None
         self._highlight_words = load_highlight_words()
         for child in self.listbox.get_children():
             self.listbox.remove(child)
@@ -590,9 +591,10 @@ class PopupMixin:
                     self.listbox.add(self.build_youtube_row(entry))
 
             if media_urls:
-                self.listbox.add(self.build_header_row(
+                self._media_header_row = self.build_header_row(
                     '__media__', 'Media', is_first=is_first_section, clickable=False
-                ))
+                )
+                self.listbox.add(self._media_header_row)
                 is_first_section = False
                 for url in media_urls:
                     self.listbox.add(self.build_media_row(url))
@@ -878,6 +880,9 @@ class PopupMixin:
                 return True
             if row is not None and hasattr(row, 'readlater_id'):
                 self.remove_read_later(row.readlater_id)  # off the Read later list without opening
+                return True
+            if row is not None and hasattr(row, 'media_source'):
+                self._show_media_menu(row, event)
                 return True
             if row is None:
                 if self.popup:

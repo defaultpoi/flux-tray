@@ -1,0 +1,223 @@
+{
+ "menus": {
+  "https://media.example/feed.xml": {
+   "children": [
+    {
+     "classes": [
+      "menu-text"
+     ],
+     "ellipsize": "end",
+     "markup": true,
+     "sensitive": true,
+     "text": "<b>Example Podcast</b>",
+     "type": "Label",
+     "visible": false,
+     "wrap": false,
+     "xalign": 0.0
+    },
+    {
+     "children": [
+      {
+       "ellipsize": "none",
+       "markup": false,
+       "sensitive": true,
+       "text": "Remove from list",
+       "type": "Label",
+       "visible": true,
+       "wrap": false,
+       "xalign": 0.5
+      }
+     ],
+     "classes": [
+      "text-button"
+     ],
+     "sensitive": false,
+     "text": "Remove from list",
+     "tooltip": "1 unwatched episode left",
+     "type": "Button",
+     "visible": false
+    },
+    {
+     "children": [
+      {
+       "ellipsize": "none",
+       "markup": false,
+       "sensitive": true,
+       "text": "Remove all 2 fully watched",
+       "type": "Label",
+       "visible": true,
+       "wrap": false,
+       "xalign": 0.5
+      }
+     ],
+     "classes": [
+      "text-button"
+     ],
+     "sensitive": true,
+     "text": "Remove all 2 fully watched",
+     "tooltip": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk.",
+     "type": "Button",
+     "visible": false
+    }
+   ],
+   "classes": [
+    "vertical"
+   ],
+   "margins": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "sensitive": true,
+   "type": "Box",
+   "visible": false
+  },
+  "https://media.example/film.xml": {
+   "children": [
+    {
+     "classes": [
+      "menu-text"
+     ],
+     "ellipsize": "end",
+     "markup": true,
+     "sensitive": true,
+     "text": "<b>Example Film</b>",
+     "type": "Label",
+     "visible": false,
+     "wrap": false,
+     "xalign": 0.0
+    },
+    {
+     "children": [
+      {
+       "ellipsize": "none",
+       "markup": false,
+       "sensitive": true,
+       "text": "Remove from list",
+       "type": "Label",
+       "visible": true,
+       "wrap": false,
+       "xalign": 0.5
+      }
+     ],
+     "classes": [
+      "text-button"
+     ],
+     "sensitive": true,
+     "text": "Remove from list",
+     "tooltip": "Takes this source out of [media] in config.conf. Downloaded files stay on disk.",
+     "type": "Button",
+     "visible": false
+    },
+    {
+     "children": [
+      {
+       "ellipsize": "none",
+       "markup": false,
+       "sensitive": true,
+       "text": "Remove all 2 fully watched",
+       "type": "Label",
+       "visible": true,
+       "wrap": false,
+       "xalign": 0.5
+      }
+     ],
+     "classes": [
+      "text-button"
+     ],
+     "sensitive": true,
+     "text": "Remove all 2 fully watched",
+     "tooltip": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk.",
+     "type": "Button",
+     "visible": false
+    }
+   ],
+   "classes": [
+    "vertical"
+   ],
+   "margins": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "sensitive": true,
+   "type": "Box",
+   "visible": false
+  },
+  "https://media.example/series.xml": {
+   "children": [
+    {
+     "classes": [
+      "menu-text"
+     ],
+     "ellipsize": "end",
+     "markup": true,
+     "sensitive": true,
+     "text": "<b>Example Series</b>",
+     "type": "Label",
+     "visible": false,
+     "wrap": false,
+     "xalign": 0.0
+    },
+    {
+     "children": [
+      {
+       "ellipsize": "none",
+       "markup": false,
+       "sensitive": true,
+       "text": "Remove from list",
+       "type": "Label",
+       "visible": true,
+       "wrap": false,
+       "xalign": 0.5
+      }
+     ],
+     "classes": [
+      "text-button"
+     ],
+     "sensitive": true,
+     "text": "Remove from list",
+     "tooltip": "Takes this source out of [media] in config.conf. Downloaded files stay on disk.",
+     "type": "Button",
+     "visible": false
+    },
+    {
+     "children": [
+      {
+       "ellipsize": "none",
+       "markup": false,
+       "sensitive": true,
+       "text": "Remove all 2 fully watched",
+       "type": "Label",
+       "visible": true,
+       "wrap": false,
+       "xalign": 0.5
+      }
+     ],
+     "classes": [
+      "text-button"
+     ],
+     "sensitive": true,
+     "text": "Remove all 2 fully watched",
+     "tooltip": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk.",
+     "type": "Button",
+     "visible": false
+    }
+   ],
+   "classes": [
+    "vertical"
+   ],
+   "margins": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "sensitive": true,
+   "type": "Box",
+   "visible": false
+  }
+ }
+}

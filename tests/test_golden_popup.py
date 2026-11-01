@@ -52,6 +52,12 @@ class TestPopupAppearance(unittest.TestCase):
     def test_nothing_unread_but_a_saved_item(self):
         self.check('quiet')
 
+    def test_the_menu_of_each_kind_of_media_row(self):
+        self.check('media_menu')
+
+    def test_removing_the_watched_sources_through_the_menu_end_to_end(self):
+        self.check('media_removed')
+
     def test_the_run_is_repeatable(self):
         self.assertEqual(self.render('full'), self.render('full'))
 

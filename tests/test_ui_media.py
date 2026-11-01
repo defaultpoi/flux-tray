@@ -86,6 +86,9 @@ class Stub:
     build_media_row = rt.FluxTray.build_media_row
     _update_media_row = rt.FluxTray._update_media_row
     _refresh_media_rows = rt.FluxTray._refresh_media_rows
+    _consumed_media_sources = rt.FluxTray._consumed_media_sources
+    remove_consumed_media = rt.FluxTray.remove_consumed_media
+    _media_menu_remove = rt.FluxTray._media_menu_remove
 
     def __init__(self):
         self.media = {'sources': {}}
@@ -109,6 +112,10 @@ class Stub:
         self.listbox = mock.MagicMock()
         self.note_request_failure = mock.Mock()
         self.on_new_items = mock.Mock()
+        self.refresh_list = mock.Mock()
+        self.lock = threading.Lock()
+        self.state = {}
+        self._media_header_row = None
 
 
 class MediaCase(unittest.TestCase):
@@ -1108,6 +1115,145 @@ class TestPlaying(MediaCase):
         stub._on_media_played(URL, 'a', 30.0, 700.0)
         stub._on_media_played(URL, 'a', None, None)
         stub.mark_media_watched.assert_not_called()
+
+
+class TestRemovingWatchedSources(MediaCase):
+    """Taking sources whose episodes are all watched off the list (right-click on the row)."""
+    FILM = 'https://archive.org/details/film'
+
+    def setUp(self):
+        super().setUp()
+        self.sources = [(URL, None, None), (POD, 'The Podcast', None), (self.FILM, 'The Film', 'oldest')]
+        self.config_lines = [url for url, _n, _o in self.sources]
+
+        def remove(urls):  # what remove_media_sources does to config.conf, without touching one
+            self.removed_calls.append(list(urls))
+            if self.config_writable:
+                self.sources = [s for s in self.sources if s[0] not in urls]
+        self.removed_calls, self.config_writable = [], True
+        patcher = mock.patch.object(rt, 'remove_media_sources', side_effect=remove)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.stub = Stub()
+        self.stub._media_rows_removed = mock.Mock()
+        self.stub.media['sources'] = {
+            URL: entry_with(ep('a', 1), ep('b', 2), watched=['a', 'b'], title='Show'),   # all watched
+            POD: entry_with(ep('p1', 1), ep('p2', 2), watched=['p1'], title='Pod'),      # one left
+            self.FILM: entry_with(ep('f', 1), watched=['f'], title='Film'),              # all watched
+        }
+
+    def test_only_sources_with_everything_watched_are_offered_in_config_order(self):
+        self.assertEqual(self.stub._consumed_media_sources(), [(URL, 'Show'), (self.FILM, 'The Film')])
+
+    def test_a_source_never_read_or_without_episodes_is_not_consumed(self):
+        self.stub.media['sources'][POD] = entry_with()  # read, but nothing in it
+        del self.stub.media['sources'][self.FILM]       # configured, never read
+        self.assertEqual(self.stub._consumed_media_sources(), [(URL, 'Show')])
+
+    def test_a_source_that_is_no_longer_configured_is_not_offered(self):
+        self.sources = [s for s in self.sources if s[0] != URL]
+        self.assertEqual(self.stub._consumed_media_sources(), [(self.FILM, 'The Film')])
+
+    def test_removing_takes_the_line_out_and_forgets_the_source(self):
+        gone = self.stub.remove_consumed_media([URL])
+        self.assertEqual(gone, [URL])
+        self.assertEqual(self.removed_calls, [[URL]])
+        self.assertNotIn(URL, self.stub.media['sources'])
+        self.assertEqual(set(self.stub.media['sources']), {POD, self.FILM})
+        self.save_media.assert_called_with(self.stub.media)
+        self.stub._media_rows_removed.assert_called_once_with([URL])
+
+    def test_removing_clears_what_was_in_memory_about_it_and_nothing_else(self):
+        self.stub.media_errors = {URL: 'down', POD: 'down too'}
+        self.stub.media_status = {(URL, 'a'): {'state': 'queued'}, (POD, 'p2'): {'state': 'queued'}}
+        self.stub._media_queue = [(URL, 'a'), (POD, 'p2')]
+        self.stub._media_known_sources = {URL, POD, self.FILM}
+        self.stub.remove_consumed_media([URL])
+        self.assertEqual(self.stub.media_errors, {POD: 'down too'})
+        self.assertEqual(self.stub.media_status, {(POD, 'p2'): {'state': 'queued'}})
+        self.assertEqual(self.stub._media_queue, [(POD, 'p2')])
+        self.assertEqual(self.stub._media_known_sources, {POD, self.FILM})
+
+    def test_several_at_once_in_one_edit_of_the_config(self):
+        gone = self.stub.remove_consumed_media([URL, self.FILM])
+        self.assertEqual(gone, [URL, self.FILM])
+        self.assertEqual(self.removed_calls, [[URL, self.FILM]])
+        self.assertEqual(set(self.stub.media['sources']), {POD})
+
+    def test_a_source_with_something_unwatched_is_left_alone_even_if_asked(self):
+        gone = self.stub.remove_consumed_media([POD, URL])
+        self.assertEqual(gone, [URL])
+        self.assertEqual(self.removed_calls, [[URL]])
+        self.assertIn(POD, self.stub.media['sources'])
+
+    def test_asking_for_nothing_consumed_changes_nothing(self):
+        self.assertEqual(self.stub.remove_consumed_media([POD, 'https://nowhere.example/']), [])
+        self.assertEqual(self.removed_calls, [])
+        self.save_media.assert_not_called()
+        self.stub._media_rows_removed.assert_not_called()
+
+    def test_a_config_that_cannot_be_written_leaves_everything_as_it_was(self):
+        self.config_writable = False
+        self.assertEqual(self.stub.remove_consumed_media([URL]), [])
+        self.assertIn(URL, self.stub.media['sources'])
+        self.assertEqual(self.stub.media['sources'][URL]['watched'], ['a', 'b'])
+        self.save_media.assert_not_called()
+        self.stub.refresh_list.assert_not_called()
+
+    def list_with(self, *urls, header=True, extra=0):
+        """A list box of fake rows: a Media heading, a row per url, then `extra` other rows."""
+        rows = []
+        self.heading = rt.types.SimpleNamespace(name='heading')
+        if header:
+            rows.append(self.heading)
+            self.stub._media_header_row = self.heading
+        rows += [rt.types.SimpleNamespace(media_source=url) for url in urls]
+        rows += [rt.types.SimpleNamespace(name=f'other{i}') for i in range(extra)]
+        box = mock.Mock()
+        box.get_children.side_effect = lambda: list(rows)
+        box.remove.side_effect = rows.remove
+        self.stub.listbox = box
+        return rows
+
+    def test_with_unread_items_showing_the_list_is_rebuilt(self):
+        self.stub.state = {'unread': [{'id': 'x'}]}
+        rows = self.list_with(URL, POD)
+        rt.FluxTray._media_rows_removed(self.stub, [URL])
+        self.stub.refresh_list.assert_called_once_with(keep_open=True)
+        self.assertEqual(len(rows), 3)  # rebuilding is refresh_list's job
+
+    def test_with_only_media_showing_the_rows_go_in_place_and_the_others_stay(self):
+        rows = self.list_with(URL, POD, self.FILM)
+        rt.FluxTray._media_rows_removed(self.stub, [URL, self.FILM])
+        self.assertEqual([getattr(r, 'media_source', 'heading') for r in rows], ['heading', POD])
+        self.stub.refresh_list.assert_not_called()
+
+    def test_the_heading_goes_with_the_last_media_row_but_other_rows_stay(self):
+        rows = self.list_with(URL, extra=2)
+        rt.FluxTray._media_rows_removed(self.stub, [URL])
+        self.assertEqual([r.name for r in rows], ['other0', 'other1'])
+        self.assertIsNone(self.stub._media_header_row)
+        self.stub.refresh_list.assert_not_called()
+
+    def test_when_nothing_at_all_is_left_the_list_is_rebuilt_to_say_so(self):
+        self.list_with(URL)
+        rt.FluxTray._media_rows_removed(self.stub, [URL])
+        self.stub.refresh_list.assert_called_once_with(keep_open=True)
+
+    def test_without_a_popup_there_is_no_list_to_fix(self):
+        self.stub.popup = None
+        self.list_with(URL)
+        rt.FluxTray._media_rows_removed(self.stub, [URL])
+        self.stub.listbox.remove.assert_not_called()
+        self.stub.refresh_list.assert_not_called()
+
+    def test_the_menu_button_closes_the_menu_before_it_removes(self):
+        order = []
+        popover = mock.Mock()
+        popover.popdown.side_effect = lambda: order.append('popdown')
+        self.stub.remove_consumed_media = mock.Mock(side_effect=lambda urls: order.append(('remove', urls)))
+        self.stub._media_menu_remove(None, popover, [URL])
+        self.assertEqual(order, ['popdown', ('remove', [URL])])
 
 
 class TestWatched(MediaCase):

@@ -38,6 +38,7 @@ class FluxTray(ConnectivityMixin, FeedsMixin, IconMixin, LiveMixin, MediaMixin, 
         self.media = load_media()  # podcasts, series and movies (media.json)
         self.media_status = {}  # (source url, episode id) -> download progress, in memory only
         self.media_errors = {}  # source -> why its last check failed, in memory only
+        self._media_header_row = None  # the 'Media' heading in the list, while there is one
         self.media_registry = MediaSources(MEDIA_PLUGIN_DIR)  # built-in drivers and the plugins
         self._media_request_lock = threading.Lock()  # guards the four fields below
         self._media_checking = False  # a media-check thread is running

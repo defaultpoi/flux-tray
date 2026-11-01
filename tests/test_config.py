@@ -745,3 +745,68 @@ class TestConfigEditsFromSeveralThreads(TmpConfigCase):
         self.assertEqual(os.listdir(self.dir), ['config.conf'])
         with open(rt.CONFIG_FILE) as f:
             self.assertEqual(f.read(), '[feeds]\nhttps://x.example/rss\n')
+
+
+class TestRemoveMediaSources(TmpConfigCase):
+    CONFIG = (
+        '# my shows\n[feeds]\nhttps://news.example/rss\n\n[media]\n# the settings\npath=~/videos\nahead=1\n\n'
+        'https://archive.org/details/film|The Film|oldest\n'
+        'https://example.com/pod.xml|Podcast\n'
+        'yt-dlp:https://video.example/v/1\n'
+        '# https://archive.org/details/old|Commented out\n\n[twitch]\nsomechannel\n'
+    )
+
+    def lines(self):
+        with open(rt.CONFIG_FILE) as f:
+            return f.read()
+
+    def test_the_line_of_a_source_goes_and_everything_else_stays_as_it_was(self):
+        self.conf(self.CONFIG)
+        rt.remove_media_sources(['https://archive.org/details/film'])
+        self.assertEqual(self.lines(), self.CONFIG.replace('https://archive.org/details/film|The Film|oldest\n', ''))
+
+    def test_a_driver_line_with_a_colon_prefix_is_found_too(self):
+        self.conf(self.CONFIG)
+        rt.remove_media_sources(['yt-dlp:https://video.example/v/1'])
+        self.assertNotIn('video.example', self.lines())
+        self.assertEqual([u for u, _n, _o in rt.load_media_sources()],
+                         ['https://archive.org/details/film', 'https://example.com/pod.xml'])
+
+    def test_several_sources_at_once(self):
+        self.conf(self.CONFIG)
+        rt.remove_media_sources(['https://archive.org/details/film', 'https://example.com/pod.xml'])
+        self.assertEqual([u for u, _n, _o in rt.load_media_sources()], ['yt-dlp:https://video.example/v/1'])
+        self.assertEqual(rt.load_media_settings()['ahead'], 1)
+
+    def test_a_source_written_twice_goes_from_both_places(self):
+        self.conf('[media]\nhttps://example.com/pod.xml|One\nhttps://example.com/other.xml\nhttps://example.com/pod.xml|Two\n')
+        rt.remove_media_sources(['https://example.com/pod.xml'])
+        self.assertEqual(self.lines(), '[media]\nhttps://example.com/other.xml\n')
+
+    def test_a_comment_that_mentions_a_source_is_not_a_source(self):
+        self.conf(self.CONFIG)
+        rt.remove_media_sources(['https://archive.org/details/old'])
+        self.assertEqual(self.lines(), self.CONFIG)
+
+    def test_the_settings_are_never_taken_for_sources(self):
+        self.conf(self.CONFIG)
+        rt.remove_media_sources(['path=~/videos', 'ahead=1', 'path'])
+        self.assertEqual(self.lines(), self.CONFIG)
+
+    def test_a_source_that_is_not_there_leaves_the_file_alone_and_adds_no_section(self):
+        self.conf('[feeds]\nhttps://news.example/rss\n')
+        rt.remove_media_sources(['https://example.com/pod.xml'])
+        self.assertEqual(self.lines(), '[feeds]\nhttps://news.example/rss\n')
+        rt.remove_media_sources([])
+        self.assertEqual(self.lines(), '[feeds]\nhttps://news.example/rss\n')
+
+    def test_a_missing_config_file_is_not_created(self):
+        rt.remove_media_sources(['https://example.com/pod.xml'])
+        self.assertFalse(os.path.exists(rt.CONFIG_FILE))
+
+    def test_loading_and_removing_agree_on_what_a_source_line_is(self):
+        self.conf(self.CONFIG)
+        for url, _name, _order in rt.load_media_sources():
+            before = len(rt.load_media_sources())
+            rt.remove_media_sources([url])
+            self.assertEqual(len(rt.load_media_sources()), before - 1, url)
