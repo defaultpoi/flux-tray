@@ -6,9 +6,10 @@ import threading
 import time as time_module
 
 from ..gi_env import GLib, Gdk, Gio, Gtk, Pango
-from ..config import load_media_settings, load_media_sources, remove_media_sources
+from ..config import load_media_movies, load_media_settings, load_media_sources, remove_media_sources
 from ..constants import CONFIG_FILE
-from ..desktop import primary_monitor_size
+from ..desktop import move_to_trash, primary_monitor_size
+from ..fileutil import remove_empty_dirs
 from ..hls import is_hls
 from ..media import (
     clean_title,
@@ -24,7 +25,7 @@ from ..media import (
 )
 from ..mediasources import NoDriver, normalize_files, normalize_saved
 from ..network import run_when_online
-from ..playback import counts_as_watched, play_media_file
+from ..playback import counts_as_watched, play_media_file, resume_point
 from ..screen import media_target_size, remember_screen_size
 from ..state import new_media_entry, save_media
 
@@ -34,12 +35,23 @@ PLAY_PARTIAL_MIN_BYTES = 1_500_000  # enough of a download for mpv to start on (
 MEDIA_MARKER_COLORS = {'ready': '#2e8b57', 'busy': '#d08000', 'failed': '#c0392b', 'idle': '#808080'}
 
 
-def media_row_view(name, entry, order, downloaded, status, error=None):
+def duration_text(seconds):
+    """A time ahead for a row, in the largest sensible unit: '2 days', '23 h', '45 min'."""
+    minutes = max(1, int(seconds // 60))
+    if minutes >= 48 * 60:
+        return f'{minutes // (24 * 60)} days'
+    if minutes >= 60:
+        return f'{(minutes + 30) // 60} h'
+    return f'{minutes} min'
+
+
+def media_row_view(name, entry, order, downloaded, status, error=None, now=None):
     """What a source's row shows: (name, next episode text, stats text, tooltip,
     marker colour key). `downloaded` is whether the next episode is on disk and
     `status` its entry in the downloads' progress ('queued', 'downloading' with a
     percent, or 'failed' with an error), None when nothing is going on. `error` is
-    why the source's last check failed, if it did."""
+    why the source's last check failed, if it did. A watched movie that is due to be
+    removed says when."""
     last = entry.get('last_watched')
     last_line = f"Last watched: {last.get('title') or last['id']}" if last else ''
     error_line = f'Last check failed: {error}' if error else ''
@@ -49,7 +61,12 @@ def media_row_view(name, entry, order, downloaded, status, error=None):
         return name, 'cannot be read', '', '\n'.join((error, 'Click to try again')), 'failed'
     if not nxt:
         text = 'all watched' if entry.get('episodes') else 'no episodes yet'
-        return name, text, (f'{news} new' if news else ''), '\n'.join(p for p in (last_line, error_line) if p), 'idle'
+        stats, removal_line = (f'{news} new' if news else ''), ''
+        if entry.get('remove_at') is not None and entry.get('episodes'):
+            left = max(0.0, entry['remove_at'] - (time_module.time() if now is None else now))
+            stats = f'removed in {duration_text(left)}'
+            removal_line = f'Removed with its file in {duration_text(left)}. Right-click it and choose "I didn\'t finish it" to keep it.'
+        return name, text, stats, '\n'.join(p for p in (removal_line, last_line, error_line) if p), 'idle'
     episode = nxt[0]
     label = episode_label(episode)
     text = ' '.join(p for p in (label, clean_title(episode.get('title'), (name, entry.get('title')))) if p)
@@ -83,10 +100,12 @@ class MediaMixin:
     # ---- checking the sources ------------------------------------------------
 
     def initial_media_check(self):
+        threading.Thread(target=self.remove_due_movies, daemon=True).start()  # some fell due while the app was closed
         run_when_online(self.start_media_check)
         return False
 
     def periodic_media_check(self):
+        threading.Thread(target=self.remove_due_movies, daemon=True).start()
         self.start_media_check()
         # re-arm with the interval currently in config.conf, so edits apply after the next check
         GLib.timeout_add_seconds(load_media_settings()['interval'], self.periodic_media_check)
@@ -320,6 +339,7 @@ class MediaMixin:
                     self.start_media_check()  # an unreadable source: try it again now
                 return
             episode = nxt[0]
+            start = (entry.get('resume') or {}).get(episode['id'])  # where it stopped last time
             ready = self._media_file_ready(entry, episode['id'])
             path = entry['files'][episode['id']]['video'] if ready else None
             name = self._media_display_name(url, entry)
@@ -341,14 +361,43 @@ class MediaMixin:
         # A partial file's own length is only an estimate, so how far it got is measured against the
         # playlist's; without that, playing it is not tracked at all.
         track = ready or bool(length)
-        play_media_file(path, title, total_seconds=length,
+        stopped = {}  # where it stopped and how much of it was played, filled in when playback ends
+        play_media_file(path, title, total_seconds=length, start=start, on_stopped=stopped.update,
+                        sleep_seconds=load_media_settings()['sleep'],
                         on_finished=(lambda percent, remaining:
-                                     GLib.idle_add(self._on_media_played, url, episode_id, percent, remaining)) if track else None)
+                                     GLib.idle_add(self._on_media_played, url, episode_id, percent, remaining,
+                                                   dict(stopped), start)) if track else None)
 
-    def _on_media_played(self, url, episode_id, percent, remaining):
-        if counts_as_watched(percent, remaining):
+    def _on_media_played(self, url, episode_id, percent, remaining, info=None, start=None):
+        """Playback of an episode ended. `info` says where it stopped and how much of it was
+        played (seeking over parts is not playing); `start` is where it carried on from, all
+        of which counts as seen. Watched through: marked, and a movie is set to be removed.
+        Otherwise the place is remembered for the next time."""
+        info = info or {}
+        played, duration = info.get('played'), info.get('duration')
+        fraction = (played + (start or 0.0)) / duration if isinstance(played, (int, float)) and duration else None
+        if counts_as_watched(percent, remaining, fraction):
             self.mark_media_watched(url, episode_id)
+            if url in load_media_movies():
+                self._schedule_movie_removal(url)
+        elif info.get('position') is not None:  # nothing seen means nothing to change
+            self._set_media_resume(url, episode_id, resume_point(info['position'], watched=False))
         return False
+
+    def _set_media_resume(self, url, episode_id, seconds):
+        """Remembers where playback of an episode stopped; None forgets it."""
+        with self._media_data_lock:
+            entry = self.media['sources'].get(url)
+            if not entry:
+                return
+            resume = entry.setdefault('resume', {})
+            if seconds is None and episode_id not in resume or resume.get(episode_id) == seconds:
+                return
+            if seconds is None:
+                del resume[episode_id]
+            else:
+                resume[episode_id] = seconds
+            save_media(self.media)
 
     def mark_media_watched(self, url, episode_id):
         with self._media_data_lock:
@@ -360,9 +409,114 @@ class MediaMixin:
             episode = next((e for e in entry['episodes'] if e['id'] == episode_id), {})
             entry['last_watched'] = {'id': episode_id, 'title': episode.get('title') or episode_id, 'at': time_module.time()}
             entry['new'] = [i for i in entry['new'] if i != episode_id]
+            entry.setdefault('resume', {}).pop(episode_id, None)  # watched through: nowhere to carry on from
             save_media(self.media)
         self._plan_media_downloads()  # keeps the next ones ready
         self._refresh_media_rows()
+        threading.Thread(target=self._prune_watched_files, args=(url,), daemon=True).start()
+
+    def mark_media_unwatched(self, url, episode_id):
+        """Puts a watched episode back as not watched (it was counted by mistake, say the
+        person fell asleep), and stops a movie's removal. True when it was watched."""
+        with self._media_data_lock:
+            entry = self.media['sources'].get(url)
+            if not entry or episode_id not in entry['watched']:
+                return False
+            entry['watched'] = [i for i in entry['watched'] if i != episode_id]
+            if (entry.get('last_watched') or {}).get('id') == episode_id:
+                entry['last_watched'] = None
+            entry['remove_at'] = None
+            save_media(self.media)
+        self._plan_media_downloads()  # its file may have gone to the Trash with `behind`
+        self._refresh_media_rows()
+        return True
+
+    # ---- what happens to files once they are watched ---------------------------
+
+    def _trash_episode_files(self, files):
+        """Moves the video and subtitles of one episode to the Trash, and the folders that
+        leaves empty. True when none of them is left where it was."""
+        root = load_media_settings()['path']
+        paths = [p for p in [files.get('video')] + list(files.get('subs') or []) if isinstance(p, str)]
+        moved = [move_to_trash(path, root) for path in paths]
+        for path in paths:
+            remove_empty_dirs(os.path.dirname(path), root)
+        return all(moved)
+
+    def _prune_watched_files(self, url):
+        """With `behind` set, only that many of the most recently watched episodes of a
+        source keep their files: the files of older watched ones go to the Trash. They stay
+        watched, so they are not downloaded again. Movies are removed another way."""
+        behind = load_media_settings()['behind']
+        if behind is None or url in load_media_movies():
+            return
+        with self._media_data_lock:
+            entry = self.media['sources'].get(url)
+            if not entry:
+                return
+            with_files = [i for i in entry['watched'] if i in entry['files']]  # in the order they were watched
+            doomed = {i: dict(entry['files'][i]) for i in (with_files[:-behind] if behind else with_files)}
+        gone = [i for i, files in doomed.items() if self._trash_episode_files(files)]
+        if gone:
+            with self._media_data_lock:
+                entry = self.media['sources'].get(url)
+                if entry:
+                    for episode_id in gone:
+                        entry['files'].pop(episode_id, None)
+                    save_media(self.media)
+            GLib.idle_add(self._refresh_media_rows)
+
+    def _trash_source_files(self, url):
+        """Moves every file of a source to the Trash and forgets them. True when all went;
+        a file that could not go leaves the others forgotten and the source as it is."""
+        with self._media_data_lock:
+            entry = self.media['sources'].get(url)
+            everything = {i: dict(f) for i, f in entry['files'].items()} if entry else {}
+        gone = [i for i, files in everything.items() if self._trash_episode_files(files)]
+        with self._media_data_lock:
+            entry = self.media['sources'].get(url)
+            if entry:
+                for episode_id in gone:
+                    entry['files'].pop(episode_id, None)
+                save_media(self.media)
+        return len(gone) == len(everything)
+
+    def _schedule_movie_removal(self, url):
+        """A movie was watched through: it is to be removed, with its file, after the grace
+        period (right away with none), so that a film that was slept through can be put back."""
+        grace = load_media_settings()['grace']
+        with self._media_data_lock:
+            entry = self.media['sources'].get(url)
+            if not entry:
+                return
+            entry['remove_at'] = time_module.time() + grace
+            save_media(self.media)
+        if grace <= 0:
+            self.remove_due_movies()
+        else:
+            self._refresh_media_rows()
+
+    def remove_due_movies(self):
+        """Removes the movies whose grace period is over: the file to the Trash, the line out
+        of [media], what is known of it forgotten. A movie that is not watched through any
+        more, or whose file cannot go to the Trash, is left (and tried again in an hour)."""
+        now = time_module.time()
+        movies = load_media_movies()
+        with self._media_data_lock:
+            due = [url for url in movies if (entry := self.media['sources'].get(url)) and entry.get('remove_at') is not None
+                   and entry['remove_at'] <= now and entry.get('episodes') and unwatched_count(entry) == 0]
+        done = []
+        for url in due:
+            if self._trash_source_files(url):
+                done.append(url)
+            else:
+                with self._media_data_lock:
+                    self.media['sources'][url]['remove_at'] = now + 3600
+                    save_media(self.media)
+        gone = self._drop_media_sources(done)
+        if gone:
+            GLib.idle_add(self._media_rows_removed, gone)
+        return gone
 
     # ---- taking watched sources off the list ----------------------------------
 
@@ -377,18 +531,28 @@ class MediaMixin:
 
     def remove_consumed_media(self, urls):
         """Takes sources whose episodes are all watched off the list: their lines go out of
-        [media] in config.conf and what is known of them is forgotten. Downloaded files
-        stay on disk. A source that has something unwatched left, or that is not
-        configured any more, is left alone (decided now, not when a menu was drawn).
-        If the config cannot be written the source and what is known of it stay, so
-        nothing is half done. Returns the sources taken off."""
+        [media] in config.conf and what is known of them is forgotten. The files of
+        episodes stay on disk; a movie's file goes to the Trash with it. A source that has
+        something unwatched left, or that is not configured any more, is left alone (decided
+        now, not when a menu was drawn). If the config cannot be written, or a movie's file
+        cannot go to the Trash, the source and what is known of it stay: nothing is half
+        done. Returns the sources taken off."""
         consumed = {url for url, _name in self._consumed_media_sources()}
-        wanted = [url for url in urls if url in consumed]
-        if not wanted:
+        movies = load_media_movies()
+        wanted = [url for url in urls if url in consumed and (url not in movies or self._trash_source_files(url))]
+        gone = self._drop_media_sources(wanted)
+        if gone:
+            self._media_rows_removed(gone)
+        return gone
+
+    def _drop_media_sources(self, urls):
+        """Takes the lines of sources out of [media] and forgets the sources (not the files).
+        Only those really gone from the config are forgotten. Returns them."""
+        if not urls:
             return []
-        remove_media_sources(wanted)
+        remove_media_sources(urls)
         still_configured = {u for u, _n, _o in load_media_sources()}
-        gone = [url for url in wanted if url not in still_configured]
+        gone = [url for url in urls if url not in still_configured]
         if not gone:
             return []
         with self._media_data_lock:
@@ -402,7 +566,6 @@ class MediaMixin:
         for key in [k for k in self.media_status if k[0] in gone]:
             del self.media_status[key]
         self._media_known_sources -= set(gone)  # adding the source again later reads it as new
-        self._media_rows_removed(gone)
         return gone
 
     def _media_rows_removed(self, gone):
@@ -432,16 +595,26 @@ class MediaMixin:
         popover.popdown()
         self.remove_consumed_media(urls)
 
+    def _media_menu_unwatch(self, _button, popover, url, episode_id):
+        popover.popdown()
+        self.mark_media_unwatched(url, episode_id)
+
     def _media_menu_content(self, url, popover):
         """What the right-click menu of a media row holds: removal of this source when
-        everything in it is watched (the button says why when it is not), and, when
-        more than one source is finished, removal of all of those at once."""
+        everything in it is watched (the button says why when it is not; for a movie it
+        takes the file to the Trash too), taking the last watched episode back as not
+        watched (for a movie waiting to be removed: "I didn't finish it"), and, when more
+        than one source is finished, removal of all of those at once."""
         consumed = self._consumed_media_sources()
+        movies = load_media_movies()
         with self._media_data_lock:
             entry = self.media['sources'].get(url)
             read = bool(entry and entry.get('episodes'))
             left = unwatched_count(entry) if read else 0
             title = self._media_display_name(url, entry or {})
+            last = (entry or {}).get('last_watched') or {}
+            can_unwatch = last.get('id') in (entry or {}).get('watched', [])
+            pending = (entry or {}).get('remove_at')
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         for margin in ('start', 'end', 'top', 'bottom'):
             getattr(box, f'set_margin_{margin}')(4)
@@ -453,9 +626,11 @@ class MediaMixin:
         heading.get_style_context().add_class('menu-text')  # dark text: the menu sits on a white scroller
         box.pack_start(heading, False, False, 0)
 
-        one = Gtk.Button(label='Remove from list')
+        is_movie = url in movies
+        one = Gtk.Button(label='Remove movie and its file' if is_movie else 'Remove from list')
         if any(u == url for u, _n in consumed):
-            one.set_tooltip_text('Takes this source out of [media] in config.conf. Downloaded files stay on disk.')
+            one.set_tooltip_text('Takes this movie out of [media] and moves its file to the Trash.' if is_movie else
+                                 'Takes this source out of [media] in config.conf. Downloaded files stay on disk.')
             one.connect('clicked', self._media_menu_remove, popover, [url])
         else:
             one.set_sensitive(False)
@@ -463,11 +638,19 @@ class MediaMixin:
                                  else 'This source has not been read yet')
         box.pack_start(one, False, False, 0)
 
+        if can_unwatch:
+            undo = Gtk.Button(label="I didn't finish it" if pending is not None else 'Mark as not watched')
+            shown = last.get('title') or last['id']
+            undo.set_tooltip_text(f'Puts "{shown}" back as not watched' + ('; the movie is not removed.' if pending is not None else '.'))
+            undo.connect('clicked', self._media_menu_unwatch, popover, url, last['id'])
+            box.pack_start(undo, False, False, 0)
+
         if len(consumed) > 1:
             names = [name for _u, name in consumed]
             listed = ', '.join(names[:8]) + (f' and {len(names) - 8} more' if len(names) > 8 else '')
+            kept = "Downloaded files stay on disk" + ("; a movie's file goes to the Trash." if any(u in movies for u, _n in consumed) else '.')
             every = Gtk.Button(label=f'Remove all {len(consumed)} fully watched')
-            every.set_tooltip_text(f'Takes these out of [media]: {listed}. Downloaded files stay on disk.')
+            every.set_tooltip_text(f'Takes these out of [media]: {listed}. {kept}')
             every.connect('clicked', self._media_menu_remove, popover, [u for u, _n in consumed])
             box.pack_start(every, False, False, 0)
         return box

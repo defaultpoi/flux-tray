@@ -20,3 +20,16 @@ def write_atomic(path, write):
         except OSError:
             pass
         raise
+
+
+def remove_empty_dirs(directory, root):
+    """Removes `directory` if it is empty, then its parent if that is now empty, and
+    so on, but never `root` itself and never anything outside it."""
+    base = os.path.realpath(root)
+    current = os.path.realpath(directory)
+    while current != base and os.path.commonpath([current, base]) == base:
+        try:
+            os.rmdir(current)  # fails, harmlessly, unless the directory is empty
+        except OSError:
+            return
+        current = os.path.dirname(current)

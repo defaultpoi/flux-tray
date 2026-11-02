@@ -591,7 +591,10 @@ DEFAULT_MEDIA_CHECK_MINUTES = 60
 MIN_MEDIA_CHECK_MINUTES = 10
 DEFAULT_MEDIA_AHEAD = 2
 MAX_MEDIA_AHEAD = 20
-_MEDIA_SETTINGS = ('path', 'interval', 'ahead', 'ytdlp', 'screen')
+DEFAULT_MEDIA_GRACE_HOURS = 24
+MAX_MEDIA_BEHIND = 1000
+MIN_MEDIA_SLEEP_MINUTES = 5
+_MEDIA_SETTINGS = ('path', 'interval', 'ahead', 'behind', 'grace', 'sleep', 'ytdlp', 'screen')
 _MEDIA_SOURCE_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.\-_]*:\S')  # https://..., yt-dlp:https://..., mysite:show-1
 
 
@@ -604,9 +607,12 @@ def _media_setting(name):
 
 
 def load_media_settings():
-    """{'path', 'interval' (seconds), 'ahead', 'ytdlp' (extra yt-dlp arguments, a
-    list), 'screen' ((width, height) or None for the monitor's own)} from [media],
-    defaults for anything missing or unusable."""
+    """{'path', 'interval' (seconds), 'ahead' (episodes downloaded ahead), 'behind'
+    (watched episodes whose files are kept, None for all of them), 'grace' (seconds
+    a watched movie waits before it is removed), 'sleep' (seconds without any key or
+    mouse input after which playback is paused, 0 for never), 'ytdlp' (extra yt-dlp
+    arguments, a list), 'screen' ((width, height) or None for the monitor's own)}
+    from [media], defaults for anything missing or unusable."""
     path = _media_setting('path') or DEFAULT_MEDIA_PATH
     try:
         minutes = max(MIN_MEDIA_CHECK_MINUTES, int(_media_setting('interval')))
@@ -617,18 +623,33 @@ def load_media_settings():
     except (TypeError, ValueError):
         ahead = DEFAULT_MEDIA_AHEAD
     try:
+        behind = min(MAX_MEDIA_BEHIND, max(0, int(_media_setting('behind'))))
+    except (TypeError, ValueError):
+        behind = None
+    try:
+        grace_hours = max(0.0, float(_media_setting('grace')))
+    except (TypeError, ValueError):
+        grace_hours = DEFAULT_MEDIA_GRACE_HOURS
+    try:
+        sleep_minutes = int(_media_setting('sleep'))
+        sleep_minutes = max(MIN_MEDIA_SLEEP_MINUTES, sleep_minutes) if sleep_minutes > 0 else 0
+    except (TypeError, ValueError):
+        sleep_minutes = 0
+    try:
         ytdlp = shlex.split(_media_setting('ytdlp') or '')
     except ValueError:  # an unclosed quote
         ytdlp = []
     size = re.fullmatch(r'(\d{3,5})\s*x\s*(\d{3,5})', (_media_setting('screen') or '').lower())
     screen = (int(size.group(1)), int(size.group(2))) if size else None
-    return {'path': os.path.expanduser(path), 'interval': minutes * 60, 'ahead': ahead, 'ytdlp': ytdlp, 'screen': screen}
+    return {'path': os.path.expanduser(path), 'interval': minutes * 60, 'ahead': ahead, 'behind': behind,
+            'grace': int(grace_hours * 3600), 'sleep': sleep_minutes * 60, 'ytdlp': ytdlp, 'screen': screen}
 
 
 def _media_source_line(line):
-    """(source, display name or None, order or None) when a line of [media] names a
-    source, None for a setting or anything else. A source is an http(s) URL or a
-    `name:...` line for a driver or plugin."""
+    """(source, display name or None, order or None, is_movie) when a line of [media]
+    names a source, None for a setting or anything else. A source is an http(s) URL
+    or a `name:...` line for a driver or plugin. The third column is `oldest` or
+    `newest`, or `movie` for a source that is a single film."""
     key, sep, _val = line.partition('=')
     if sep and key.strip().lower() in _MEDIA_SETTINGS:
         return None
@@ -637,8 +658,8 @@ def _media_source_line(line):
     if not _MEDIA_SOURCE_RE.match(url):
         return None
     name = parts[1] if len(parts) > 1 and parts[1] else None
-    order = parts[2].lower() if len(parts) > 2 and parts[2].lower() in ('oldest', 'newest') else None
-    return url, name, order
+    third = parts[2].lower() if len(parts) > 2 else ''
+    return url, name, (third if third in ('oldest', 'newest') else None), third == 'movie'
 
 
 def load_media_sources():
@@ -650,8 +671,18 @@ def load_media_sources():
         if parsed is None or parsed[0] in seen:
             continue
         seen.add(parsed[0])
-        sources.append(parsed)
+        sources.append(parsed[:3])
     return sources
+
+
+def load_media_movies():
+    """The sources of [media] marked `movie` in their third column (a set)."""
+    movies = set()
+    for line in _read_config_sections()['media']:
+        parsed = _media_source_line(line)
+        if parsed is not None and parsed[3]:
+            movies.add(parsed[0])
+    return movies
 
 
 def remove_media_sources(urls):

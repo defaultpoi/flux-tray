@@ -398,22 +398,26 @@ class TestCountsAsWatched(unittest.TestCase):
         self.assertFalse(rt.counts_as_watched(40.0, 900.0))
 
 
-class TestWatchLocalPlayback(unittest.TestCase):
-    def watch(self, script, clock=None, total=None):
-        """Runs the watcher over scripted poll results; returns what on_finished got."""
-        results = iter(script)
+class WatcherCase(unittest.TestCase):
+    def watch(self, script, clock=None, total=None, **options):
+        """Runs the watcher over scripted poll results (followed by enough silence for mpv to
+        count as gone); returns what on_finished got. What on_stopped got is in self.stopped."""
+        results = iter(list(script) + [None] * rt.WATCH_MAX_MISSES)
         done = []
-        self.asked = []
+        self.asked, self.stopped = [], []
         with mock.patch.object(rt, '_mpv_get_properties', side_effect=lambda names: self.asked.append(list(names)) or next(results)), \
                 mock.patch.object(rt.time_module, 'sleep'), \
                 mock.patch.object(rt.time_module, 'monotonic', side_effect=clock or (lambda: 0.0)):
-            rt._watch_local_playback('/v/a.mp4', lambda percent, remaining: done.append((percent, remaining)), total_seconds=total)
+            rt._watch_local_playback('/v/a.mp4', lambda percent, remaining: done.append((percent, remaining)), total_seconds=total,
+                                     on_stopped=self.stopped.append, **options)
         return done
 
     @staticmethod
     def at(percent, remaining, path='/v/a.mp4'):
         return {'path': path, 'percent-pos': percent, 'time-remaining': remaining}
 
+
+class TestWatchLocalPlayback(WatcherCase):
     def test_it_reports_the_furthest_point_when_mpv_quits(self):
         self.assertEqual(self.watch([self.at(5, 95), self.at(50, 50), self.at(96, 4), None]), [(96, 4)])
 
@@ -441,11 +445,11 @@ class TestWatchLocalPlayback(unittest.TestCase):
         growing = {'path': '/v/a.mp4', 'percent-pos': 95.0, 'time-remaining': 3.0, 'time-pos': 600.0}
         self.assertEqual(self.watch([growing, None], total=2400), [(25.0, 1800.0)])
 
-    def test_it_asks_for_the_time_only_when_it_has_a_length(self):
+    def test_it_always_asks_for_the_time_and_the_length_since_it_measures_what_was_played(self):
         self.watch([None])
-        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining'])
+        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause'])
         self.watch([None], total=100)
-        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos'])
+        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause'])
 
     def test_the_furthest_point_and_the_least_remaining_are_kept_against_a_known_length(self):
         at = lambda pos: {'path': '/v/a.mp4', 'percent-pos': 1, 'time-remaining': 1, 'time-pos': pos}
@@ -475,10 +479,10 @@ class TestPlayMediaFile(unittest.TestCase):
                 mock.patch.object(rt, '_load_in_mpv', return_value=True) as load, \
                 mock.patch.object(rt.threading, 'Thread') as thread:
             self.assertTrue(rt.play_media_file('/v/a.mp4', 'Show \u00b7 Pilot', done))
-        load.assert_called_once_with('/v/a.mp4', 'Show \u00b7 Pilot')
+        load.assert_called_once_with('/v/a.mp4', 'Show \u00b7 Pilot', start=None)
         self.assertEqual(thread.call_args.kwargs['target'], rt._watch_local_playback)
         self.assertEqual(thread.call_args.kwargs['args'], ('/v/a.mp4', done))
-        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': None})
+        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': None, 'on_stopped': None, 'sleep_seconds': 0})
         thread.return_value.start.assert_called_once_with()
 
     def test_the_length_of_an_unfinished_download_is_handed_to_the_watcher(self):
@@ -486,7 +490,7 @@ class TestPlayMediaFile(unittest.TestCase):
                 mock.patch.object(rt, '_load_in_mpv', return_value=True), \
                 mock.patch.object(rt.threading, 'Thread') as thread:
             rt.play_media_file('/v/a.ts.part', 'T', mock.Mock(), total_seconds=2501)
-        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': 2501})
+        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': 2501, 'on_stopped': None, 'sleep_seconds': 0})
 
     def test_without_a_callback_nothing_is_watched(self):
         with mock.patch.object(rt.shutil, 'which', return_value='/usr/bin/mpv'), \
@@ -518,3 +522,297 @@ class TestPlayMediaFile(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def timed(position, duration=1320.0, pause=False, path='/v/a.mp4'):
+    """What mpv answers at a position of a file of `duration` seconds."""
+    return {'path': path, 'percent-pos': position * 100.0 / duration, 'time-remaining': duration - position,
+            'time-pos': float(position), 'duration': duration, 'pause': pause}
+
+
+class TestWatchingTime(WatcherCase):
+    """What the watcher measures besides the furthest point: time actually played, and where it stopped."""
+    def played(self, positions, **kw):
+        self.watch([timed(p) for p in positions], **kw)
+        return self.stopped[0]['played']
+
+    def test_steps_of_normal_playback_add_up(self):
+        self.assertEqual(self.played([0, 2, 4, 6, 8]), 8.0)
+
+    def test_a_seek_forward_is_not_played_time(self):
+        self.assertEqual(self.played([0, 2, 4, 900, 902]), 6.0)
+
+    def test_a_seek_back_is_not_played_time_and_playing_on_from_there_is(self):
+        self.assertEqual(self.played([100, 102, 30, 32, 34]), 6.0)
+
+    def test_a_pause_adds_nothing(self):
+        self.assertEqual(self.played([10, 12, 12, 12, 12, 14]), 4.0)
+
+    def test_double_speed_is_still_playing(self):
+        self.assertEqual(self.played([0, 4, 8, 12]), 12.0)
+
+    def test_a_skip_of_a_few_seconds_counts_as_the_playing_it_looks_like(self):
+        self.assertEqual(self.played([0, 2, 7, 9]), 9.0)  # one 5 s key press: below the step that is told from a seek
+
+    def test_seeking_to_the_end_to_find_ones_place_does_not_make_a_film_watched(self):
+        self.watch([timed(p, 7200) for p in (0, 2, 4, 6900, 7100, 1500, 1502)])
+        percent, remaining = self.watch([timed(p, 7200) for p in (0, 2, 4, 6900, 7100, 1500, 1502)])[0]
+        info = self.stopped[0]
+        self.assertGreaterEqual(percent, rt.WATCHED_PERCENT)  # the furthest point alone would have said watched
+        self.assertFalse(rt.counts_as_watched(percent, remaining, info['played'] / info['duration']))
+
+    def test_watching_through_does_count(self):
+        self.watch([timed(p, 600) for p in range(0, 601, 2)])
+        percent, remaining = self.watch([timed(p, 600) for p in range(0, 601, 2)])[0]
+        info = self.stopped[0]
+        self.assertTrue(rt.counts_as_watched(percent, remaining, info['played'] / info['duration']))
+
+    def test_where_it_stopped_is_the_last_position_not_the_furthest(self):
+        self.watch([timed(p) for p in (100, 102, 104, 40)])
+        self.assertEqual(self.stopped[0]['position'], 40.0)
+
+    def test_the_length_comes_from_mpv_or_from_the_playlist_when_given(self):
+        self.watch([timed(10, 1320.0)])
+        self.assertEqual(self.stopped[0]['duration'], 1320.0)
+        self.watch([timed(10, 1320.0)], total=2400)
+        self.assertEqual(self.stopped[0]['duration'], 2400)
+
+    def test_without_times_from_mpv_nothing_is_claimed_about_playing(self):
+        self.watch([self.at(30, 70), self.at(35, 65)])
+        self.assertEqual(self.stopped, [{'position': None, 'played': None, 'duration': None}])
+
+    def test_on_stopped_comes_before_on_finished(self):
+        order = []
+        results = iter([timed(10)] + [None] * rt.WATCH_MAX_MISSES)
+        with mock.patch.object(rt, '_mpv_get_properties', side_effect=lambda names: next(results)), \
+                mock.patch.object(rt.time_module, 'sleep'):
+            rt._watch_local_playback('/v/a.mp4', lambda p, r: order.append('finished'), on_stopped=lambda i: order.append('stopped'))
+        self.assertEqual(order, ['stopped', 'finished'])
+
+
+class TestWatchingThroughSilence(WatcherCase):
+    def test_mpv_not_answering_for_a_few_polls_does_not_end_the_watch(self):
+        script = [timed(100), None, None, None, None, timed(102), timed(104)]
+        self.assertEqual(self.watch(script)[0][0], 104 * 100.0 / 1320)
+
+    def test_the_watch_goes_on_counting_after_the_silence(self):
+        self.watch([timed(100), timed(102), None, None, timed(104), timed(106)])
+        self.assertEqual(self.stopped[0]['played'], 6.0)
+
+    def test_mpv_silent_for_the_allowed_polls_in_a_row_is_gone(self):
+        results = iter([timed(100)] + [None] * rt.WATCH_MAX_MISSES + [timed(500)])
+        done = []
+        with mock.patch.object(rt, '_mpv_get_properties', side_effect=lambda names: next(results)), mock.patch.object(rt.time_module, 'sleep'):
+            rt._watch_local_playback('/v/a.mp4', lambda p, r: done.append(p))
+        self.assertEqual(done, [100 * 100.0 / 1320])  # the later answer was never asked for
+
+    def test_one_fewer_silent_poll_is_still_waited_out(self):
+        results = iter([timed(100)] + [None] * (rt.WATCH_MAX_MISSES - 1) + [timed(500)] + [None] * rt.WATCH_MAX_MISSES)
+        done = []
+        with mock.patch.object(rt, '_mpv_get_properties', side_effect=lambda names: next(results)), mock.patch.object(rt.time_module, 'sleep'):
+            rt._watch_local_playback('/v/a.mp4', lambda p, r: done.append(p))
+        self.assertEqual(done, [500 * 100.0 / 1320])
+
+    def test_silence_that_comes_in_separate_stretches_never_adds_up(self):
+        script = []
+        for pos in range(100, 120, 2):
+            script += [timed(pos)] + [None] * (rt.WATCH_MAX_MISSES - 1)
+        self.assertEqual(self.watch(script)[0][0], 118 * 100.0 / 1320)
+
+
+class TestSleepTimer(WatcherCase):
+    LIMIT = 30 * 60
+
+    def run_with_idle(self, idles, values=None, **kw):
+        """The watcher over as many polls as there are idle readings, mpv's commands recorded."""
+        values = values or [timed(100 + 2 * i) for i in range(len(idles))]
+        readings = iter(idles)
+        self.commands = []
+        with mock.patch.object(rt, '_mpv_ipc', side_effect=lambda cmds, **k: self.commands.append(cmds) or True):
+            self.watch(values, sleep_seconds=self.LIMIT, idle_seconds=lambda: next(readings, 0), **kw)
+        return self.commands
+
+    def test_input_within_the_limit_leaves_playback_alone(self):
+        self.assertEqual(self.run_with_idle([0, 60, 900, self.LIMIT - 1]), [])
+
+    def test_the_limit_without_input_pauses_playback_and_asks(self):
+        commands = self.run_with_idle([0, 60, self.LIMIT])
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(commands[0][0], ['set_property', 'pause', True])
+        self.assertEqual(commands[0][1][0:2], ['show-text', rt.SLEEP_PROMPT])
+
+    def test_it_pauses_once_not_at_every_poll(self):
+        self.assertEqual(len(self.run_with_idle([self.LIMIT, self.LIMIT + 2, self.LIMIT + 4, self.LIMIT + 6])), 1)
+
+    def test_the_next_input_carries_playback_on(self):
+        commands = self.run_with_idle([self.LIMIT, self.LIMIT + 2, 0.4, 3])
+        self.assertEqual([c[0] for c in commands], [['set_property', 'pause', True], ['set_property', 'pause', False]])
+
+    def test_after_carrying_on_it_can_pause_again_later(self):
+        commands = self.run_with_idle([self.LIMIT, 0.4, self.LIMIT])
+        self.assertEqual([c[0][2] for c in commands if c[0][0] == 'set_property'], [True, False, True])
+
+    def test_a_pause_by_the_person_is_left_alone(self):
+        values = [timed(100, pause=True), timed(100, pause=True)]
+        self.assertEqual(self.run_with_idle([self.LIMIT, self.LIMIT + 2], values=values), [])
+
+    def test_when_the_idle_time_cannot_be_told_nothing_happens(self):
+        with mock.patch.object(rt, '_mpv_ipc') as ipc:
+            self.watch([timed(100), timed(102)], sleep_seconds=self.LIMIT, idle_seconds=lambda: None)
+        ipc.assert_not_called()
+
+    def test_off_means_the_idle_time_is_not_even_read(self):
+        reader = mock.Mock(return_value=10 ** 6)
+        with mock.patch.object(rt, '_mpv_ipc') as ipc:
+            self.watch([timed(100), timed(102)], sleep_seconds=0, idle_seconds=reader)
+        reader.assert_not_called()
+        ipc.assert_not_called()
+
+    def test_a_pause_that_mpv_did_not_take_is_tried_again_at_the_next_poll(self):
+        results = iter([False, True, True])
+        self.commands = []
+        with mock.patch.object(rt, '_mpv_ipc', side_effect=lambda cmds, **k: self.commands.append(cmds) or next(results)):
+            self.watch([timed(100), timed(102), timed(104)], sleep_seconds=self.LIMIT, idle_seconds=lambda: self.LIMIT)
+        self.assertEqual(len(self.commands), 2)
+
+    def test_the_time_asleep_adds_nothing_to_what_was_played(self):
+        self.run_with_idle([0, self.LIMIT, self.LIMIT, self.LIMIT], values=[timed(100), timed(102), timed(102), timed(102)])
+        self.assertEqual(self.stopped[0]['played'], 2.0)
+
+
+class TestCountingAsWatchedByPlayedTime(unittest.TestCase):
+    def test_without_the_played_fraction_nothing_changes(self):
+        self.assertTrue(rt.counts_as_watched(95, 100))
+        self.assertTrue(rt.counts_as_watched(60, 10))
+        self.assertFalse(rt.counts_as_watched(60, 100))
+
+    def test_less_than_half_played_is_not_watched_however_far_the_playhead_got(self):
+        self.assertFalse(rt.counts_as_watched(99, 5, 0.1))
+        self.assertFalse(rt.counts_as_watched(99, 5, rt.WATCH_MIN_PLAYED_FRACTION - 0.01))
+
+    def test_half_or_more_played_and_at_the_end_is_watched(self):
+        self.assertTrue(rt.counts_as_watched(99, 5, rt.WATCH_MIN_PLAYED_FRACTION))
+        self.assertTrue(rt.counts_as_watched(95, 300, 0.9))
+
+    def test_playing_a_lot_but_stopping_early_is_not_watched(self):
+        self.assertFalse(rt.counts_as_watched(60, 900, 0.6))
+
+
+class TestResumePoint(unittest.TestCase):
+    def test_nowhere_for_a_file_that_was_watched_through(self):
+        self.assertIsNone(rt.resume_point(1300, watched=True))
+
+    def test_nowhere_for_a_file_that_hardly_started_or_has_no_position(self):
+        for position in (None, 0, 5, rt.RESUME_MIN_SECONDS - 0.1):
+            self.assertIsNone(rt.resume_point(position, watched=False), position)
+
+    def test_a_few_seconds_before_where_it_stopped(self):
+        self.assertEqual(rt.resume_point(754.0, watched=False), 754.0 - rt.RESUME_REWIND_SECONDS)
+        self.assertEqual(rt.resume_point(rt.RESUME_MIN_SECONDS, watched=False), rt.RESUME_MIN_SECONDS - rt.RESUME_REWIND_SECONDS)
+
+
+class TestLoadingWithAStart(unittest.TestCase):
+    def setUp(self):
+        rt._mpv_version_cache.clear()
+        self.addCleanup(rt._mpv_version_cache.clear)
+
+    def version(self, text):
+        return mock.patch.object(rt.subprocess, 'run', return_value=mock.Mock(stdout=text))
+
+    def load(self, start):
+        with mock.patch.object(rt, '_ensure_mpv', return_value=True), mock.patch.object(rt, '_mpv_ipc', return_value=True) as ipc:
+            self.assertTrue(rt._load_in_mpv('/v/a.mp4', 'T', start=start))
+        return ipc.call_args[0][0]
+
+    def test_a_new_mpv_gets_the_index_before_the_options(self):
+        with self.version('mpv 0.40.0 Copyright \u00a9 2000-2025 mpv/MPlayer/mplayer2 projects\n'):
+            self.assertEqual(self.load(95.04), [['set_property', 'force-media-title', 'T'],
+                                                ['loadfile', '/v/a.mp4', 'replace', -1, 'start=95.0']])
+
+    def test_an_mpv_older_than_0_38_gets_the_options_straight_after_the_flags(self):
+        with self.version('mpv 0.37.0 Copyright \u00a9 2000-2023 mpv/MPlayer/mplayer2 projects\n'):
+            self.assertEqual(self.load(95.0)[1], ['loadfile', '/v/a.mp4', 'replace', 'start=95.0'])
+
+    def test_the_version_forms(self):
+        for text, new in (('mpv 0.38.0', True), ('mpv v0.39.1-dirty', True), ('mpv 0.36.0', False), ('mpv 0.9.2', False),
+                          ('mpv 1.0.0', True), ('something else', True), ('', True)):
+            rt._mpv_version_cache.clear()
+            with self.version(text):
+                self.assertEqual(rt._mpv_loadfile_has_index(), new, text)
+
+    def test_a_version_that_cannot_be_asked_counts_as_new(self):
+        with mock.patch.object(rt.subprocess, 'run', side_effect=OSError('no mpv')):
+            self.assertTrue(rt._mpv_loadfile_has_index())
+
+    def test_the_version_is_asked_once(self):
+        with self.version('mpv 0.37.0') as run:
+            rt._mpv_loadfile_has_index()
+            rt._mpv_loadfile_has_index()
+        run.assert_called_once()
+
+    def test_without_a_start_the_command_is_what_it_always_was(self):
+        for start in (None, 0, 0.0):
+            self.assertEqual(self.load(start)[1], ['loadfile', '/v/a.mp4', 'replace'])
+
+
+class TestAFileReplacingAStream(unittest.TestCase):
+    def play(self, loaded=True, mpv=True, **kw):
+        with mock.patch.object(rt.shutil, 'which', return_value='/usr/bin/mpv' if mpv else None), \
+                mock.patch.object(rt, '_load_in_mpv', return_value=loaded) as load, \
+                mock.patch.object(rt, '_retire_stream') as retire, mock.patch.object(rt.subprocess, 'Popen'), \
+                mock.patch.object(rt.threading, 'Thread'):
+            result = rt.play_media_file('/v/a.mp4', 'T', mock.Mock(), **kw)
+        return result, load, retire
+
+    def test_the_stream_is_retired_once_the_file_is_in_the_window(self):
+        result, _load, retire = self.play()
+        self.assertTrue(result)
+        retire.assert_called_once_with()
+
+    def test_a_file_that_could_not_be_loaded_leaves_the_stream_alone(self):
+        result, _load, retire = self.play(loaded=False)
+        self.assertFalse(result)
+        retire.assert_not_called()
+
+    def test_without_mpv_there_is_no_window_to_take_over(self):
+        _result, _load, retire = self.play(mpv=False)
+        retire.assert_not_called()
+
+    def test_the_start_is_handed_to_mpv(self):
+        _result, load, _retire = self.play(start=95.0)
+        load.assert_called_once_with('/v/a.mp4', 'T', start=95.0)
+
+    def test_retiring_stops_streamlink_and_clears_the_playing_marker(self):
+        proc = mock.Mock()
+        proc.poll.return_value = None
+        rt._streamlink_proc, rt._playing = proc, (proc, 'Twitch', 'chan')
+        self.addCleanup(setattr, rt, '_playing', None)
+        self.addCleanup(setattr, rt, '_streamlink_proc', None)
+        rt._retire_stream()
+        proc.terminate.assert_called_once_with()
+        self.assertFalse(rt.is_stream_playing('Twitch', 'chan'))
+
+    def test_retiring_when_no_stream_was_playing_is_harmless(self):
+        rt._streamlink_proc = rt._playing = None
+        rt._retire_stream()
+
+
+class TestLoadingWhenTheStartIsRefused(unittest.TestCase):
+    def setUp(self):
+        rt._mpv_version_cache[:] = [(0, 40)]
+        self.addCleanup(rt._mpv_version_cache.clear)
+
+    def test_a_refused_start_falls_back_to_playing_from_the_beginning(self):
+        sent = []
+        answers = iter([False, True])  # the form with a start is refused, the plain one is taken
+        with mock.patch.object(rt, '_ensure_mpv', return_value=True), mock.patch.object(rt, '_log') as log, \
+                mock.patch.object(rt, '_mpv_ipc', side_effect=lambda cmds, **k: sent.append(cmds[1]) or next(answers)):
+            self.assertTrue(rt._load_in_mpv('/v/a.mp4', 'T', start=95.0))
+        self.assertEqual(sent, [['loadfile', '/v/a.mp4', 'replace', -1, 'start=95.0'], ['loadfile', '/v/a.mp4', 'replace']])
+        self.assertIn('from the beginning', log.call_args[0][0])
+
+    def test_with_no_start_a_refusal_is_just_a_failure_as_before(self):
+        with mock.patch.object(rt, '_ensure_mpv', return_value=True), mock.patch.object(rt.time_module, 'sleep'), \
+                mock.patch.object(rt, '_mpv_ipc', return_value=False) as ipc:
+            self.assertFalse(rt._load_in_mpv('/v/a.mp4', 'T'))
+        self.assertEqual(ipc.call_count, 2)

@@ -3,6 +3,7 @@
 import atexit
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -11,6 +12,7 @@ import time as time_module
 import webbrowser
 
 from .constants import YOUTUBE_CHECK_TIMEOUT_SECONDS
+from .desktop import x_idle_seconds
 from .log import _log
 
 
@@ -129,13 +131,39 @@ def _ensure_mpv():
         return False
 
 
-def _load_in_mpv(stream_url, title):
-    """Plays stream_url in the shared mpv window (replacing what's there)."""
+_mpv_version_cache = []  # [(major, minor) or None] once asked
+
+
+def _mpv_loadfile_has_index():
+    """mpv 0.38 put an index between loadfile's flags and its options; with an older
+    mpv the options come straight after the flags. True when the new form is wanted
+    (also when the version cannot be told: that is the one that will be common)."""
+    if not _mpv_version_cache:
+        try:
+            out = subprocess.run(['mpv', '--version'], capture_output=True, text=True, timeout=5).stdout
+            found = re.search(r'\bmpv v?(\d+)\.(\d+)', out)
+            _mpv_version_cache.append((int(found.group(1)), int(found.group(2))) if found else None)
+        except Exception:
+            _mpv_version_cache.append(None)
+    version = _mpv_version_cache[0]
+    return version is None or version >= (0, 38)
+
+
+def _load_in_mpv(stream_url, title, start=None):
+    """Plays stream_url in the shared mpv window (replacing what's there), from
+    `start` seconds in if given. If mpv does not take the start (a form of the command
+    it does not know), the file is played from the beginning rather than not at all."""
+    plain = ['loadfile', stream_url, 'replace']
+    load = plain
+    if start:
+        load = plain + ([-1] if _mpv_loadfile_has_index() else []) + [f'start={start:.1f}']
     for _attempt in range(2):  # 2nd try covers mpv quitting right after the probe
         if not _ensure_mpv():
             return False
-        if _mpv_ipc([['set_property', 'force-media-title', title],
-                     ['loadfile', stream_url, 'replace']]):
+        if _mpv_ipc([['set_property', 'force-media-title', title], load]):
+            return True
+        if load is not plain and _mpv_ipc([['set_property', 'force-media-title', title], plain]):
+            _log(f'mpv did not take start={start:.1f}; playing from the beginning')
             return True
         time_module.sleep(0.5)
     return False
@@ -177,63 +205,138 @@ WATCHED_PERCENT = 90.0
 WATCHED_REMAINING_SECONDS = 20.0
 
 
-def counts_as_watched(percent, remaining):
+WATCH_MAX_MISSES = 5  # polls in a row mpv may leave unanswered (waking from sleep) before it counts as gone
+WATCH_MIN_PLAYED_FRACTION = 0.5  # of a file that must have been played, not skipped to, to count as watched
+WATCH_MAX_PLAY_SPEED = 3  # a step between two polls of up to this many times real time is playing, not a seek
+RESUME_MIN_SECONDS = 20  # an unfinished file is resumed only if it got further than this
+RESUME_REWIND_SECONDS = 5  # and from this far before where it stopped, which is known only to a poll
+SLEEP_PROMPT = 'Still watching? Press any key to carry on'
+
+
+def counts_as_watched(percent, remaining, played_fraction=None):
     """Whether a playback that got as far as `percent` of the file, with `remaining`
     seconds left at its furthest point, was watched: through to the credits, or the
     last few seconds of anything that was at least half played. Polling is coarse,
-    so the very end of a short file is often never seen."""
+    so the very end of a short file is often never seen. With `played_fraction`, how
+    much of the file was actually played rather than skipped over, at least half of
+    it must have been: seeking to the end to find one's place is not watching."""
     if percent is None:
+        return False
+    if played_fraction is not None and played_fraction < WATCH_MIN_PLAYED_FRACTION:
         return False
     return percent >= WATCHED_PERCENT or (percent >= 50 and remaining is not None and remaining <= WATCHED_REMAINING_SECONDS)
 
 
-def _watch_local_playback(path, on_finished, poll=WATCH_POLL_SECONDS, total_seconds=None):
+def _watch_local_playback(path, on_finished, poll=WATCH_POLL_SECONDS, total_seconds=None,
+                          on_stopped=None, sleep_seconds=0, idle_seconds=None):
     """Follows `path` in the shared mpv until it is replaced or mpv quits, then calls
-    on_finished(furthest_percent, least_seconds_remaining) (None where never seen).
-    With total_seconds, how far it got is measured against that, since the length mpv
-    reports for a file that is still being downloaded is only an estimate."""
+    on_finished(furthest_percent, least_seconds_remaining) (None where never seen),
+    after on_stopped({'position', 'played', 'duration'}) in seconds: where it stopped,
+    how much of the file was played (steps of normal playback, not seeks; None if
+    mpv gave no times) and the length. With total_seconds, how far it got is measured
+    against that, since the length mpv reports for a file that is still being
+    downloaded is only an estimate.
+
+    mpv not answering is not taken as it having quit until it has failed
+    WATCH_MAX_MISSES polls in a row: a laptop waking from sleep does not answer
+    straight away, and giving up then would lose the rest of the film.
+
+    With sleep_seconds, playback is paused (with a question on screen) once that long
+    has passed without a key or mouse input, and carries on at the next one, so a film
+    that nobody is watching does not run to its end. idle_seconds() tells the time since
+    the last input (None when unknown)."""
     percent = remaining = None
     loaded = False
     started = time_module.monotonic()
+    misses = 0
+    position = played = None
+    duration = total_seconds
+    paused_by_us = False
+    idle_seconds = idle_seconds or x_idle_seconds
+    max_step = poll * WATCH_MAX_PLAY_SPEED + 1
     while True:
-        values = _mpv_get_properties(['path', 'percent-pos', 'time-remaining'] + (['time-pos'] if total_seconds else []))
-        if values is None:  # mpv is gone: it quits when the file ends
-            break
+        values = _mpv_get_properties(['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause'])
+        if values is None:
+            misses += 1
+            if misses >= WATCH_MAX_MISSES:
+                break  # mpv is gone: it quits when the file ends
+            time_module.sleep(poll)
+            continue
+        misses = 0
         if values.get('path') == path:
             loaded = True
             here, left = values.get('percent-pos'), values.get('time-remaining')
+            at = values.get('time-pos')
+            if isinstance(at, (int, float)):
+                if position is not None and 0 < at - position <= max_step:
+                    played += at - position
+                elif played is None:
+                    played = 0.0
+                position = at
+            if not total_seconds and isinstance(values.get('duration'), (int, float)) and values['duration'] > 0:
+                duration = values['duration']
             if total_seconds:
-                played = values.get('time-pos')
-                here = min(100.0, played * 100.0 / total_seconds) if isinstance(played, (int, float)) else None
-                left = max(0.0, total_seconds - played) if isinstance(played, (int, float)) else None
+                here = min(100.0, at * 100.0 / total_seconds) if isinstance(at, (int, float)) else None
+                left = max(0.0, total_seconds - at) if isinstance(at, (int, float)) else None
             if isinstance(here, (int, float)) and (percent is None or here > percent):
                 percent = here
             if isinstance(left, (int, float)) and (remaining is None or left < remaining):
                 remaining = left
+            if sleep_seconds:
+                idle = idle_seconds()
+                if idle is not None and idle >= sleep_seconds and not paused_by_us and not values.get('pause'):
+                    paused_by_us = bool(_mpv_ipc([['set_property', 'pause', True], ['show-text', SLEEP_PROMPT, 10000]]))
+                elif idle is not None and idle < sleep_seconds and paused_by_us:
+                    _mpv_ipc([['set_property', 'pause', False]])
+                    paused_by_us = False
         elif loaded or time_module.monotonic() - started > WATCH_LOAD_TIMEOUT_SECONDS:
             break  # another file took its place, or it never loaded
         time_module.sleep(poll)
+    if on_stopped:
+        on_stopped({'position': position, 'played': played, 'duration': duration})
     on_finished(percent, remaining)
 
 
-def play_media_file(path, title, on_finished=None, total_seconds=None):
-    """Plays a local file in the shared mpv window; subtitles saved next to it with
+def resume_point(position, watched):
+    """Where to carry on from next time, in seconds, or None: nowhere for a file that
+    was watched through or that got hardly anywhere, otherwise a few seconds before
+    where it stopped."""
+    if watched or not isinstance(position, (int, float)) or position < RESUME_MIN_SECONDS:
+        return None
+    return max(0.0, position - RESUME_REWIND_SECONDS)
+
+
+def play_media_file(path, title, on_finished=None, total_seconds=None, start=None, on_stopped=None, sleep_seconds=0):
+    """Plays a local file in the shared mpv window (replacing a stream or another
+    file in it, the way one stream replaces another); subtitles saved next to it with
     the same name load on their own. True when it was handed to a player. With
-    on_finished, a thread reports how far playback got (see _watch_local_playback;
-    total_seconds is the length of a file that is still being downloaded); without mpv
-    the file goes to the desktop's default player, untracked."""
+    `start`, from that many seconds in. With on_finished, a thread reports how far
+    playback got (see _watch_local_playback, which also says what on_stopped and
+    sleep_seconds do; total_seconds is the length of a file that is still being
+    downloaded); without mpv the file goes to the desktop's default player, untracked."""
     if not shutil.which('mpv'):
         try:
             subprocess.Popen(['xdg-open', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except OSError:
             return False
-    if not _load_in_mpv(path, title):
+    if not _load_in_mpv(path, title, start=start):
         return False
+    _retire_stream()  # a stream that was in the window has nothing left to serve
     if on_finished:
-        threading.Thread(target=_watch_local_playback, args=(path, on_finished), kwargs={'total_seconds': total_seconds},
+        threading.Thread(target=_watch_local_playback, args=(path, on_finished),
+                         kwargs={'total_seconds': total_seconds, 'on_stopped': on_stopped, 'sleep_seconds': sleep_seconds},
                          daemon=True).start()
     return True
+
+
+def _retire_stream():
+    """Called once a file has replaced a stream in the shared mpv: the stream's streamlink
+    is stopped (as when the next stream replaces it) and no row shows it as playing."""
+    global _playing
+    with _player_lock:
+        _playing = None
+    _stop_streamlink()
 
 
 def _stop_streamlink():

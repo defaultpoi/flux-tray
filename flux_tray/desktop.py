@@ -1,5 +1,7 @@
 """Desktop integration: sounds, fullscreen detection, editor and launcher."""
 
+import ctypes
+import ctypes.util
 import os
 import shutil
 import subprocess
@@ -11,6 +13,27 @@ from .log import _log
 
 
 NOTIFICATION_SOUND_FILE = os.path.join(CONFIG_DIR, 'notification.wav')  # no sound if absent
+
+
+def move_to_trash(path, root):
+    """Moves one file to the desktop's Trash, from where it can be put back; nothing is
+    erased. Only a regular file that lies inside `root` is touched: a link, a
+    directory, a path that leads outside `root` (a `..`, a link in the way) is refused.
+    Returns True when the file is no longer where it was (also when it was not
+    there to begin with) and False when it was left in place."""
+    try:
+        if not os.path.lexists(path):
+            return True
+        real, base = os.path.realpath(path), os.path.realpath(root)
+        if os.path.islink(path) or not os.path.isfile(path) or real == base \
+                or os.path.commonpath([real, base]) != base:
+            _log(f'not moving to the Trash, not a plain file inside {root}: {path}')
+            return False
+        Gio.File.new_for_path(real).trash(None)
+        return True
+    except Exception as error:  # GLib.Error when there is no Trash on that disk, OSError, ValueError
+        _log(f'could not move {path} to the Trash: {error!r}')
+        return False
 
 
 def run_launcher_command(command):
@@ -97,3 +120,55 @@ def edit_file_externally(path):
             subprocess.Popen([editor, path])
         except Exception:
             print(f"Couldn't open an editor — edit manually: {path}")
+
+
+class _XScreenSaverInfo(ctypes.Structure):
+    _fields_ = [('window', ctypes.c_ulong), ('state', ctypes.c_int), ('kind', ctypes.c_int),
+                ('til_or_since', ctypes.c_ulong), ('idle', ctypes.c_ulong), ('event_mask', ctypes.c_ulong)]
+
+
+_xss = None  # (library, display, root window, info) once opened, False when it cannot be
+_xss_lock = threading.Lock()
+
+
+def _open_xss():
+    """Connects to the X display and the screensaver extension, which keeps the time
+    of the last key or mouse input. False, with the reason logged, when it cannot."""
+    try:
+        x11_name, xss_name = ctypes.util.find_library('X11'), ctypes.util.find_library('Xss')
+        if not x11_name or not xss_name:
+            _log('idle time unavailable: libX11 or libXss (libXScrnSaver) not found')
+            return False
+        x11, xss = ctypes.CDLL(x11_name), ctypes.CDLL(xss_name)
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(_XScreenSaverInfo)
+        xss.XScreenSaverQueryInfo.restype = ctypes.c_int
+        xss.XScreenSaverQueryInfo.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(_XScreenSaverInfo)]
+        display = x11.XOpenDisplay(None)
+        if not display:
+            _log('idle time unavailable: no X display')
+            return False
+        return xss, display, x11.XDefaultRootWindow(display), xss.XScreenSaverAllocInfo()
+    except Exception as error:
+        _log(f'idle time unavailable: {error!r}')
+        return False
+
+
+def x_idle_seconds():
+    """Seconds since the last key or mouse input on the X display, or None when that
+    cannot be told (no X, no screensaver extension)."""
+    global _xss
+    with _xss_lock:
+        if _xss is None:
+            _xss = _open_xss()
+        if not _xss:
+            return None
+        xss, display, root, info = _xss
+        try:
+            return info.contents.idle / 1000.0 if xss.XScreenSaverQueryInfo(display, root, info) else None
+        except Exception as error:
+            _log(f'could not read the idle time: {error!r}')
+            return None

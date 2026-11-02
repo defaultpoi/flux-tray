@@ -1,5 +1,9 @@
 {
  "config": "[feeds]\nhttps://news.example/rss|Example News|10\nhttps://blog.example/atom|Example Blog|10\n\n[highlight]\nharbour\n\n[twitch]\ninterval=15\nquality=720p60,720p,best\nexamplechan|Example Channel\n\n[youtube]\n@examplebeta|Beta Show\n\n[media]\npath=~/videos\ninterval=60\nahead=0\nhttps://media.example/feed.xml|Example Podcast|newest\n",
+ "in_the_trash": [
+  "film.mkv"
+ ],
+ "left_in_the_media_folder": [],
  "media_json_sources": [
   "https://media.example/feed.xml"
  ],

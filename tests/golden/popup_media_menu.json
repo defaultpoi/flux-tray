@@ -55,7 +55,8 @@
      ],
      "sensitive": true,
      "text": "Remove all 2 fully watched",
-     "tooltip": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk.",
+     "tooltip": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk; a movie's file goes to the Trash.",
+     "tooltip_markup": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk; a movie&apos;s file goes to the Trash.",
      "type": "Button",
      "visible": false
     }
@@ -94,7 +95,7 @@
        "ellipsize": "none",
        "markup": false,
        "sensitive": true,
-       "text": "Remove from list",
+       "text": "Remove movie and its file",
        "type": "Label",
        "visible": true,
        "wrap": false,
@@ -105,8 +106,31 @@
       "text-button"
      ],
      "sensitive": true,
-     "text": "Remove from list",
-     "tooltip": "Takes this source out of [media] in config.conf. Downloaded files stay on disk.",
+     "text": "Remove movie and its file",
+     "tooltip": "Takes this movie out of [media] and moves its file to the Trash.",
+     "type": "Button",
+     "visible": false
+    },
+    {
+     "children": [
+      {
+       "ellipsize": "none",
+       "markup": false,
+       "sensitive": true,
+       "text": "I didn't finish it",
+       "type": "Label",
+       "visible": true,
+       "wrap": false,
+       "xalign": 0.5
+      }
+     ],
+     "classes": [
+      "text-button"
+     ],
+     "sensitive": true,
+     "text": "I didn't finish it",
+     "tooltip": "Puts \"Example Film\" back as not watched; the movie is not removed.",
+     "tooltip_markup": "Puts &quot;Example Film&quot; back as not watched; the movie is not removed.",
      "type": "Button",
      "visible": false
     },
@@ -128,7 +152,8 @@
      ],
      "sensitive": true,
      "text": "Remove all 2 fully watched",
-     "tooltip": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk.",
+     "tooltip": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk; a movie's file goes to the Trash.",
+     "tooltip_markup": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk; a movie&apos;s file goes to the Trash.",
      "type": "Button",
      "visible": false
     }
@@ -189,6 +214,29 @@
        "ellipsize": "none",
        "markup": false,
        "sensitive": true,
+       "text": "Mark as not watched",
+       "type": "Label",
+       "visible": true,
+       "wrap": false,
+       "xalign": 0.5
+      }
+     ],
+     "classes": [
+      "text-button"
+     ],
+     "sensitive": true,
+     "text": "Mark as not watched",
+     "tooltip": "Puts \"Example Series S01E02 Next\" back as not watched.",
+     "tooltip_markup": "Puts &quot;Example Series S01E02 Next&quot; back as not watched.",
+     "type": "Button",
+     "visible": false
+    },
+    {
+     "children": [
+      {
+       "ellipsize": "none",
+       "markup": false,
+       "sensitive": true,
        "text": "Remove all 2 fully watched",
        "type": "Label",
        "visible": true,
@@ -201,7 +249,8 @@
      ],
      "sensitive": true,
      "text": "Remove all 2 fully watched",
-     "tooltip": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk.",
+     "tooltip": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk; a movie's file goes to the Trash.",
+     "tooltip_markup": "Takes these out of [media]: Example Series, Example Film. Downloaded files stay on disk; a movie&apos;s file goes to the Trash.",
      "type": "Button",
      "visible": false
     }

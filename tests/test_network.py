@@ -48,6 +48,7 @@ class TestRunWhenOnline(unittest.TestCase):
             initial_media_check = rt.FluxTray.initial_media_check
         stub = Stub()
         stub.start_check_thread = stub.start_twitch_check = stub.start_youtube_check = stub.start_weather_fetch = stub.start_media_check = mock.Mock()
+        stub.remove_due_movies = mock.Mock()  # started on a thread of its own, so the calling thread still returns at once
         with mock.patch.object(rt, 'run_when_online') as run, mock.patch.object(rt, 'is_online') as probe:
             for name in ('initial_check', 'initial_twitch_check', 'initial_youtube_check', 'initial_weather_check', 'initial_media_check'):
                 self.assertFalse(getattr(stub, name)())

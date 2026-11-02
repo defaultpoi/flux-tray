@@ -91,8 +91,11 @@ def _clean_media_entry(entry):
     the right type; entries of the wrong shape inside lists are dropped."""
     def strings(value):
         return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+    def seconds(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
     files = entry.get('files')
     last = entry.get('last_watched')
+    resume = entry.get('resume')
     return {
         'title': entry['title'] if isinstance(entry.get('title'), str) else '',
         'episodes': [e for e in entry.get('episodes', []) if isinstance(e, dict) and isinstance(e.get('id'), str)]
@@ -103,6 +106,11 @@ def _clean_media_entry(entry):
         'files': {k: v for k, v in files.items() if isinstance(k, str) and isinstance(v, dict)
                   and isinstance(v.get('video'), str)} if isinstance(files, dict) else {},
         'last_watched': last if isinstance(last, dict) and isinstance(last.get('id'), str) else None,
+        # where playback of an unfinished episode stopped, in seconds, by episode id
+        'resume': {k: float(v) for k, v in resume.items() if isinstance(k, str) and seconds(v) and v > 0}
+        if isinstance(resume, dict) else {},
+        # when a watched movie is due to be removed (a time.time() value), None while it is not
+        'remove_at': float(entry['remove_at']) if seconds(entry.get('remove_at')) else None,
         'baselined': entry.get('baselined') is True,
     }
 

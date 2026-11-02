@@ -89,6 +89,14 @@ class Stub:
     _consumed_media_sources = rt.FluxTray._consumed_media_sources
     remove_consumed_media = rt.FluxTray.remove_consumed_media
     _media_menu_remove = rt.FluxTray._media_menu_remove
+    _drop_media_sources = rt.FluxTray._drop_media_sources
+    _set_media_resume = rt.FluxTray._set_media_resume
+    mark_media_unwatched = rt.FluxTray.mark_media_unwatched
+    _schedule_movie_removal = rt.FluxTray._schedule_movie_removal
+    _trash_source_files = rt.FluxTray._trash_source_files
+    _trash_episode_files = rt.FluxTray._trash_episode_files
+    remove_due_movies = rt.FluxTray.remove_due_movies
+    _prune_watched_files = rt.FluxTray._prune_watched_files
 
     def __init__(self):
         self.media = {'sources': {}}
@@ -123,9 +131,12 @@ class MediaCase(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
         self.sources = [(URL, None, None)]
-        self.settings = {'path': self.dir, 'interval': 3600, 'ahead': 2, 'screen': None}
+        self.settings = {'path': self.dir, 'interval': 3600, 'ahead': 2, 'behind': None, 'grace': 24 * 3600,
+                         'sleep': 0, 'screen': None}
+        self.movies = set()  # the sources marked `movie` in the config
         self.idle = []
         for name, value in (('load_media_sources', mock.Mock(side_effect=lambda: list(self.sources))),
+                            ('load_media_movies', mock.Mock(side_effect=lambda: set(self.movies))),
                             ('load_media_settings', mock.Mock(side_effect=lambda: dict(self.settings))),
                             ('save_media', mock.Mock())):
             patcher = mock.patch.object(rt, name, value)
@@ -574,7 +585,7 @@ class TestWatchingWhileItDownloads(MediaCase):
         stub.popup.hide.assert_called_once_with()
         stub._enqueue_media.assert_not_called()  # the download carries on
         play.call_args.kwargs['on_finished'](95.0, 5.0)
-        self.assertEqual(self.queued(stub, '_on_media_played'), [(URL, 'a', 95.0, 5.0)])
+        self.assertEqual(self.queued(stub, '_on_media_played'), [(URL, 'a', 95.0, 5.0, {}, None)])
 
     def test_with_too_little_downloaded_the_click_does_nothing(self):
         stub = self.stub(dict(self.DOWNLOADING), size=400_000)
@@ -1055,7 +1066,7 @@ class TestPlaying(MediaCase):
         with mock.patch.object(rt, 'play_media_file') as play:
             stub.on_media_row_clicked(URL)
         play.call_args.kwargs['on_finished'](95.0, 3.0)  # called from the watcher thread
-        self.assertEqual(self.queued(stub, '_on_media_played'), [(URL, 'a', 95.0, 3.0)])
+        self.assertEqual(self.queued(stub, '_on_media_played'), [(URL, 'a', 95.0, 3.0, {}, None)])
 
     def test_an_episode_that_is_not_downloaded_is_queued_at_the_front_not_played(self):
         stub = self.stub(ep('a', 1))
@@ -1448,3 +1459,427 @@ class TestRows(MediaCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+NOW = 1_793_000_000.0
+
+
+class TestDurationText(unittest.TestCase):
+    def test_the_largest_sensible_unit(self):
+        for seconds, text in ((20, '1 min'), (45 * 60, '45 min'), (59 * 60, '59 min'), (60 * 60, '1 h'), (90 * 60, '2 h'),
+                              (23 * 3600, '23 h'), (47 * 3600, '47 h'), (48 * 3600, '2 days'), (5 * 86400 + 3600, '5 days')):
+            self.assertEqual(rt.duration_text(seconds), text, seconds)
+
+
+class TestRowOfAMovieThatIsGoing(unittest.TestCase):
+    def view(self, **fields):
+        entry = entry_with(ep('f', 1), watched=['f'], title='Film')
+        entry.update(fields)
+        return rt.media_row_view('The Film', entry, None, False, None, now=NOW)
+
+    def test_a_watched_movie_that_is_to_be_removed_says_when_and_how_to_keep_it(self):
+        _name, text, stats, tooltip, color = self.view(remove_at=NOW + 23 * 3600)
+        self.assertEqual((text, stats, color), ('all watched', 'removed in 23 h', 'idle'))
+        self.assertIn('Removed with its file in 23 h', tooltip)
+        self.assertIn("I didn't finish it", tooltip)
+
+    def test_a_removal_that_is_due_says_a_minute(self):
+        self.assertEqual(self.view(remove_at=NOW - 500)[2], 'removed in 1 min')
+
+    def test_without_a_removal_due_the_row_is_as_it_was(self):
+        _name, text, stats, tooltip, _color = self.view()
+        self.assertEqual((text, stats, tooltip), ('all watched', '', ''))
+
+    def test_a_removal_is_not_mentioned_while_something_is_unwatched(self):
+        entry = entry_with(ep('a', 1), ep('b', 2), watched=['a'])
+        entry['remove_at'] = NOW + 3600
+        _name, _text, stats, tooltip, _color = rt.media_row_view('Show', entry, 'oldest', True, None, now=NOW)
+        self.assertNotIn('removed in', stats + tooltip)
+
+
+class TestPlayingFromWhereItStopped(TestWatchingWhileItDownloads):
+    """Clicking a row plays on from where an unfinished episode stopped, and hands over the
+    sleep timer; the end of playback is judged by what was played, not skipped."""
+
+    def clicked(self, resume=None, sleep=0):
+        stub = self.stub(None, 3_000_000)
+        stub.media['sources'][URL]['files']['a'] = {'video': self.touch('a.mkv'), 'subs': []}
+        stub.media['sources'][URL]['resume'] = {'a': resume} if resume else {}
+        self.settings['sleep'] = sleep
+        with mock.patch.object(rt, 'play_media_file') as play:
+            stub.on_media_row_clicked(URL)
+        return stub, play
+
+    def test_an_episode_that_stopped_part_way_starts_there(self):
+        _stub, play = self.clicked(resume=754.0)
+        self.assertEqual(play.call_args.kwargs['start'], 754.0)
+
+    def test_one_that_never_stopped_part_way_starts_where_it_always_did(self):
+        _stub, play = self.clicked()
+        self.assertIsNone(play.call_args.kwargs['start'])
+
+    def test_the_sleep_timer_setting_goes_to_the_player(self):
+        self.assertEqual(self.clicked(sleep=1800)[1].call_args.kwargs['sleep_seconds'], 1800)
+        self.assertEqual(self.clicked(sleep=0)[1].call_args.kwargs['sleep_seconds'], 0)
+
+    def test_where_it_stopped_reaches_the_end_of_playback_with_where_it_started(self):
+        stub, play = self.clicked(resume=600.0)
+        play.call_args.kwargs['on_stopped']({'position': 700.0, 'played': 95.0, 'duration': 1320.0})
+        play.call_args.kwargs['on_finished'](53.0, 620.0)
+        self.assertEqual(self.queued(stub, '_on_media_played'),
+                         [(URL, 'a', 53.0, 620.0, {'position': 700.0, 'played': 95.0, 'duration': 1320.0}, 600.0)])
+
+
+class TestWhatPlaybackLeavesBehind(MediaCase):
+    def stub(self, url=URL, **fields):
+        stub = Stub()
+        stub.media['sources'][url] = entry_with(ep('a', 1), ep('b', 2), **fields)
+        stub._plan_media_downloads = mock.Mock()
+        stub._refresh_media_rows = mock.Mock()
+        stub._schedule_movie_removal = mock.Mock()
+        return stub
+
+    def test_watched_through_is_marked_and_forgets_where_it_stopped(self):
+        stub = self.stub()
+        stub.media['sources'][URL]['resume'] = {'a': 600.0, 'b': 30.0}
+        stub._on_media_played(URL, 'a', 99.0, 4.0, {'position': 1316.0, 'played': 1300.0, 'duration': 1320.0}, None)
+        entry = stub.media['sources'][URL]
+        self.assertEqual((entry['watched'], entry['resume']), (['a'], {'b': 30.0}))
+        stub._schedule_movie_removal.assert_not_called()
+
+    def test_stopping_part_way_remembers_the_place_a_few_seconds_back(self):
+        stub = self.stub()
+        stub._on_media_played(URL, 'a', 41.0, 780.0, {'position': 540.0, 'played': 540.0, 'duration': 1320.0}, None)
+        entry = stub.media['sources'][URL]
+        self.assertEqual((entry['watched'], entry['resume']), ([], {'a': 540.0 - rt.RESUME_REWIND_SECONDS}))
+        self.save_media.assert_called_with(stub.media)
+
+    def test_seeking_to_the_end_is_not_watching(self):
+        stub = self.stub()
+        stub._on_media_played(URL, 'a', 99.0, 20.0, {'position': 1500.0, 'played': 120.0, 'duration': 7200.0}, None)
+        entry = stub.media['sources'][URL]
+        self.assertEqual(entry['watched'], [])
+        self.assertEqual(entry['resume'], {'a': 1495.0})
+
+    def test_the_part_before_a_resume_counts_as_seen_when_the_rest_is_watched(self):
+        stub = self.stub()
+        stub._on_media_played(URL, 'a', 99.0, 10.0, {'position': 7190.0, 'played': 1100.0, 'duration': 7200.0}, 6000.0)
+        self.assertEqual(stub.media['sources'][URL]['watched'], ['a'])
+
+    def test_stopping_before_it_got_anywhere_forgets_an_old_place(self):
+        stub = self.stub()
+        stub.media['sources'][URL]['resume'] = {'a': 600.0}
+        stub._on_media_played(URL, 'a', 1.0, 1300.0, {'position': 8.0, 'played': 8.0, 'duration': 1320.0}, None)
+        self.assertEqual(stub.media['sources'][URL]['resume'], {})
+
+    def test_playback_that_never_loaded_leaves_the_old_place_alone(self):
+        stub = self.stub()
+        stub.media['sources'][URL]['resume'] = {'a': 600.0}
+        stub._on_media_played(URL, 'a', None, None, {'position': None, 'played': None, 'duration': None}, 600.0)
+        self.assertEqual(stub.media['sources'][URL]['resume'], {'a': 600.0})
+        self.save_media.assert_not_called()
+
+    def test_an_unchanged_place_is_not_saved_again(self):
+        stub = self.stub()
+        stub.media['sources'][URL]['resume'] = {'a': 535.0}
+        stub._on_media_played(URL, 'a', 41.0, 780.0, {'position': 540.0, 'played': 10.0, 'duration': 1320.0}, 535.0)
+        self.save_media.assert_not_called()
+
+    def test_without_the_details_the_furthest_point_alone_decides_as_before(self):
+        stub = self.stub()
+        stub._on_media_played(URL, 'a', 95.0, 30.0)
+        self.assertEqual(stub.media['sources'][URL]['watched'], ['a'])
+
+    def test_a_movie_watched_through_is_set_to_be_removed(self):
+        self.movies = {URL}
+        stub = self.stub()
+        stub._on_media_played(URL, 'a', 99.0, 4.0, {'position': 1316.0, 'played': 1300.0, 'duration': 1320.0}, None)
+        stub._schedule_movie_removal.assert_called_once_with(URL)
+
+    def test_a_movie_that_was_not_watched_through_is_not(self):
+        self.movies = {URL}
+        stub = self.stub()
+        stub._on_media_played(URL, 'a', 40.0, 800.0, {'position': 530.0, 'played': 530.0, 'duration': 1320.0}, None)
+        stub._schedule_movie_removal.assert_not_called()
+
+
+class TestPuttingAnEpisodeBack(MediaCase):
+    def stub(self, **fields):
+        stub = Stub()
+        stub.media['sources'][URL] = entry_with(ep('a', 1), ep('b', 2), watched=['a', 'b'],
+                                                last={'id': 'b', 'title': 'Show S01E02 b', 'at': 5.0}, **fields)
+        stub._plan_media_downloads = mock.Mock()
+        stub._refresh_media_rows = mock.Mock()
+        return stub
+
+    def test_the_episode_is_unwatched_and_next_in_line_again(self):
+        stub = self.stub()
+        self.assertTrue(stub.mark_media_unwatched(URL, 'b'))
+        entry = stub.media['sources'][URL]
+        self.assertEqual((entry['watched'], entry['last_watched']), (['a'], None))
+        self.assertEqual(rt.upcoming(entry['episodes'], entry['watched'], 'oldest', 1)[0]['id'], 'b')
+        self.save_media.assert_called_with(stub.media)
+        stub._plan_media_downloads.assert_called_once_with()
+        stub._refresh_media_rows.assert_called_once_with()
+
+    def test_an_earlier_episode_leaves_the_last_watched_alone(self):
+        stub = self.stub()
+        stub.mark_media_unwatched(URL, 'a')
+        self.assertEqual(stub.media['sources'][URL]['last_watched']['id'], 'b')
+
+    def test_a_movie_waiting_to_be_removed_is_kept(self):
+        stub = self.stub()
+        stub.media['sources'][URL]['remove_at'] = NOW + 3600
+        stub.mark_media_unwatched(URL, 'b')
+        self.assertIsNone(stub.media['sources'][URL]['remove_at'])
+
+    def test_an_episode_that_was_not_watched_changes_nothing(self):
+        stub = self.stub()
+        stub.media['sources'][URL]['watched'] = ['a']
+        self.assertFalse(stub.mark_media_unwatched(URL, 'b'))
+        self.assertFalse(stub.mark_media_unwatched('https://nowhere.example/', 'b'))
+        self.save_media.assert_not_called()
+
+    def test_the_menu_button_closes_the_menu_before_it_acts(self):
+        order = []
+        stub = self.stub()
+        stub.mark_media_unwatched = mock.Mock(side_effect=lambda *a: order.append(('unwatch', a)))
+        popover = mock.Mock()
+        popover.popdown.side_effect = lambda: order.append('popdown')
+        rt.FluxTray._media_menu_unwatch(stub, None, popover, URL, 'b')
+        self.assertEqual(order, ['popdown', ('unwatch', (URL, 'b'))])
+
+
+class TestKeepingOnlySomeWatchedFiles(MediaCase):
+    """`behind`: only that many of the most recently watched episodes keep their files."""
+
+    def setUp(self):
+        super().setUp()
+        self.trashed = []
+
+        def trash(path, root):
+            self.trashed.append((os.path.basename(path), root))
+            os.remove(path)
+            return path not in self.refuse
+        self.refuse = set()
+        patcher = mock.patch.object(rt, 'move_to_trash', side_effect=trash)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def stub(self, watched, episodes=('a', 'b', 'c', 'd', 'e'), url=URL):
+        os.makedirs(os.path.join(self.dir, 'Show'), exist_ok=True)
+        files = {i: {'video': self.touch(f'Show/{i}.mkv'), 'subs': [self.touch(f'Show/{i}.en.srt')]} for i in episodes}
+        stub = Stub()
+        stub.media['sources'][url] = entry_with(*(ep(i, n + 1) for n, i in enumerate(episodes)), watched=watched, files=files)
+        stub._refresh_media_rows = mock.Mock()
+        return stub
+
+    def left(self):
+        return sorted(os.listdir(os.path.join(self.dir, 'Show'))) if os.path.isdir(os.path.join(self.dir, 'Show')) else []
+
+    def test_without_the_setting_nothing_is_ever_deleted(self):
+        stub = self.stub(['a', 'b', 'c', 'd'])
+        stub._prune_watched_files(URL)
+        self.assertEqual(self.trashed, [])
+        self.assertEqual(len(stub.media['sources'][URL]['files']), 5)
+
+    def test_the_oldest_watched_go_to_the_trash_with_their_subtitles(self):
+        self.settings['behind'] = 2
+        stub = self.stub(['a', 'b', 'c', 'd'])
+        stub._prune_watched_files(URL)
+        self.assertEqual(sorted(name for name, _ in self.trashed), ['a.en.srt', 'a.mkv', 'b.en.srt', 'b.mkv'])
+        self.assertEqual({root for _, root in self.trashed}, {self.dir})  # nothing outside the media folder is ever asked for
+        self.assertEqual(set(stub.media['sources'][URL]['files']), {'c', 'd', 'e'})
+        self.assertEqual(self.left(), ['c.en.srt', 'c.mkv', 'd.en.srt', 'd.mkv', 'e.en.srt', 'e.mkv'])
+        self.save_media.assert_called_with(stub.media)
+
+    def test_the_watched_order_decides_not_the_episode_order(self):
+        self.settings['behind'] = 1
+        stub = self.stub(['d', 'a', 'c'])  # watched in this order
+        stub._prune_watched_files(URL)
+        self.assertEqual(set(stub.media['sources'][URL]['files']), {'b', 'e', 'c'})
+
+    def test_episodes_not_watched_yet_keep_their_files_whatever_the_setting(self):
+        self.settings['behind'] = 0
+        stub = self.stub(['a', 'b'])
+        stub._prune_watched_files(URL)
+        self.assertEqual(set(stub.media['sources'][URL]['files']), {'c', 'd', 'e'})
+
+    def test_zero_keeps_no_watched_file(self):
+        self.settings['behind'] = 0
+        stub = self.stub(['a', 'b', 'c', 'd', 'e'])
+        stub._prune_watched_files(URL)
+        self.assertEqual(stub.media['sources'][URL]['files'], {})
+        self.assertEqual(self.left(), [])
+
+    def test_fewer_watched_than_the_setting_deletes_nothing(self):
+        self.settings['behind'] = 3
+        stub = self.stub(['a', 'b'])
+        stub._prune_watched_files(URL)
+        self.assertEqual(self.trashed, [])
+
+    def test_they_stay_watched_so_they_are_not_downloaded_again(self):
+        self.settings['behind'] = 1
+        stub = self.stub(['a', 'b', 'c'])
+        stub._prune_watched_files(URL)
+        entry = stub.media['sources'][URL]
+        self.assertEqual(entry['watched'], ['a', 'b', 'c'])
+        self.assertEqual([e['id'] for e in rt.upcoming(entry['episodes'], entry['watched'], 'oldest', 5)], ['d', 'e'])
+
+    def test_a_file_that_cannot_go_to_the_trash_is_kept_in_the_state_too(self):
+        self.settings['behind'] = 1
+        stub = self.stub(['a', 'b', 'c'])
+        self.refuse = {os.path.join(self.dir, 'Show', 'a.mkv')}
+        stub._prune_watched_files(URL)
+        self.assertEqual(set(stub.media['sources'][URL]['files']), {'a', 'c', 'd', 'e'})
+
+    def test_a_movie_is_not_pruned_it_has_its_own_removal(self):
+        self.settings['behind'] = 0
+        self.movies = {URL}
+        stub = self.stub(['a', 'b'])
+        stub._prune_watched_files(URL)
+        self.assertEqual(self.trashed, [])
+
+    def test_a_source_that_is_gone_is_nothing_to_prune(self):
+        self.settings['behind'] = 0
+        Stub()._prune_watched_files('https://nowhere.example/')
+        self.assertEqual(self.trashed, [])
+
+    def test_watching_an_episode_starts_the_pruning_in_the_background(self):
+        stub = self.stub(['a'])
+        stub._plan_media_downloads = mock.Mock()
+        with mock.patch.object(rt.threading, 'Thread') as thread:
+            stub.mark_media_watched(URL, 'b')
+        self.assertEqual(thread.call_args.kwargs['target'], stub._prune_watched_files)
+        self.assertEqual(thread.call_args.kwargs['args'], (URL,))
+        thread.return_value.start.assert_called_once_with()
+
+
+class TestARemovedMovie(MediaCase):
+    FILM = 'https://archive.org/details/film'
+
+    def setUp(self):
+        super().setUp()
+        self.sources = [(self.FILM, 'The Film', None), (URL, None, None)]
+        self.movies = {self.FILM}
+        self.trashed, self.refuse = [], set()
+
+        def trash(path, root):
+            self.trashed.append(os.path.basename(path))
+            if path in self.refuse:
+                return False
+            os.remove(path)
+            return True
+        patcher = mock.patch.object(rt, 'move_to_trash', side_effect=trash)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        def remove(urls):
+            self.sources = [s for s in self.sources if s[0] not in urls]
+        patcher = mock.patch.object(rt, 'remove_media_sources', side_effect=remove)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.makedirs(os.path.join(self.dir, 'The Film'))
+        self.video, self.subs = self.touch('The Film/film.mkv'), self.touch('The Film/film.en.srt')
+        self.stub = Stub()
+        self.stub.media['sources'] = {
+            self.FILM: entry_with(ep('f', 1), watched=['f'], title='Film', files={'f': {'video': self.video, 'subs': [self.subs]}}),
+            URL: entry_with(ep('a', 1), watched=['a'], title='Show'),
+        }
+        self.stub._media_rows_removed = mock.Mock()
+        self.stub._refresh_media_rows = mock.Mock()
+
+    def due(self, seconds_ago=10):
+        self.stub.media['sources'][self.FILM]['remove_at'] = time_now() - seconds_ago
+
+    def test_watching_it_through_sets_a_time_after_the_grace_period(self):
+        self.settings['grace'] = 6 * 3600
+        with mock.patch.object(rt.time_module, 'time', return_value=NOW):
+            self.stub._schedule_movie_removal(self.FILM)
+        self.assertEqual(self.stub.media['sources'][self.FILM]['remove_at'], NOW + 6 * 3600)
+        self.assertEqual(self.trashed, [])
+        self.save_media.assert_called_with(self.stub.media)
+        self.stub._refresh_media_rows.assert_called_once_with()
+
+    def test_without_a_grace_period_it_goes_at_once(self):
+        self.settings['grace'] = 0
+        self.stub._schedule_movie_removal(self.FILM)
+        self.assertEqual(sorted(self.trashed), ['film.en.srt', 'film.mkv'])
+        self.assertNotIn(self.FILM, self.stub.media['sources'])
+
+    def test_when_the_time_has_come_the_file_the_line_and_the_memory_of_it_all_go(self):
+        self.due()
+        gone = self.stub.remove_due_movies()
+        self.assertEqual(gone, [self.FILM])
+        self.assertEqual(sorted(self.trashed), ['film.en.srt', 'film.mkv'])
+        self.assertEqual([s[0] for s in self.sources], [URL])
+        self.assertEqual(set(self.stub.media['sources']), {URL})
+        self.assertEqual(self.queued(self.stub, '_media_rows_removed'), [([self.FILM],)])
+        self.assertFalse(os.path.exists(os.path.join(self.dir, 'The Film')))  # and the folder it leaves empty
+
+    def test_before_the_time_nothing_happens(self):
+        self.stub.media['sources'][self.FILM]['remove_at'] = time_now() + 3600
+        self.assertEqual(self.stub.remove_due_movies(), [])
+        self.assertEqual(self.trashed, [])
+        self.assertIn(self.FILM, self.stub.media['sources'])
+
+    def test_a_movie_not_watched_through_is_never_removed(self):
+        self.due()
+        self.stub.media['sources'][self.FILM]['watched'] = []
+        self.assertEqual(self.stub.remove_due_movies(), [])
+        self.assertEqual(self.trashed, [])
+
+    def test_a_source_that_is_not_marked_a_movie_is_never_removed_this_way(self):
+        self.stub.media['sources'][URL]['remove_at'] = time_now() - 10
+        self.assertEqual(self.stub.remove_due_movies(), [])
+        self.assertIn(URL, self.stub.media['sources'])
+
+    def test_a_movie_whose_marker_was_taken_out_of_the_config_is_left(self):
+        self.due()
+        self.movies = set()
+        self.assertEqual(self.stub.remove_due_movies(), [])
+        self.assertEqual(self.trashed, [])
+
+    def test_a_file_that_cannot_go_to_the_trash_keeps_the_movie_and_waits_an_hour(self):
+        self.due()
+        self.refuse = {self.video}
+        with mock.patch.object(rt.time_module, 'time', return_value=NOW):
+            self.stub.media['sources'][self.FILM]['remove_at'] = NOW - 5
+            self.assertEqual(self.stub.remove_due_movies(), [])
+        entry = self.stub.media['sources'][self.FILM]
+        self.assertEqual(entry['remove_at'], NOW + 3600)
+        self.assertIn(self.FILM, [s[0] for s in self.sources])
+        self.assertEqual(entry['files'].keys(), {'f'})  # still listed: the video is still there
+
+    def test_removing_by_hand_from_the_menu_takes_the_file_too(self):
+        gone = self.stub.remove_consumed_media([self.FILM])
+        self.assertEqual(gone, [self.FILM])
+        self.assertEqual(sorted(self.trashed), ['film.en.srt', 'film.mkv'])
+        self.stub._media_rows_removed.assert_called_once_with([self.FILM])
+
+    def test_removing_by_hand_a_movie_whose_file_cannot_go_leaves_it_as_it_is(self):
+        self.refuse = {self.video}
+        self.assertEqual(self.stub.remove_consumed_media([self.FILM]), [])
+        self.assertIn(self.FILM, [s[0] for s in self.sources])
+        self.assertIn(self.FILM, self.stub.media['sources'])
+
+    def test_removing_a_series_by_hand_leaves_its_files_alone(self):
+        self.stub.media['sources'][URL]['files'] = {'a': {'video': self.touch('a.mkv'), 'subs': []}}
+        self.assertEqual(self.stub.remove_consumed_media([URL]), [URL])
+        self.assertEqual(self.trashed, [])
+        self.assertTrue(os.path.exists(os.path.join(self.dir, 'a.mkv')))
+
+    def test_the_media_checks_start_by_removing_what_is_due(self):
+        for method in ('initial_media_check', 'periodic_media_check'):
+            stub = Stub()
+            stub.remove_due_movies = mock.Mock()
+            stub.start_media_check = stub.periodic_media_check = mock.Mock()
+            with mock.patch.object(rt.threading, 'Thread') as thread, mock.patch.object(rt, 'run_when_online'), \
+                    mock.patch.object(rt.GLib, 'timeout_add_seconds'):
+                getattr(rt.FluxTray, method)(stub)
+            self.assertEqual(thread.call_args.kwargs['target'], stub.remove_due_movies, method)
+            thread.return_value.start.assert_called_once_with()
+
+
+def time_now():
+    return rt.time_module.time()

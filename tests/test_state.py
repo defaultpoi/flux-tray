@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import unittest
 from unittest import mock
 
@@ -253,7 +254,8 @@ class TestMediaState(TmpConfigCase):
 
     def test_a_new_entry_has_every_field_the_code_reads(self):
         self.assertEqual(rt.new_media_entry(), {'title': '', 'episodes': [], 'known': [], 'new': [], 'watched': [],
-                                                'files': {}, 'last_watched': None, 'baselined': False})
+                                                'files': {}, 'last_watched': None, 'resume': {}, 'remove_at': None,
+                                                'baselined': False})
 
     def test_fields_of_the_wrong_type_are_repaired(self):
         self.write({'sources': {'https://x.example/f': {
@@ -362,3 +364,36 @@ class TestMergeFeedCheck(unittest.TestCase):
         state = {}
         self.assertEqual(self.merge(state), ([], []))
         self.assertEqual(state, {'seen': {}, 'last_checked': {}})
+
+
+class TestMediaEntryResumeAndRemoval(unittest.TestCase):
+    def clean(self, **fields):
+        return rt._clean_media_entry({'title': 'T', 'episodes': [], **fields})
+
+    def test_a_new_entry_has_no_resume_points_and_no_removal_due(self):
+        entry = rt.new_media_entry()
+        self.assertEqual((entry['resume'], entry['remove_at']), ({}, None))
+
+    def test_resume_points_are_kept_as_seconds_by_episode(self):
+        self.assertEqual(self.clean(resume={'e1': 754, 'e2': 12.5})['resume'], {'e1': 754.0, 'e2': 12.5})
+
+    def test_a_resume_point_that_is_not_a_positive_finite_number_is_dropped(self):
+        resume = {'a': 0, 'b': -3, 'c': 'soon', 'd': None, 'e': True, 'f': float('inf'), 'g': float('nan'), 5: 10, 'ok': 60}
+        self.assertEqual(self.clean(resume=resume)['resume'], {'ok': 60.0})
+
+    def test_a_resume_value_of_the_wrong_shape_is_an_empty_one(self):
+        for bad in (None, [], 'x', 7):
+            self.assertEqual(self.clean(resume=bad)['resume'], {})
+
+    def test_remove_at_is_a_time_or_none(self):
+        self.assertEqual(self.clean(remove_at=1_793_000_000)['remove_at'], 1_793_000_000.0)
+        for bad in (None, 'tomorrow', True, float('inf'), float('nan'), [1]):
+            self.assertIsNone(self.clean(remove_at=bad)['remove_at'])
+
+    def test_both_survive_a_save_and_a_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'media.json')
+            with mock.patch.object(rt, 'MEDIA_FILE', path):
+                rt.save_media({'sources': {'https://x.example/f': self.clean(resume={'e1': 90}, remove_at=5.0)}})
+                entry = rt.load_media()['sources']['https://x.example/f']
+        self.assertEqual((entry['resume'], entry['remove_at']), ({'e1': 90.0}, 5.0))

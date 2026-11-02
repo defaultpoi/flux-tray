@@ -28,6 +28,7 @@ import time
 NOW = 1_793_000_000  # a fixed 'now' (late October 2026) so elapsed times read the same every run
 HOME = tempfile.mkdtemp(prefix='flux-tray-golden-')
 os.environ['HOME'] = HOME
+os.environ['XDG_DATA_HOME'] = HOME + '/.local/share'  # where the desktop Trash is: never the real one
 os.environ.pop('FLUX_TRAY_DEBUG', None)
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
@@ -98,13 +99,19 @@ if SCENARIO == 'quiet':
     MEDIA = {'sources': {}}
 elif SCENARIO in ('media_menu', 'media_removed'):
     import copy
-    CONFIG += 'https://media.example/film.xml|Example Film|oldest\n'
+    CONFIG += 'https://media.example/film.xml|Example Film|movie\n'
     STATE = {'seen': {}, 'unread': [], 'read_later': STATE['read_later']}
     MEDIA = copy.deepcopy(MEDIA)
     MEDIA['sources']['https://media.example/series.xml']['watched'] = ['ep1', 'ep2']
+    MEDIA['sources']['https://media.example/series.xml']['last_watched'] = {
+        'id': 'ep2', 'title': 'Example Series S01E02 Next', 'at': NOW - 100}
+    film_file = pathlib.Path(HOME, 'videos', 'Example Film', 'film.mkv')  # a real file, for the Trash
+    film_file.parent.mkdir(parents=True)
+    film_file.write_bytes(b'not really a film')
     MEDIA['sources']['https://media.example/film.xml'] = {
         'title': 'Example Film', 'baselined': True, 'episodes': [episode(1, 'Example Film', '2026-08-01')],
-        'known': ['ep1'], 'new': [], 'watched': ['ep1'], 'files': {}, 'last_watched': None}
+        'known': ['ep1'], 'new': [], 'watched': ['ep1'], 'files': {'ep1': {'video': str(film_file), 'subs': []}},
+        'last_watched': {'id': 'ep1', 'title': 'Example Film', 'at': NOW - 3600}, 'remove_at': NOW + 5 * 3600}
 elif SCENARIO != 'full':
     raise SystemExit(f'unknown scenario {SCENARIO!r}')
 
@@ -198,8 +205,11 @@ def media_scenario(tray):
     button = next(w for w in walk(menu) if isinstance(w, Gtk.Button) and (w.get_label() or '').startswith('Remove all'))
     button.clicked()
     pump()
+    trash = pathlib.Path(HOME, '.local', 'share', 'Trash', 'files')
     return {'config': (config_dir / 'config.conf').read_text(),
             'media_json_sources': sorted(json.loads((config_dir / 'media.json').read_text())['sources']),
+            'in_the_trash': sorted(p.name for p in trash.iterdir()) if trash.exists() else [],
+            'left_in_the_media_folder': sorted(str(p.relative_to(HOME)) for p in pathlib.Path(HOME, 'videos').rglob('*')),
             'popup': describe(tray.popup)}
 
 

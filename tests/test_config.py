@@ -536,10 +536,59 @@ class TestFetchAlertsBg(TmpConfigCase):
 
 
 class TestMediaConfig(TmpConfigCase):
+    def setting(self, name, value):
+        self.conf(f'[media]\n{name}={value}\n')
+        return rt.load_media_settings()[name]
+
+    def test_behind_is_how_many_watched_episodes_are_kept_and_unset_means_all(self):
+        self.assertIsNone(self.setting('behind', ''))
+        self.assertIsNone(self.setting('behind', 'many'))
+        self.assertEqual(self.setting('behind', '0'), 0)
+        self.assertEqual(self.setting('behind', '3'), 3)
+        self.assertEqual(self.setting('behind', '-2'), 0)
+        self.assertEqual(self.setting('behind', '99999'), rt.MAX_MEDIA_BEHIND)
+
+    def test_grace_is_hours_before_a_watched_movie_goes_and_defaults_to_a_day(self):
+        self.assertEqual(self.setting('grace', ''), 24 * 3600)
+        self.assertEqual(self.setting('grace', 'soon'), 24 * 3600)
+        self.assertEqual(self.setting('grace', '0'), 0)
+        self.assertEqual(self.setting('grace', '12'), 12 * 3600)
+        self.assertEqual(self.setting('grace', '1.5'), 5400)
+        self.assertEqual(self.setting('grace', '-4'), 0)
+
+    def test_sleep_is_minutes_without_input_and_off_unless_given(self):
+        self.assertEqual(self.setting('sleep', ''), 0)
+        self.assertEqual(self.setting('sleep', 'x'), 0)
+        self.assertEqual(self.setting('sleep', '0'), 0)
+        self.assertEqual(self.setting('sleep', '-5'), 0)
+        self.assertEqual(self.setting('sleep', '45'), 45 * 60)
+        self.assertEqual(self.setting('sleep', '1'), rt.MIN_MEDIA_SLEEP_MINUTES * 60)  # not a nag every minute
+
+    def test_the_new_settings_are_not_taken_for_sources(self):
+        self.conf('[media]\nbehind=2\ngrace=12\nsleep=30\nhttps://example.com/pod.xml\n')
+        self.assertEqual([u for u, _n, _o in rt.load_media_sources()], ['https://example.com/pod.xml'])
+
+    def test_a_third_column_of_movie_marks_a_film_and_leaves_the_order_alone(self):
+        self.conf('[media]\nhttps://archive.org/details/film|The Film|movie\nhttps://example.com/pod.xml|Pod|oldest\n'
+                  'https://archive.org/details/other|Other|MOVIE\nhttps://example.com/plain.xml\n')
+        self.assertEqual(rt.load_media_movies(), {'https://archive.org/details/film', 'https://archive.org/details/other'})
+        self.assertEqual(rt.load_media_sources(), [
+            ('https://archive.org/details/film', 'The Film', None),
+            ('https://example.com/pod.xml', 'Pod', 'oldest'),
+            ('https://archive.org/details/other', 'Other', None),
+            ('https://example.com/plain.xml', None, None)])
+
+    def test_no_movies_without_the_marker(self):
+        self.conf('[media]\nhttps://example.com/pod.xml|Pod|newest\nhttps://example.com/b.xml\n')
+        self.assertEqual(rt.load_media_movies(), set())
+        self.conf('[feeds]\nhttps://news.example/rss\n')
+        self.assertEqual(rt.load_media_movies(), set())
+
     def test_defaults_without_a_section(self):
         self.conf('[feeds]\nhttps://example.com/feed.xml\n')
         self.assertEqual(rt.load_media_settings(),
-                         {'path': os.path.expanduser('~/videos'), 'interval': 3600, 'ahead': 2, 'ytdlp': [], 'screen': None})
+                         {'path': os.path.expanduser('~/videos'), 'interval': 3600, 'ahead': 2, 'behind': None,
+                          'grace': 24 * 3600, 'sleep': 0, 'ytdlp': [], 'screen': None})
         self.assertEqual(rt.load_media_sources(), [])
 
     def test_defaults_without_a_config_file(self):
@@ -548,7 +597,8 @@ class TestMediaConfig(TmpConfigCase):
 
     def test_settings_are_read_and_the_path_is_expanded(self):
         self.conf('[media]\npath=~/shows\ninterval=30\nahead=4\n')
-        self.assertEqual(rt.load_media_settings(), {'path': os.path.expanduser('~/shows'), 'interval': 1800, 'ahead': 4, 'ytdlp': [], 'screen': None})
+        self.assertEqual(rt.load_media_settings(), {'path': os.path.expanduser('~/shows'), 'interval': 1800, 'ahead': 4,
+                                                    'behind': None, 'grace': 24 * 3600, 'sleep': 0, 'ytdlp': [], 'screen': None})
 
     def test_the_interval_has_a_minimum_and_ahead_a_range(self):
         self.conf('[media]\ninterval=1\nahead=500\n')

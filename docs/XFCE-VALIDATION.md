@@ -37,6 +37,12 @@ Tick an item only after doing it, and write down what was not done in
 - [ ] A package update: the list, "Install all", the summary of changes afterwards, orphan removal.
 - [ ] A media source of each kind in use (feed, archive.org, YouTube, an HLS plugin): check, download with progress, play, watched marks, the queue while watching.
 - [ ] A master playlist whose variant is `file:///etc/hostname` is refused with a message, not read.
+- [ ] Start a movie, switch to a Twitch or YouTube stream from the Live section: the same mpv window is reused (no second window, no flicker of closing and reopening) and `pgrep -a streamlink` shows only the new stream's. Click the movie's row again: it carries on from a few seconds before where it was left, and the stream's streamlink is gone.
+- [ ] With mpv 0.38 or newer (what Void ships), resuming works. If it does not, the log (`FLUX_TRAY_DEBUG=1`) says "mpv did not take start=" and the file plays from the beginning.
+- [ ] Sleep timer: with `sleep=5`, leave a film playing untouched for 5 minutes: it pauses with "Still watching?" on screen, and a key or a mouse move carries it on. Let it play a further 5 minutes unattended: it pauses again. Without `libXScrnSaver` nothing happens and the log says so.
+- [ ] Suspend and resume while an episode plays: tracking carries on after the wake (finish the episode: it counts as watched).
+- [ ] Fall asleep through an episode that then plays to its end: it counts as watched (unavoidable); *Mark as not watched* puts it back. A movie marked `movie` shows "removed in 23 h"; *I didn't finish it* stops that; after the grace period the file is in the XFCE Trash and the line is gone from `[media]`.
+- [ ] `behind=1` with three watched episodes downloaded: the two older ones (and their subtitles) are in the Trash, the newest is still on disk, none is downloaded again.
 
 ## 4. Shutdown, restart and files
 

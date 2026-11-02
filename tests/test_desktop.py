@@ -1,6 +1,8 @@
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -192,3 +194,110 @@ class TestCheckYoutubeLiveChannels(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestMoveToTrash(unittest.TestCase):
+    def setUp(self):
+        self.dir = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.root = os.path.join(self.dir, 'media')
+        os.makedirs(os.path.join(self.root, 'Show'))
+        self.file = os.path.join(self.root, 'Show', 'e1.mkv')
+        with open(self.file, 'w') as f:
+            f.write('video')
+
+    def trash(self, path, gio=None):
+        gio = gio or mock.MagicMock()
+        with mock.patch.object(rt, 'Gio', gio):
+            return rt.move_to_trash(path, self.root), gio
+
+    def test_a_file_inside_the_media_folder_goes_to_the_trash_not_to_oblivion(self):
+        done, gio = self.trash(self.file)
+        self.assertTrue(done)
+        gio.File.new_for_path.assert_called_once_with(self.file)
+        gio.File.new_for_path.return_value.trash.assert_called_once_with(None)
+
+    def test_a_file_that_is_already_gone_counts_as_done_without_asking_the_desktop(self):
+        done, gio = self.trash(os.path.join(self.root, 'Show', 'gone.mkv'))
+        self.assertTrue(done)
+        gio.File.new_for_path.assert_not_called()
+
+    def test_nothing_outside_the_media_folder_is_touched(self):
+        outside = os.path.join(self.dir, 'elsewhere.txt')
+        sibling = os.path.join(self.dir, 'media2', 'x.mkv')  # same prefix, another folder
+        os.makedirs(os.path.dirname(sibling))
+        for path in (outside, sibling):
+            with open(path, 'w') as f:
+                f.write('x')
+            done, gio = self.trash(path)
+            self.assertFalse(done, path)
+            gio.File.new_for_path.assert_not_called()
+
+    def test_a_dotdot_that_leaves_the_folder_is_refused(self):
+        escape = os.path.join(self.root, 'Show', '..', '..', 'elsewhere.txt')
+        with open(os.path.join(self.dir, 'elsewhere.txt'), 'w') as f:
+            f.write('x')
+        done, gio = self.trash(escape)
+        self.assertFalse(done)
+        gio.File.new_for_path.assert_not_called()
+
+    def test_a_link_is_refused_even_when_it_points_inside(self):
+        link = os.path.join(self.root, 'Show', 'link.mkv')
+        os.symlink(self.file, link)
+        done, gio = self.trash(link)
+        self.assertFalse(done)
+        gio.File.new_for_path.assert_not_called()
+
+    def test_a_directory_and_the_media_folder_itself_are_refused(self):
+        for path in (os.path.join(self.root, 'Show'), self.root):
+            done, gio = self.trash(path)
+            self.assertFalse(done, path)
+            gio.File.new_for_path.assert_not_called()
+
+    def test_a_desktop_that_cannot_trash_leaves_the_file_and_says_so(self):
+        gio = mock.MagicMock()
+        gio.File.new_for_path.return_value.trash.side_effect = RuntimeError('no trash on this disk')
+        with mock.patch.object(rt, '_log') as log:
+            done, _ = self.trash(self.file, gio)
+        self.assertFalse(done)
+        self.assertTrue(os.path.exists(self.file))
+        self.assertIn('no trash on this disk', log.call_args[0][0])
+
+    @unittest.skipIf(isinstance(sys.modules.get('gi'), mock.Mock), 'needs the real GIO')
+    def test_with_the_real_desktop_trash_the_file_ends_up_in_the_trash_folder(self):
+        data = os.path.join(self.dir, 'data')
+        code = ('import sys; sys.path.insert(0, %r); from flux_tray.desktop import move_to_trash; '
+                'sys.exit(0 if move_to_trash(%r, %r) else 3)' % (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                                  self.file, self.root))
+        env = {**os.environ, 'HOME': self.dir, 'XDG_DATA_HOME': data}
+        done = subprocess.run([sys.executable, '-W', 'ignore', '-c', code], env=env, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr[-600:])
+        self.assertFalse(os.path.exists(self.file))
+        self.assertEqual(os.listdir(os.path.join(data, 'Trash', 'files')), ['e1.mkv'])
+
+
+class TestRemoveEmptyDirs(unittest.TestCase):
+    def setUp(self):
+        self.dir = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.root = os.path.join(self.dir, 'media')
+        os.makedirs(os.path.join(self.root, 'Show', 'Season 1'))
+
+    def test_empty_folders_go_up_to_but_not_including_the_media_folder(self):
+        rt.remove_empty_dirs(os.path.join(self.root, 'Show', 'Season 1'), self.root)
+        self.assertEqual(os.listdir(self.root), [])
+        self.assertTrue(os.path.isdir(self.root))
+
+    def test_a_folder_with_something_in_it_stops_the_climb(self):
+        with open(os.path.join(self.root, 'Show', 'poster.jpg'), 'w') as f:
+            f.write('x')
+        rt.remove_empty_dirs(os.path.join(self.root, 'Show', 'Season 1'), self.root)
+        self.assertEqual(os.listdir(os.path.join(self.root, 'Show')), ['poster.jpg'])
+
+    def test_nothing_outside_the_media_folder_is_ever_removed(self):
+        other = os.path.join(self.dir, 'other', 'empty')
+        os.makedirs(other)
+        rt.remove_empty_dirs(other, self.root)
+        self.assertTrue(os.path.isdir(other))
+        rt.remove_empty_dirs(self.root, self.root)
+        self.assertTrue(os.path.isdir(self.root))
