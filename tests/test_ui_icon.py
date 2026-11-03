@@ -84,11 +84,43 @@ class TestAlertIconText(unittest.TestCase):
         self.assertEqual(self.texts(ctx), ['25'])
         self.assertEqual(len(ctx.drawn('stroke')), 1)  # the degree ring
 
-    def test_the_disc_still_pulses_in_the_alert_colour(self):
-        bright, dim = rt.ALERT_BADGE_COLORS['red']
-        self.assertEqual(self.render(pulse=0).drawn('rgba')[0], bright)
-        self.assertEqual(self.render(pulse=1).drawn('rgba')[0], dim)
-        self.assertEqual(self.texts(self.render(pulse=1)), ['25'])
+    def test_an_alert_with_nothing_unread_has_no_disc(self):
+        for pulse in range(8):
+            ctx = self.render(pulse=pulse)
+            self.assertEqual(ctx.drawn('fill'), [], pulse)
+            self.assertEqual(len(ctx.drawn('arc')), 1, pulse)  # only the degree ring is an arc
+
+    def test_the_temperature_alternates_between_the_severity_colour_and_white(self):
+        bright = rt.ALERT_BADGE_COLORS['red'][0]
+        white = (1, 1, 1, 1)
+        self.assertEqual(self.render(pulse=0).drawn('rgba'), [bright])
+        self.assertEqual(self.render(pulse=1).drawn('rgba'), [white])
+        self.assertEqual(self.render(pulse=2).drawn('rgba'), [bright])
+
+    def test_the_digits_and_the_degree_ring_share_the_colour(self):
+        for pulse in (0, 1):
+            self.assertEqual(len(self.render(pulse=pulse).drawn('rgba')), 1)  # one colour set before both are drawn
+
+    def test_each_severity_alternates_at_its_own_rate(self):
+        def phases(color):
+            bright = rt.ALERT_BADGE_COLORS[color][0]
+            return ''.join('B' if self.render(color=color, pulse=n).drawn('rgba')[0] == bright else 'w' for n in range(8))
+        self.assertEqual(phases('red'), 'BwBwBwBw')        # every tick
+        self.assertEqual(phases('orange'), 'BBwwBBww')     # every second tick
+        self.assertEqual(phases('yellow'), 'BBBBwwww')     # every fourth tick
+
+    def test_the_worst_of_several_alerts_sets_the_colour(self):
+        stub = self.Stub()
+        stub.schedule_warning, stub._schedule_flash_on = None, False
+        stub.weather_data = {'temp': 20}
+        stub.active_alerts = [{'severity_color': 'yellow'}, {'severity_color': 'red'}, {'severity_color': 'orange'}]
+        stub._alert_pulse_counter = 0
+        stub.state = {'unread': [], 'available_updates': []}
+        stub.lock = threading.RLock()
+        ctx = FakeContext()
+        with mock.patch.object(rt, 'cairo', mock.Mock(Context=lambda _surface: ctx)), mock.patch.object(rt, 'Gdk', mock.Mock()):
+            stub.render_icon(0)
+        self.assertEqual(ctx.drawn('rgba'), [rt.ALERT_BADGE_COLORS['red'][0]])
 
     def test_negative_temperatures_keep_their_sign(self):
         self.assertEqual(self.texts(self.render(temp=-5.2, color='yellow')), ['-5'])
@@ -110,11 +142,26 @@ class TestAlertIconText(unittest.TestCase):
         self.assertEqual(self.texts(ctx), ['25'])
         self.assertEqual(len(ctx.drawn('fill')), 0)
 
-    def test_the_alert_disc_uses_a_smaller_font_than_the_plain_temperature_icon(self):
+    def test_the_alerting_temperature_is_as_big_as_the_plain_temperature_icon(self):
         plain = self.render(alert=False, temp=25)
-        disc = self.render(temp=25)
-        self.assertEqual(self.texts(disc), ['25'])
-        self.assertLess(disc.font_size, plain.font_size)
+        alerting = self.render(temp=25)
+        self.assertEqual(self.texts(alerting), ['25'])
+        self.assertEqual(alerting.font_size, plain.font_size)
+
+    def test_with_unread_items_the_alert_still_pulses_the_disc_that_holds_their_count(self):
+        bright, dim = rt.ALERT_BADGE_COLORS['red']
+        self.assertEqual(self.render(unread=3, pulse=0).drawn('rgba')[0], bright)
+        self.assertEqual(self.render(unread=3, pulse=1).drawn('rgba')[0], dim)
+        self.assertEqual(len(self.render(unread=3).drawn('fill')), 1)
+
+    def test_with_package_updates_the_alert_still_pulses_the_disc_that_holds_their_count(self):
+        self.assertEqual(len(self.render(updates=2).drawn('fill')), 1)
+
+    def test_without_a_temperature_the_alert_falls_back_to_the_pulsing_disc(self):
+        bright, dim = rt.ALERT_BADGE_COLORS['red']
+        self.assertEqual(self.render(temp=None, pulse=0).drawn('rgba')[0], bright)
+        self.assertEqual(self.render(temp=None, pulse=1).drawn('rgba')[0], dim)
+        self.assertEqual(len(self.render(temp=None).drawn('fill')), 1)
 
 
 if __name__ == '__main__':

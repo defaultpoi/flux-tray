@@ -13,7 +13,7 @@ config, and it is withdrawn.
 
 ## What does not change
 
-- **How it looks.** The popup built from fixed data is compared, widget by widget, with the popup of the original, unmodified void-tray at commit `eb73c7d`: byte-identical for both golden scenarios. `tests/test_golden_popup.py` keeps it so.
+- **How it looks.** Except where a change was asked for (the tray icon during a weather alert; see STATUS.md), the look is the original's. The popup built from fixed data is compared, widget by widget, with the popup of the original, unmodified void-tray at commit `eb73c7d`: byte-identical for both golden scenarios. `tests/test_golden_popup.py` keeps it so.
 - **The config.** `config.conf` has the same syntax. Every loader (27 of them) was run on 116 config texts, the README example, the default template and 112 snippets from the tests, under the original and under this code: 3248 results, no difference. What is stored in `state.json` and `media.json` was not changed (the feed part of it was also compared old against new on 400 random scenarios).
 - **Behaviour.** The tests of the original pass on Python 3.14. They were changed only for the new names, in two tests that used placeholder links like `la` (now real addresses, since feed links are checked), in two that ran `build_popup_window` on a mock (now bound to the real builders), and by removing the tests of the old-directory migration.
 

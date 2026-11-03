@@ -101,18 +101,23 @@ class IconMixin:
             surface.flush()
             return Gdk.pixbuf_get_from_surface(surface, 0, 0, size, size)
 
-        show_weather = self._should_show_weather_icon(count)
+        worst_alert_color = self._worst_alert_color()
+        # an alert with nothing unread and nothing to update: no disc, the temperature
+        # itself alternates between the severity colour and white, at the severity's rate
+        alert_temperature = bool(count == 0 and worst_alert_color and self._current_temperature() is not None)
 
-        if show_weather:
+        if self._should_show_weather_icon(count) or alert_temperature:
             # Temperature only, no glyph — the icon is a fixed-size XEMBED
             # tray slot with no way to make it bigger overall, so dropping
             # the glyph here lets the digits alone claim the full icon
             # instead of splitting the space with it. The glyph still shows
             # in the popup's weather bar, where space isn't constrained.
-            ctx.set_source_rgba(1, 1, 1, 1)
+            if alert_temperature and self._pulse_on_for(worst_alert_color):
+                ctx.set_source_rgba(*ALERT_BADGE_COLORS[worst_alert_color][0])
+            else:
+                ctx.set_source_rgba(1, 1, 1, 1)
             self._draw_temperature(ctx, size)
         else:
-            worst_alert_color = self._worst_alert_color()
             if worst_alert_color:
                 bright, dim = ALERT_BADGE_COLORS[worst_alert_color]
                 ctx.set_source_rgba(*(bright if self._pulse_on_for(worst_alert_color) else dim))
@@ -126,17 +131,12 @@ class IconMixin:
             ctx.fill()
 
             ctx.set_source_rgba(1, 1, 1, 1)
-            if count == 0 and worst_alert_color and self._current_temperature() is not None:
-                # an alert with nothing unread: the pulsing disc shows the
-                # temperature instead of a meaningless 0
-                self._draw_temperature(ctx, size, padding=4, max_font=12, min_font=7)
-            else:
-                text = str(count) if count < 100 else '99+'
-                ctx.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-                ctx.set_font_size(12 if len(text) <= 2 else 8)
-                xb, yb, w, h = ctx.text_extents(text)[:4]
-                ctx.move_to(size / 2 - w / 2 - xb, size / 2 - h / 2 - yb)
-                ctx.show_text(text)
+            text = str(count) if count < 100 else '99+'
+            ctx.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            ctx.set_font_size(12 if len(text) <= 2 else 8)
+            xb, yb, w, h = ctx.text_extents(text)[:4]
+            ctx.move_to(size / 2 - w / 2 - xb, size / 2 - h / 2 - yb)
+            ctx.show_text(text)
 
         surface.flush()
         return Gdk.pixbuf_get_from_surface(surface, 0, 0, size, size)
