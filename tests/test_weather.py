@@ -90,6 +90,8 @@ class TestRiseSpacer(unittest.TestCase):
     def test_forecast_segments_are_padded_too(self):
         class Stub:
             build_forecast_weather_segments = rt.FluxTray.build_forecast_weather_segments
+            _forecast_alerts_by_day = rt.FluxTray._forecast_alerts_by_day
+            active_alerts = upcoming_alerts = ()
             weather_data = {'forecast_days': [{'max_temp': 5.0, 'min_temp': 1.0, 'rain_prob': 0}]}
         with mock.patch.object(rt.GLib, 'markup_escape_text', side_effect=lambda x: x):
             seg = Stub().build_forecast_weather_segments()[0]
@@ -259,3 +261,131 @@ class TestAlertSeverityAndTiming(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestUpcomingAlertsInTheFeed(unittest.TestCase):
+    NOW = rt.datetime(2026, 11, 3, 15, 0, tzinfo=rt.timezone.utc)
+
+    def setUp(self):
+        import os
+        import time
+        self.addCleanup(self.restore_tz, os.environ.get('TZ'))
+        os.environ['TZ'] = 'UTC'
+        time.tzset()
+
+    @staticmethod
+    def restore_tz(previous):
+        import os
+        import time
+        if previous is None:
+            os.environ.pop('TZ', None)
+        else:
+            os.environ['TZ'] = previous
+        time.tzset()
+
+    def entry(self, onset, expires, severity='Severe', title='Orange Wind Warning issued for Exampleland - Northshire'):
+        return {'cap_areadesc': 'Northshire', 'title': title, 'cap_onset': onset, 'cap_expires': expires, 'cap_severity': severity}
+
+    def fetch(self, entries, **kw):
+        parsed = mock.MagicMock(bozo=False, entries=entries)
+        with mock.patch.object(rt.feedparser, 'parse', return_value=parsed):
+            return rt.fetch_meteoalarm_alerts('Northshire', 'Exampleland', now=self.NOW, **kw)
+
+    def test_by_default_only_what_is_in_force_now_as_before(self):
+        alerts = self.fetch([self.entry('2026-11-03T10:00:00+00:00', '2026-11-03T20:00:00+00:00'),
+                             self.entry('2026-11-04T08:00:00+00:00', '2026-11-04T20:00:00+00:00')])
+        self.assertEqual(len(alerts), 1)
+        self.assertFalse(alerts[0]['upcoming'])
+        self.assertEqual(alerts[0]['onset'], '2026-11-03T10:00:00+00:00')
+
+    def test_with_upcoming_days_what_starts_later_comes_too_marked_as_upcoming(self):
+        alerts = self.fetch([self.entry('2026-11-03T10:00:00+00:00', '2026-11-03T20:00:00+00:00'),
+                             self.entry('2026-11-04T08:00:00+00:00', '2026-11-04T20:00:00+00:00')], upcoming_days=5)
+        self.assertEqual([a['upcoming'] for a in alerts], [False, True])
+        self.assertEqual(alerts[1]['onset'], '2026-11-04T08:00:00+00:00')
+        self.assertEqual((alerts[1]['hazard'], alerts[1]['severity_color'], alerts[1]['segment']), ('Wind', 'orange', 'wind'))
+
+    def test_the_horizon_is_the_end_of_the_last_forecast_day(self):
+        # today is 3 November; the five forecast days end at midnight starting the 9th
+        inside = self.entry('2026-11-08T23:59:00+00:00', '2026-11-09T06:00:00+00:00')
+        outside = self.entry('2026-11-09T00:00:00+00:00', '2026-11-09T06:00:00+00:00')
+        self.assertEqual(len(self.fetch([inside, outside], upcoming_days=5)), 1)
+
+    def test_one_that_has_already_expired_is_never_included(self):
+        self.assertEqual(self.fetch([self.entry('2026-11-02T08:00:00+00:00', '2026-11-03T09:00:00+00:00')], upcoming_days=5), [])
+
+    def test_an_entry_without_an_onset_counts_as_in_force_not_upcoming(self):
+        alerts = self.fetch([self.entry('', '2026-11-04T09:00:00+00:00')], upcoming_days=5)
+        self.assertEqual([a['upcoming'] for a in alerts], [False])
+
+    def test_the_feed_is_asked_for_once_whatever_the_days(self):
+        parsed = mock.MagicMock(bozo=False, entries=[])
+        with mock.patch.object(rt.feedparser, 'parse', return_value=parsed) as parse:
+            rt.fetch_meteoalarm_alerts('Northshire', 'Exampleland', now=self.NOW, upcoming_days=5)
+        parse.assert_called_once()
+
+
+class TestAlertsOnForecastDays(unittest.TestCase):
+    TODAY = rt.datetime(2026, 11, 3).date()
+    TZ = rt.timezone(rt.timedelta(hours=2))
+
+    def alert(self, onset, expires, color='orange', hazard='Wind'):
+        return {'onset': onset, 'expires': expires, 'severity_color': color, 'hazard': hazard}
+
+    def days(self, *alerts):
+        by_day = rt.forecast_alerts_by_day(list(alerts), self.TODAY, tz=self.TZ)
+        return {n: [a['hazard'] + ':' + a['severity_color'] for a in found] for n, found in by_day.items()}
+
+    def test_an_alert_within_tomorrow_is_on_day_one_only(self):
+        self.assertEqual(self.days(self.alert('2026-11-04T10:00:00+02:00', '2026-11-04T18:00:00+02:00')), {1: ['Wind:orange']})
+
+    def test_an_alert_that_runs_over_midnights_is_on_each_day_it_touches(self):
+        self.assertEqual(sorted(self.days(self.alert('2026-11-04T20:00:00+02:00', '2026-11-06T06:00:00+02:00'))), [1, 2, 3])
+
+    def test_one_in_force_now_that_runs_into_tomorrow_is_on_day_one(self):
+        self.assertEqual(sorted(self.days(self.alert('2026-11-02T20:00:00+02:00', '2026-11-04T05:00:00+02:00'))), [1])
+
+    def test_one_that_ends_at_midnight_does_not_touch_the_next_day(self):
+        self.assertEqual(sorted(self.days(self.alert('2026-11-04T20:00:00+02:00', '2026-11-05T00:00:00+02:00'))), [1])
+
+    def test_one_that_starts_at_midnight_is_on_that_day(self):
+        self.assertEqual(sorted(self.days(self.alert('2026-11-05T00:00:00+02:00', '2026-11-05T03:00:00+02:00'))), [2])
+
+    def test_one_that_is_over_by_tomorrow_is_not_on_any_forecast_day(self):
+        self.assertEqual(self.days(self.alert('2026-11-03T08:00:00+02:00', '2026-11-03T23:59:00+02:00')), {})
+
+    def test_the_forecast_stops_at_the_fifth_day(self):
+        self.assertEqual(sorted(self.days(self.alert('2026-11-07T20:00:00+02:00', '2026-11-12T00:00:00+02:00'))), [4, 5])
+        self.assertEqual(self.days(self.alert('2026-11-09T00:00:00+02:00', '2026-11-09T12:00:00+02:00')), {})
+
+    def test_the_day_is_the_persons_own_not_utc(self):
+        # 22:30 UTC on the 4th is 00:30 on the 5th at UTC+2
+        self.assertEqual(sorted(self.days(self.alert('2026-11-04T22:30:00+00:00', '2026-11-05T04:00:00+00:00'))), [2])
+
+    def test_alerts_of_several_severities_on_one_day_are_all_listed(self):
+        found = self.days(self.alert('2026-11-04T08:00:00+02:00', '2026-11-04T12:00:00+02:00', 'yellow', 'Rain'),
+                          self.alert('2026-11-04T09:00:00+02:00', '2026-11-04T11:00:00+02:00', 'red', 'Wind'))
+        self.assertEqual(found, {1: ['Rain:yellow', 'Wind:red']})
+
+    def test_an_alert_without_an_end_covers_only_the_day_it_starts(self):
+        self.assertEqual(sorted(self.days(self.alert('2026-11-05T10:00:00+02:00', ''))), [2])
+
+    def test_an_alert_without_a_start_reaches_back_but_ends_when_it_says(self):
+        self.assertEqual(sorted(self.days(self.alert('', '2026-11-05T12:00:00+02:00'))), [1, 2])
+
+    def test_an_alert_without_either_is_not_a_forecast_alert(self):
+        self.assertEqual(self.days(self.alert('', '')), {})
+        self.assertEqual(self.days(self.alert('not a time', 'neither')), {})
+
+    def test_no_alerts_no_days(self):
+        self.assertEqual(rt.forecast_alerts_by_day([], self.TODAY, tz=self.TZ), {})
+
+
+class TestWorstSeverity(unittest.TestCase):
+    def test_the_most_severe_colour_wins(self):
+        self.assertEqual(rt.worst_severity([{'severity_color': 'yellow'}, {'severity_color': 'red'}, {'severity_color': 'orange'}]), 'red')
+        self.assertEqual(rt.worst_severity([{'severity_color': 'yellow'}, {'severity_color': 'orange'}]), 'orange')
+
+    def test_nothing_is_none_and_a_missing_colour_is_yellow(self):
+        self.assertIsNone(rt.worst_severity([]))
+        self.assertEqual(rt.worst_severity([{}]), 'yellow')

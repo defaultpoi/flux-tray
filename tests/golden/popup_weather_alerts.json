@@ -1,0 +1,1387 @@
+{
+ "scenarios": {
+  "alerts_ahead": {
+   "forecast": {
+    "children": [
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#c9a600\" font_family=\"DejaVu Sans\">☔︎</span> 12/4°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>14/6°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#d97300\" font_family=\"DejaVu Sans\">☔︎</span> 15/7°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#cc0000\" font_family=\"DejaVu Sans\">⚠︎</span> 16/8°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>13/5°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "hexpand": true,
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "markup": false,
+        "sensitive": true,
+        "text": "‹",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "classes": [
+       "text-button"
+      ],
+      "sensitive": true,
+      "text": "‹",
+      "tooltip": "Back to today",
+      "type": "Button",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "weather-bar"
+    ],
+    "margins": [
+     6,
+     6,
+     4,
+     4
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   },
+   "today": {
+    "children": [
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\" rise=\"6389\">☁︎</span> 9°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>11/3°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>12/30 km/h<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>20%/0.4mm<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "hexpand": true,
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "markup": false,
+        "sensitive": true,
+        "text": "›",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "classes": [
+       "severity-alert-red",
+       "text-button"
+      ],
+      "sensitive": true,
+      "text": "›",
+      "tooltip": "Show 5-day forecast\nTue: Rain (yellow)\nThu: Wind (orange)\nFri: Wind (red)",
+      "type": "Button",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "weather-bar"
+    ],
+    "margins": [
+     6,
+     6,
+     4,
+     4
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   },
+   "toggle_background": [
+    0.8,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "toggle_has_gradient": false,
+   "toggle_text": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ]
+  },
+  "in_force_into_tomorrow": {
+   "forecast": {
+    "children": [
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#d97300\" font_family=\"DejaVu Sans\">☔︎</span> 12/4°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>14/6°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\">☔︎</span> 15/7°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>16/8°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>13/5°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "hexpand": true,
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "markup": false,
+        "sensitive": true,
+        "text": "‹",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "classes": [
+       "text-button"
+      ],
+      "sensitive": true,
+      "text": "‹",
+      "tooltip": "Back to today",
+      "type": "Button",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "weather-bar"
+    ],
+    "margins": [
+     6,
+     6,
+     4,
+     4
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   },
+   "today": {
+    "children": [
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\" rise=\"6389\">☁︎</span> 9°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>11/3°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#d97300\">12/30 km/h</span><span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>20%/0.4mm<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "hexpand": true,
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "markup": false,
+        "sensitive": true,
+        "text": "›",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "classes": [
+       "severity-alert-orange",
+       "text-button"
+      ],
+      "sensitive": true,
+      "text": "›",
+      "tooltip": "Show 5-day forecast\nTue: Wind (orange)",
+      "type": "Button",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "weather-bar"
+    ],
+    "margins": [
+     6,
+     6,
+     4,
+     4
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   },
+   "toggle_background": [
+    0.851,
+    0.451,
+    0.0,
+    1.0
+   ],
+   "toggle_has_gradient": false,
+   "toggle_text": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ]
+  },
+  "no_alerts": {
+   "forecast": {
+    "children": [
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\">☔︎</span> 12/4°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>14/6°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\">☔︎</span> 15/7°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>16/8°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>13/5°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "hexpand": true,
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "markup": false,
+        "sensitive": true,
+        "text": "‹",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "classes": [
+       "text-button"
+      ],
+      "sensitive": true,
+      "text": "‹",
+      "tooltip": "Back to today",
+      "type": "Button",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "weather-bar"
+    ],
+    "margins": [
+     6,
+     6,
+     4,
+     4
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   },
+   "today": {
+    "children": [
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\" rise=\"6389\">☁︎</span> 9°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>11/3°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>12/30 km/h<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>20%/0.4mm<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "hexpand": true,
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "markup": false,
+        "sensitive": true,
+        "text": "›",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "classes": [
+       "text-button"
+      ],
+      "sensitive": true,
+      "text": "›",
+      "tooltip": "Show 5-day forecast",
+      "type": "Button",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "weather-bar"
+    ],
+    "margins": [
+     6,
+     6,
+     4,
+     4
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   },
+   "toggle_background": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "toggle_has_gradient": true,
+   "toggle_text": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  "only_today": {
+   "forecast": {
+    "children": [
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\">☔︎</span> 12/4°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>14/6°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\">☔︎</span> 15/7°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>16/8°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>13/5°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "hexpand": true,
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "markup": false,
+        "sensitive": true,
+        "text": "‹",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "classes": [
+       "text-button"
+      ],
+      "sensitive": true,
+      "text": "‹",
+      "tooltip": "Back to today",
+      "type": "Button",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "weather-bar"
+    ],
+    "margins": [
+     6,
+     6,
+     4,
+     4
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   },
+   "today": {
+    "children": [
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\" rise=\"6389\">☁︎</span> 9°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>11/3°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#cc0000\">12/30 km/h</span><span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>20%/0.4mm<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "hexpand": true,
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "markup": false,
+        "sensitive": true,
+        "text": "›",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "classes": [
+       "text-button"
+      ],
+      "sensitive": true,
+      "text": "›",
+      "tooltip": "Show 5-day forecast",
+      "type": "Button",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "weather-bar"
+    ],
+    "margins": [
+     6,
+     6,
+     4,
+     4
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   },
+   "toggle_background": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "toggle_has_gradient": true,
+   "toggle_text": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  "yellow_only": {
+   "forecast": {
+    "children": [
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\">☔︎</span> 12/4°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#c9a600\" font_family=\"DejaVu Sans\">⚠︎</span> 14/6°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\">☔︎</span> 15/7°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>16/8°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>13/5°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "hexpand": true,
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "markup": false,
+        "sensitive": true,
+        "text": "‹",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "classes": [
+       "text-button"
+      ],
+      "sensitive": true,
+      "text": "‹",
+      "tooltip": "Back to today",
+      "type": "Button",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "weather-bar"
+    ],
+    "margins": [
+     6,
+     6,
+     4,
+     4
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   },
+   "today": {
+    "children": [
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b><span foreground=\"#2b2b2b\" font_family=\"DejaVu Sans\" rise=\"6389\">☁︎</span> 9°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>11/3°C<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>12/30 km/h<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>·</b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       },
+       {
+        "ellipsize": "none",
+        "hexpand": true,
+        "markup": true,
+        "sensitive": true,
+        "text": "<span size=\"large\"><b>20%/0.4mm<span font_family=\"DejaVu Sans\" rise=\"6389\">​</span></b></span>",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "hexpand": true,
+      "sensitive": true,
+      "type": "Box",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "ellipsize": "none",
+        "markup": false,
+        "sensitive": true,
+        "text": "›",
+        "type": "Label",
+        "visible": true,
+        "wrap": false,
+        "xalign": 0.5
+       }
+      ],
+      "classes": [
+       "severity-alert-yellow",
+       "text-button"
+      ],
+      "sensitive": true,
+      "text": "›",
+      "tooltip": "Show 5-day forecast\nWed: Rain (yellow)",
+      "type": "Button",
+      "visible": true
+     }
+    ],
+    "classes": [
+     "weather-bar"
+    ],
+    "margins": [
+     6,
+     6,
+     4,
+     4
+    ],
+    "sensitive": true,
+    "type": "Box",
+    "visible": true
+   },
+   "toggle_background": [
+    0.788,
+    0.651,
+    0.0,
+    1.0
+   ],
+   "toggle_has_gradient": false,
+   "toggle_text": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  }
+ }
+}

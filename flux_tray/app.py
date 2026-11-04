@@ -74,6 +74,7 @@ class FluxTray(ConnectivityMixin, FeedsMixin, IconMixin, LiveMixin, MediaMixin, 
         self.weather_box = None
         self.weather_view = 'today'
         self.active_alerts = []
+        self.upcoming_alerts = []  # alerts that start in the next few days (see ui/weather.py)
         self._alert_pulse_counter = 0
         self._last_pulse_signature = None
         self.active_installs = 0

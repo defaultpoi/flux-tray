@@ -5,7 +5,7 @@ import json
 import re
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .config import load_weather_settings
 from .constants import WEATHER_GLYPH_COLOR
@@ -121,11 +121,18 @@ def _parse_meteoalarm_time(value):
         return None
 
 
-def fetch_meteoalarm_alerts(region, country, now=None):
+FORECAST_DAYS = 5  # the days after today that the weather bar's forecast shows
+
+
+def fetch_meteoalarm_alerts(region, country, now=None, upcoming_days=0):
     """Fetches `country`'s MeteoAlarm feed and returns the entries whose area
     matches `region` (case-insensitive) AND whose time window currently
     covers `now` (defaults to the real current time), as a list of
-    {'hazard', 'segment', 'title', 'expires', 'severity_color'} dicts.
+    {'hazard', 'segment', 'title', 'onset', 'expires', 'severity_color',
+    'upcoming'} dicts. With `upcoming_days`, entries that have not started yet
+    but start before the end of that many days after today are included too,
+    with 'upcoming' True; the feed lists as far ahead as the country publishes,
+    so what is there is what is shown.
     Returns None on a feed fetch failure (distinct from [] = feed fetched
     fine, nothing active for this region right now).
 
@@ -142,6 +149,10 @@ def fetch_meteoalarm_alerts(region, country, now=None):
     if now is None:
         now = datetime.now(timezone.utc)
     region_lower = (region or '').strip().lower()
+    horizon = None
+    if upcoming_days:
+        local_midnight = now.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        horizon = local_midnight + timedelta(days=upcoming_days + 1)
     alerts = []
     for entry in parsed.entries:
         if entry.get('cap_areadesc', '').strip().lower() != region_lower:
@@ -153,8 +164,9 @@ def fetch_meteoalarm_alerts(region, country, now=None):
             _parse_meteoalarm_time(entry.get('cap_onset'))
             or _parse_meteoalarm_time(entry.get('cap_effective'))
         )
-        if onset is not None and now < onset:
-            continue  # not started yet
+        upcoming = onset is not None and now < onset
+        if upcoming and (horizon is None or onset >= horizon):
+            continue  # not started yet, and not wanted that far ahead
         expires = _parse_meteoalarm_time(entry.get('cap_expires'))
         if expires is not None and now > expires:
             continue  # expired
@@ -162,10 +174,46 @@ def fetch_meteoalarm_alerts(region, country, now=None):
             'hazard': hazard,
             'segment': _hazard_to_segment(hazard),
             'title': entry.get('title', ''),
+            'onset': entry.get('cap_onset') or entry.get('cap_effective') or '',
             'expires': entry.get('cap_expires', ''),
             'severity_color': _severity_to_color(entry.get('cap_severity')),
+            'upcoming': upcoming,
         })
     return alerts
+
+
+_SEVERITY_ORDER = ('yellow', 'orange', 'red')
+
+
+def worst_severity(alerts):
+    """The most severe colour name among alerts' 'severity_color', None for none."""
+    colors = [a.get('severity_color', 'yellow') for a in alerts]
+    return max(colors, key=lambda c: _SEVERITY_ORDER.index(c) if c in _SEVERITY_ORDER else 0) if colors else None
+
+
+def forecast_alerts_by_day(alerts, today, days=FORECAST_DAYS, tz=None):
+    """{n: [alerts]} for each forecast day n (1 = tomorrow ... `days`) that has any: the
+    alerts whose time window overlaps that day, a day being midnight to midnight where
+    the person is (`tz`, the local time zone by default; `today` is a date). A window with
+    no start reaches back indefinitely; one with no end is taken to cover only the day
+    it starts in, since an open end would paint every day ahead."""
+    tz = tz or datetime.now().astimezone().tzinfo
+
+    def midnight(day):
+        return datetime.combine(day, datetime.min.time(), tzinfo=tz)
+
+    result = {}
+    for alert in alerts:
+        onset = _parse_meteoalarm_time(alert.get('onset'))
+        expires = _parse_meteoalarm_time(alert.get('expires'))
+        if expires is None:
+            first_day = onset.astimezone(tz).date() if onset else today
+            expires = midnight(first_day + timedelta(days=1))
+        for n in range(1, days + 1):
+            day_start = midnight(today + timedelta(days=n))
+            if (onset is None or onset < day_start + timedelta(days=1)) and expires > day_start:
+                result.setdefault(n, []).append(alert)
+    return result
 
 
 def fetch_weather():
@@ -198,7 +246,7 @@ def fetch_weather():
         daily_precip_sum = daily.get('precipitation_sum', [])
 
         forecast_days = []
-        for i in range(1, 6):
+        for i in range(1, FORECAST_DAYS + 1):
             if i < len(daily_max) and i < len(daily_min):
                 forecast_days.append({
                     'max_temp': daily_max[i],
