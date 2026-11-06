@@ -19,7 +19,10 @@
   ".timer-status { background: rgba(255, 255, 255, 0.9); border-radius: 4px; padding: 1px 6px; }",
   ".missed-on { background: #ffc9c9; }",
   ".timer-status label.missed-text, label.missed-text { color: #b3261e; font-weight: bold; }",
-  ".timer-status label { color: #333333; font-size: 11px; }"
+  ".timer-status label { color: #333333; font-size: 11px; }",
+  ".live-badge { color: #b3261e; font-weight: bold; font-size: 10px; padding: 0 4px; }",
+  ".quality-hd { background: #2e8b57; color: #ffffff; border-radius: 4px; font-size: 10px; font-weight: bold; }",
+  ".quality-low { background: #c0392b; color: #ffffff; border-radius: 4px; font-size: 10px; font-weight: bold; }"
  ],
  "tree": {
   "children": [

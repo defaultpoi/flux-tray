@@ -119,7 +119,7 @@ class TestState(TmpConfigCase):
         self.state_text(json.dumps({'unread': [{'id': 'a'}], 'seen': {'a': 1}}))
         s = rt.load_state()
         self.assertEqual(s['unread'], [{'id': 'a'}])
-        self.assertEqual(s['seen'], {'a': 1})
+        self.assertEqual(s['seen'], {'a': {'seen_at': 1, 'updated': None}})
 
     def test_a_saved_countdown_end_is_kept_only_when_it_is_a_finite_number(self):
         self.state_text(json.dumps({'timer_end': 1760000000.5}))
@@ -343,9 +343,11 @@ class TestMergeFeedCheck(unittest.TestCase):
         self.assertEqual(state['read_later'][0]['saved'], self.NOW)
 
     def test_ids_are_remembered_and_old_ones_forgotten(self):
-        state = {'seen': {'stale': self.NOW - rt.SEEN_RETENTION_SECONDS - 1, 'kept': self.NOW - 5}}
+        state = {'seen': {'stale': {'seen_at': self.NOW - rt.SEEN_RETENTION_SECONDS - 1, 'updated': None}, 'kept': {'seen_at': self.NOW - 5, 'updated': None}}}
         self.merge(state, newly_seen_ids={'a', 'kept'})
-        self.assertEqual(state['seen'], {'kept': self.NOW - 5, 'a': self.NOW})  # 'kept' keeps its first-seen time
+        self.assertEqual(state['seen']['kept']['seen_at'], self.NOW - 5)  # 'kept' keeps its first-seen time
+        self.assertEqual(state['seen']['a']['seen_at'], self.NOW)
+        self.assertNotIn('stale', state['seen'])
 
     def test_last_checked_times_are_merged_not_replaced(self):
         state = {'last_checked': {'x': 1, 'y': 2}}

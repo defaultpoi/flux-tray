@@ -77,6 +77,9 @@ row.breaking-on { background: #ffc9c9; }
 .missed-on { background: #ffc9c9; }
 .timer-status label.missed-text, label.missed-text { color: #b3261e; font-weight: bold; }
 .timer-status label { color: #333333; font-size: 11px; }
+.live-badge { color: #b3261e; font-weight: bold; font-size: 10px; padding: 0 4px; }
+.quality-hd { background: #2e8b57; color: #ffffff; border-radius: 4px; font-size: 10px; font-weight: bold; }
+.quality-low { background: #c0392b; color: #ffffff; border-radius: 4px; font-size: 10px; font-weight: bold; }
 """
 
 
@@ -283,6 +286,10 @@ class PopupMixin:
         self.listbox.connect('row-activated', self.on_row_activated)
         self.listbox.connect('button-press-event', self.on_listbox_button_press)
 
+        # Connect metadata popover hover tracking (from MediaMixin)
+        if hasattr(self, '_setup_listbox_hover_events'):
+            self._setup_listbox_hover_events()
+
         # The list sits in a box together with a real spacer that reserves the
         # strip the timer slides over (timer_box is 60px tall, valign END; the
         # extra 25px keeps a gap above it instead of its top edge sitting flush
@@ -409,7 +416,7 @@ class PopupMixin:
         footer.pack_start(edit_btn, True, True, 0)
         refresh_btn = Gtk.Button(label='Refresh')
         refresh_btn.connect('clicked', lambda *_a: (
-            self.start_check_thread(force=True), self.start_twitch_check()
+            self.start_check_thread(force=True), self.start_twitch_check(), self.start_discovery_fetch()
         ))
         footer.pack_start(refresh_btn, True, True, 0)
         mark_all_btn = Gtk.Button(label='Mark all read')
@@ -435,7 +442,7 @@ class PopupMixin:
         if auto and is_fullscreen_active():
             return  # don't interrupt a fullscreen video/game/presentation
         if auto and self.popup is not None and self.popup.get_visible():
-            self.refresh_list()  # already open: update in place, keeping scroll position and any open Launch list
+            self.refresh_list(keep_open=True)  # already open: update in place, keeping scroll position and any open Launch list
             return
         if self.popup is not None:
             self._launcher_open = False  # its Launch list (if open) dies with the window
@@ -554,11 +561,13 @@ class PopupMixin:
 
         any_live = bool(live_channels or live_youtube_channels)
         media_urls = self.media_source_urls()
-        # like live channels, media never holds the popup open or fills it once it is showing
-        truly_empty = not unread and not available and not any_live and not media_urls
-        only_live_remains = (not unread and not available) and (any_live or bool(media_urls))
+        discovery_urls = self.discovery_source_urls()
+        # Discovery items keep the popup open like unread items; regular media sources behave like live channels
+        truly_empty = not unread and not available and not any_live and not discovery_urls and not media_urls
+        # Only live channels or downloadable media (not discovery) collapse the popup when already visible
+        only_live_or_downloadable = (not unread and not available and not discovery_urls) and (any_live or bool(media_urls))
         popup_already_visible = bool(self.popup and self.popup.get_visible())
-        should_hide = truly_empty or (only_live_remains and popup_already_visible)
+        should_hide = truly_empty or (only_live_or_downloadable and popup_already_visible)
         close_popup = should_hide and not keep_open and not self.orphan_status and not self.update_summary
 
         if should_hide:
@@ -591,13 +600,18 @@ class PopupMixin:
                 for entry in live_youtube_channels:
                     self.listbox.add(self.build_youtube_row(entry))
 
-            if media_urls:
+            # Single Media section: downloadable items first (live-like), then discovery items (unread-like)
+            if media_urls or discovery_urls:
                 self._media_header_row = self.build_header_row(
                     '__media__', 'Media', is_first=is_first_section, clickable=False
                 )
                 self.listbox.add(self._media_header_row)
                 is_first_section = False
+                # Downloadable media sources at the top (behave like live channels)
                 for url in media_urls:
+                    self.listbox.add(self.build_media_row(url))
+                # Discovery items after (behave like unread news)
+                for url in discovery_urls:
                     self.listbox.add(self.build_media_row(url))
 
             if unread:
@@ -607,6 +621,8 @@ class PopupMixin:
                     self.listbox.add(self.build_header_row(
                         feed_url, feed_name, is_first=(is_first_section and i == 0)
                     ))
+                    # Sort entries: live updates first, then by original order (newest first)
+                    entries = sorted(entries, key=lambda e: (not e.get('live', False),))
                     for entry in entries:
                         self.listbox.add(self.build_row(entry))
                 is_first_section = False
@@ -850,9 +866,17 @@ class PopupMixin:
         front_btn.connect('clicked', callback, entry['id'])
         box.pack_start(front_btn, False, False, 0)
 
+        # LIVE badge for updated articles
+        if entry.get('live'):
+            live_label = Gtk.Label(label=' 🔴 LIVE')
+            live_label.get_style_context().add_class('live-badge')
+            box.pack_start(live_label, False, False, 0)
+
         full_title = entry['title']
         label, truncated = _title_label(full_title)
         tooltip = '\n'.join(part for part in (full_title if truncated else '', item_detail_text(entry)) if part)
+        if entry.get('live'):
+            tooltip = 'Updated since last check\n' + tooltip
         if tooltip:
             row.set_tooltip_text(tooltip)
             label.set_tooltip_text(tooltip)
@@ -882,6 +906,9 @@ class PopupMixin:
             if row is not None and hasattr(row, 'readlater_id'):
                 self.remove_read_later(row.readlater_id)  # off the Read later list without opening
                 return True
+            if row is not None and hasattr(row, 'discovery_item'):
+                self._on_discovery_dismiss(None, row.discovery_item)
+                return True
             if row is not None and hasattr(row, 'media_source'):
                 try:
                     self._show_media_menu(row, event)
@@ -910,6 +937,9 @@ class PopupMixin:
                 self.refresh_list(keep_open=True)
             else:
                 self.remove_orphans(clean_cache=(action == 'remove_cache'))
+            return
+        if hasattr(row, 'discovery_item'):  # left-click: queue for download
+            self._on_discovery_row_activated(row.discovery_item)
             return
         if not self.online and (getattr(row, 'install_all_header', False)
                                 or hasattr(row, 'header_feed_url') or hasattr(row, 'entry_id') or hasattr(row, 'readlater_id')

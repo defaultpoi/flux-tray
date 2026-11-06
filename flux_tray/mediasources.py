@@ -254,6 +254,10 @@ class MediaSources:
     def by_name(self, name):
         return next((d for d in self.drivers() if d.name == name), None)
 
+    def discovery_plugins(self):
+        """Plugins that implement fetch_discovery() for the discovery feed."""
+        return [driver for driver in self.drivers() if hasattr(driver.module, 'fetch_discovery')]
+
     def problems(self):
         """Why plugins failed to load, for an error message; '' when all loaded."""
         if not self.errors:

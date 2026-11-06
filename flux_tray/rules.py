@@ -295,6 +295,17 @@ def entry_age_seconds(entry):
         return None
 
 
+def entry_updated_timestamp(entry):
+    """Returns the updated_parsed timestamp as epoch seconds, or None if not available."""
+    parsed = entry.get('updated_parsed')
+    if not parsed:
+        return None
+    try:
+        return calendar.timegm(parsed)
+    except Exception:
+        return None
+
+
 FEED_RETRY_SECONDS = 120  # retry a feed this soon after a failed fetch (instead of a full interval)
 
 
@@ -314,19 +325,29 @@ def failed_fetch_checked_at(now, interval_seconds):
     return now - interval_seconds + min(interval_seconds, FEED_RETRY_SECONDS)
 
 
-def items_from_entries(entries, feed_url, seen_ids, mute_phrases, mute_rules, later_rules):
+def items_from_entries(entries, feed_url, seen, mute_phrases, mute_rules, later_rules):
     """Turns the entries of one fetched feed into (new_items, later_items, newly_seen_ids).
-    An entry whose id is in `seen_ids` is skipped; every other one is added to `seen_ids`
-    (the set is changed in place, so a second feed in the same round sees it too) and
-    counts as seen, but is not surfaced when it matches a mute phrase or rule or is
-    older than MAX_ITEM_AGE_SECONDS. What is left goes to later_items when a read-later
-    rule matches it (no badge, sound or popup for those), otherwise to new_items."""
+    `seen` is a dict {eid: {'seen_at': timestamp, 'updated': updated_timestamp_or_None}}.
+    An entry whose id is in `seen` is skipped unless it has been updated (updated_parsed
+    is newer than the stored 'updated' timestamp). Updated entries are surfaced again
+    with a 'live' flag. Every entry (new or updated) is added to `seen` with its
+    current updated_parsed timestamp. Items matching mute phrases/rules or older than
+    MAX_ITEM_AGE_SECONDS are not surfaced (but are still marked as seen)."""
     new_items, later_items, newly_seen_ids = [], [], set()
     for entry in entries:
         eid = entry_id(entry, feed_url)
-        if eid in seen_ids:
-            continue
-        seen_ids.add(eid)
+        updated_ts = entry_updated_timestamp(entry)
+        seen_entry = seen.get(eid)
+        is_update = False
+        if seen_entry is not None:
+            # Already seen — check if updated
+            stored_updated = seen_entry.get('updated')
+            if updated_ts is not None and stored_updated is not None and updated_ts > stored_updated:
+                is_update = True
+            else:
+                continue  # not updated, skip
+        # New or updated entry
+        seen[eid] = {'seen_at': time_module.time(), 'updated': updated_ts}
         newly_seen_ids.add(eid)
         title = entry.get('title', '(untitled)')
         if is_muted(title, mute_phrases) or entry_matches_mute_rules(entry, mute_rules):
@@ -340,6 +361,7 @@ def items_from_entries(entries, feed_url, seen_ids, mute_phrases, mute_rules, la
             'link': entry.get('link', ''),
             'feed_url': feed_url,
             'pkg_match': None,
+            'live': is_update,  # True if this is an updated article
         }
         tags, author = entry_tag_terms(entry), entry_author_name(entry)
         if tags:

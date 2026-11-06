@@ -46,6 +46,15 @@ def load_state():
     # the app elsewhere; reset just the offending key to a sane default.
     if not isinstance(state.get('seen'), dict):
         state['seen'] = {}
+    # Normalize old format (seen was {eid: timestamp}) to new format
+    # {eid: {'seen_at': timestamp, 'updated': updated_timestamp_or_None}}
+    normalized_seen = {}
+    for eid, val in state['seen'].items():
+        if isinstance(val, (int, float)):
+            normalized_seen[eid] = {'seen_at': val, 'updated': None}
+        elif isinstance(val, dict) and 'seen_at' in val:
+            normalized_seen[eid] = val
+    state['seen'] = normalized_seen
     if not isinstance(state.get('unread'), list):
         state['unread'] = []
     if not isinstance(state.get('available_updates'), list):
@@ -66,6 +75,12 @@ def load_state():
         state['live_youtube_channels'] = []
     if not isinstance(state.get('last_checked'), dict):
         state['last_checked'] = {}
+    # plugin discovery dismissed items: {plugin_name: {item_id: timestamp}}
+    if not isinstance(state.get('plugin_discovery_seen'), dict):
+        state['plugin_discovery_seen'] = {}
+    # plugin discovery cached items: {plugin_name: {item_id: item_dict}}
+    if not isinstance(state.get('plugin_discovery_items'), dict):
+        state['plugin_discovery_items'] = {}
     # the running countdown's end as a wall-clock timestamp; anything else is dropped
     end = state.get('timer_end')
     if isinstance(end, bool) or not isinstance(end, (int, float)) or not math.isfinite(end):
@@ -147,7 +162,6 @@ def save_media(media):
 
 MAX_UNREAD_ITEMS = 500  # stored unread items; the oldest beyond this are dropped (they stay 'seen')
 
-
 SEEN_RETENTION_SECONDS = 30 * 24 * 3600  # prune seen-item records older than this
 
 
@@ -157,12 +171,18 @@ def merge_feed_check(state, now, newly_seen_ids, last_checked, feed_links, new_i
     links, the items to read later and the new unread ones (at most MAX_UNREAD_ITEMS,
     the newest first). Items already stored are not added twice. Returns the new
     items and the read-later items that were really added, which may be fewer than
-    were given."""
+    were given.
+    `seen` is now {eid: {'seen_at': timestamp, 'updated': updated_timestamp_or_None}}.
+    """
     merged_seen = dict(state.get('seen', {}))
     for eid in newly_seen_ids:
-        merged_seen.setdefault(eid, now)
+        # The seen dict is already updated in items_from_entries; just ensure new entries have the right structure
+        if eid not in merged_seen:
+            merged_seen[eid] = {'seen_at': now, 'updated': None}
     cutoff = now - SEEN_RETENTION_SECONDS
-    merged_seen = {eid: ts for eid, ts in merged_seen.items() if ts >= cutoff}
+    # Prune old entries based on 'seen_at'
+    merged_seen = {eid: val for eid, val in merged_seen.items()
+                   if isinstance(val, dict) and val.get('seen_at', 0) >= cutoff}
 
     merged_last_checked = dict(state.get('last_checked', {}))
     merged_last_checked.update(last_checked)

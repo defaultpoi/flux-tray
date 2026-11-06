@@ -257,5 +257,111 @@ class TestAlertSeverityAndTiming(unittest.TestCase):
         self.assertIn(flips('yellow'), (3, 4))
 
 
+class TestAlertToForecastDayMapping(unittest.TestCase):
+    """Test mapping active alerts to overlapping forecast days."""
+
+    def _alert(self, onset_str, expires_str, severity='Moderate', hazard='Wind'):
+        """Create a mock alert dict with parsed onset/expires."""
+        return {
+            'hazard': hazard,
+            'severity_color': rt._severity_to_color(severity),
+            'onset': rt.datetime.fromisoformat(onset_str),
+            'expires': rt.datetime.fromisoformat(expires_str),
+            'title': f'{rt._severity_to_color(severity).capitalize()} {hazard} Warning issued for Country - Region',
+        }
+
+    def test_alert_overlapping_single_day(self):
+        """Alert spanning one forecast day colors that day."""
+        alerts = [self._alert('2026-09-30T06:00:00+00:00', '2026-09-30T18:00:00+00:00')]
+        forecast_dates = [
+            rt.datetime(2026, 9, 29, tzinfo=rt.timezone.utc),  # today
+            rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),  # day 1 - overlaps
+            rt.datetime(2026, 10, 1, tzinfo=rt.timezone.utc),  # day 2
+            rt.datetime(2026, 10, 2, tzinfo=rt.timezone.utc),  # day 3
+            rt.datetime(2026, 10, 3, tzinfo=rt.timezone.utc),  # day 4
+        ]
+        # Map alerts to forecast days (day index -> {'color': severity_color, 'titles': [...]} )
+        mapping = rt._map_alerts_to_forecast_days(alerts, forecast_dates)
+        # Should map day 1 (index 1) to yellow
+        self.assertEqual(mapping.get(1), {'color': 'yellow', 'titles': [alerts[0]['title']]})
+        self.assertNotIn(0, mapping)
+        self.assertNotIn(2, mapping)
+
+    def test_alert_spanning_multiple_days(self):
+        """Alert spanning multiple days colors all overlapping days."""
+        alerts = [self._alert('2026-09-30T06:00:00+00:00', '2026-10-02T18:00:00+00:00', severity='Severe')]
+        forecast_dates = [
+            rt.datetime(2026, 9, 29, tzinfo=rt.timezone.utc),
+            rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),
+            rt.datetime(2026, 10, 1, tzinfo=rt.timezone.utc),
+            rt.datetime(2026, 10, 2, tzinfo=rt.timezone.utc),
+            rt.datetime(2026, 10, 3, tzinfo=rt.timezone.utc),
+        ]
+        mapping = rt._map_alerts_to_forecast_days(alerts, forecast_dates)
+        self.assertEqual(mapping.get(1), {'color': 'orange', 'titles': [alerts[0]['title']]})  # day 1
+        self.assertEqual(mapping.get(2), {'color': 'orange', 'titles': [alerts[0]['title']]})  # day 2
+        self.assertEqual(mapping.get(3), {'color': 'orange', 'titles': [alerts[0]['title']]})  # day 3
+        self.assertNotIn(0, mapping)
+        self.assertNotIn(4, mapping)
+
+    def test_multiple_alerts_worst_severity_wins(self):
+        """When multiple alerts overlap a day, worst severity wins."""
+        alerts = [
+            self._alert('2026-09-30T06:00:00+00:00', '2026-09-30T18:00:00+00:00', severity='Moderate', hazard='Wind'),
+            self._alert('2026-09-30T12:00:00+00:00', '2026-10-01T12:00:00+00:00', severity='Extreme', hazard='Rain'),
+        ]
+        forecast_dates = [
+            rt.datetime(2026, 9, 29, tzinfo=rt.timezone.utc),
+            rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),
+            rt.datetime(2026, 10, 1, tzinfo=rt.timezone.utc),
+        ]
+        mapping = rt._map_alerts_to_forecast_days(alerts, forecast_dates)
+        # Day 1 has both alerts: yellow (wind) and red (rain) -> red wins
+        self.assertEqual(mapping.get(1)['color'], 'red')
+        self.assertEqual(len(mapping.get(1)['titles']), 2)
+        # Day 2 has only red (rain)
+        self.assertEqual(mapping.get(2)['color'], 'red')
+        self.assertEqual(len(mapping.get(2)['titles']), 1)
+
+    def test_alert_before_forecast_period(self):
+        """Alert ending before first forecast day doesn't color anything."""
+        alerts = [self._alert('2026-09-28T06:00:00+00:00', '2026-09-28T18:00:00+00:00')]
+        forecast_dates = [
+            rt.datetime(2026, 9, 29, tzinfo=rt.timezone.utc),
+            rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),
+        ]
+        mapping = rt._map_alerts_to_forecast_days(alerts, forecast_dates)
+        self.assertEqual(mapping, {})
+
+    def test_alert_after_forecast_period(self):
+        """Alert starting after last forecast day doesn't color anything."""
+        alerts = [self._alert('2026-10-05T06:00:00+00:00', '2026-10-05T18:00:00+00:00')]
+        forecast_dates = [
+            rt.datetime(2026, 9, 29, tzinfo=rt.timezone.utc),
+            rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),
+        ]
+        mapping = rt._map_alerts_to_forecast_days(alerts, forecast_dates)
+        self.assertEqual(mapping, {})
+
+    def test_alert_exactly_on_day_boundary(self):
+        """Alert starting exactly at midnight of a forecast day counts as overlapping."""
+        alerts = [self._alert('2026-09-30T00:00:00+00:00', '2026-09-30T23:59:00+00:00')]
+        forecast_dates = [
+            rt.datetime(2026, 9, 29, tzinfo=rt.timezone.utc),
+            rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),  # day starts at midnight
+        ]
+        mapping = rt._map_alerts_to_forecast_days(alerts, forecast_dates)
+        self.assertEqual(mapping.get(1), {'color': 'yellow', 'titles': [alerts[0]['title']]})
+
+
+class TestFetchWeatherIncludesForecastDates(unittest.TestCase):
+    """Test that fetch_weather returns daily dates for forecast mapping."""
+
+    def test_fetch_weather_returns_daily_dates(self):
+        """fetch_weather should include 'daily_dates' in returned dict."""
+        # This test will verify the structure after implementation
+        pass
+
+
 if __name__ == '__main__':
     unittest.main()

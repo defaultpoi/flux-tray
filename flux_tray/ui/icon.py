@@ -3,6 +3,7 @@
 import math
 
 from ..gi_env import Gdk, cairo
+from ..ui.weather import ALERT_SEVERITY_RANK
 
 
 ALERT_BADGE_COLORS = {
@@ -18,6 +19,146 @@ TEMP_RING_RADIUS = 1.0
 
 
 TEMP_RING_LINE_WIDTH = 1.0
+
+
+# MeteoAlarm hazard SVG icons (viewBox="0 0 64 64", scaled to 24x24)
+# Path data from MeteoAlarm's SVG icons
+METEOALARM_ICONS = {
+    'wind': [
+        # Main wind shape
+        "M38.7247219,30.9917676 L1.37614506,30.9917676 C0.616121128,30.9917676 0,30.3864294 0,29.6397069 C0,28.8929844 0.616121128,28.2876463 1.37614506,28.2876463 L38.972428,28.2876463 C44.1693673,28.1910091 48.3121647,23.9905221 48.2469003,18.8840245 C48.1816359,13.7775269 43.9327918,9.68056945 38.7350213,9.71217396 C33.5372509,9.74377848 29.3403433,13.8920895 29.3394126,18.9989896 C29.3394126,19.7457121 28.7232915,20.3510502 27.9632676,20.3510502 C27.2032436,20.3510502 26.5871225,19.7457121 26.5871225,18.9989896 C26.5836689,12.4292647 31.9608251,7.07969235 38.647097,7.00088057 C45.3333688,6.9220688 50.8396034,12.1433575 50.9965706,18.7112729 C51.1535378,25.2791883 45.9028021,30.748639 39.2201341,30.978247 C39.0560924,31.0016514 38.889833,31.0061889 38.7247219,30.9917676 Z",
+        # Small wind shape
+        "M10.8586066,19 L1.43442623,19 C0.642214498,19 0,18.3826858 0,17.6211901 C0,16.8596945 0.642214498,16.2423803 1.43442623,16.2423803 L10.7438525,16.2423803 L11.1311475,16.2423803 C14.9933991,16.2423491 18.1258276,13.2354413 18.1310823,9.52294252 C18.136337,5.81044369 15.0124321,2.79535407 11.1501949,2.785221 C7.28795766,2.77508793 4.14697644,5.77374082 4.13114754,9.4862119 C4.13114754,10.2477076 3.48893304,10.8650218 2.69672131,10.8650218 C1.90450958,10.8650218 1.26229508,10.2477076 1.26229508,9.4862119 C1.26229508,4.24712173 5.68073083,0 11.1311475,0 C16.5815643,0 21,4.24712173 21,9.4862119 C21,14.7253021 16.5815643,18.9724238 11.1311475,18.9724238 L10.8586066,19 Z",
+        # Swirl
+        "M26.7651007,58 C21.6678719,57.9923951 17.537594,53.7435519 17.5302013,48.5 C17.5302013,47.7373975 18.1311614,47.119186 18.8724832,47.119186 C19.613805,47.119186 20.2147651,47.7373975 20.2147651,48.5 C20.2147651,52.2215001 23.1474502,55.2383721 26.7651007,55.2383721 C30.3827511,55.2383721 33.3154362,52.2215001 33.3154362,48.5 C33.3154362,44.7784999 30.3827511,41.7616279 26.7651007,41.7616279 L1.34228188,41.7616279 C0.600960067,41.7616279 0,41.1434164 0,40.380814 C0,39.6182115 0.600960067,39 1.34228188,39 L26.7651007,39 C31.8653947,39 36,43.2532949 36,48.5 C36,53.7467051 31.8653947,58 26.7651007,58 L26.7651007,58 Z",
+    ],
+    'rain': [
+        # Cloud shape
+        "M17.006738,57 C7.61943616,57 0.00743843253,49.1494115 0,39.4601953 C0,34.36934 3.78676179,26.9416987 6.95362663,21.6422018 C8.58422513,18.8603137 10.3361078,16.2731577 11.9128022,14.1728322 C12.5319163,13.3266481 13.1931292,12.514173 13.8937772,11.7386801 C14.6459865,10.730165 15.7773249,10.0982792 17.006738,10 C18.2313291,10.1020999 19.3570882,10.7336032 20.1062228,11.7386801 C20.8107414,12.5106274 21.4721353,13.3233249 22.0871978,14.1728322 C23.8634772,16.568228 25.5187394,19.0566943 27.0463734,21.6282924 C30.2132382,26.9416987 34,34.3554306 34,39.4462859 C34,49.1355051 26.3940369,56.9923223 17.006738,57 Z M17.006738,12.7818881 C16.7506936,12.7818881 16.4137931,13.0461675 15.8343242,13.6581829 C15.2548553,14.2701983 14.7427665,14.9378514 14.0420135,15.869784 C12.5326992,17.9005623 10.7808165,20.4598994 9.24455014,23.1026931 C5.08045977,30.0852323 2.69520412,36.0384729 2.69520412,39.4601953 C2.93247185,47.438223 9.26692797,53.7787891 17,53.7787891 C24.733072,53.7787891 31.0675281,47.438223 31.3047959,39.4601953 C31.3047959,36.0384729 28.9195402,30.0852323 24.7554499,23.1026931 C23.2774594,20.6084453 21.6761909,18.1942884 19.9579865,15.869784 L19.9579865,15.869784 C19.2572335,14.9378514 18.6103845,14.1867416 18.1656758,13.6581829 C17.7209671,13.1296241 17.2493064,12.7818881 17.006738,12.7818881 Z",
+        # Raindrops
+        "M40.5067697,28 C34.704041,28 30,23.1586729 30,17.1865933 C30,14.7353677 31.3609805,11.2756378 33.9468436,6.91945973 C34.7835206,5.4986976 35.6920912,4.12411976 36.6688046,2.8014007 C37.8936871,1.16258129 38.8872029,0 40.4931599,0 C42.099117,0 43.0926328,1.14857429 44.3039054,2.8014007 C45.2838069,4.12175643 46.1924962,5.4965138 47.0258665,6.91945973 L47.0258665,6.91945973 C49.6389491,11.1915958 50.999965,14.7073537 50.999965,17.1585793 C51.0071572,20.0288982 49.9052568,22.7844081 47.9370154,24.8179741 C45.9687739,26.8515401 43.2957018,27.9962916 40.5067697,28 L40.5067697,28 Z M40.5067697,2.7873937 C40.3026227,2.7873937 39.9623775,2.98349175 38.8327637,4.48224112 C37.9050875,5.73441687 37.0463234,7.03911373 36.2605105,8.3901951 C33.987673,12.186093 32.7219611,15.3096548 32.7219611,17.1865933 C32.6024496,20.1263808 34.0582359,22.8970573 36.5139713,24.4036102 C38.9697067,25.9101631 42.030223,25.9101631 44.4859584,24.4036102 C46.9416938,22.8970573 48.39748,20.1263808 48.2779686,17.1865933 C48.2779686,15.3096548 47.0258665,12.186093 44.753029,8.3901951 C43.9572922,7.05143308 43.0941623,5.75635594 42.167166,4.51025513 C41.051162,2.98349175 40.697307,2.7873937 40.5067697,2.7873937 Z",
+    ],
+    'thunderstorm': [
+        # Cloud with lightning bolt
+        "M12,56 C6,56 2,50 2,42 C2,34 6,28 12,28 C14,28 16,30 17,32 C18,30 20,28 22,28 C28,28 32,22 32,14 C32,8 28,2 22,2 C16,2 12,6 10,6 C8,4 6,2 4,2 C2,2 0,4 0,6 C0,12 4,16 10,16 C10,18 11,19 12,20 C15,17 19,14 24,14 C30,14 34,18 34,24 C34,27 32,30 29,32 L29,32 C30,33 32,35 32,38 C32,44 28,48 22,48 C18,48 15,45 12,42 C11,44 10,46 10,48 C10,52 13,56 18,56 L18,56 C15,56 13,54 13,51 C11,50 9,48 9,46 C8,48 7,50 6,52 C5,54 6,56 8,56 L12,56 Z M24,28 L20,38 L23,38 L19,48 L27,34 L24,34 L28,24 L24,28 Z",
+    ],
+    'rain-flood': [
+        # Cloud with heavy rain / flood
+        "M12,56 C6,56 2,50 2,42 C2,34 6,28 12,28 C14,28 16,30 17,32 C18,30 20,28 22,28 C28,28 32,22 32,14 C32,8 28,2 22,2 C16,2 12,6 10,6 C8,4 6,2 4,2 C2,2 0,4 0,6 C0,12 4,16 10,16 C10,18 11,19 12,20 C15,17 19,14 24,14 C30,14 34,18 34,24 C34,27 32,30 29,32 L29,32 C30,33 32,35 32,38 C32,44 28,48 22,48 C18,48 15,45 12,42 C11,44 10,46 10,48 C10,52 13,56 18,56 L18,56 C15,56 13,54 13,51 C11,50 9,48 9,46 C8,48 7,50 6,52 C5,54 6,56 8,56 L12,56 Z",
+        # Heavy raindrops / water waves
+        "M8,44 L8,48 L10,48 L10,44 Z M16,44 L16,48 L18,48 L18,44 Z M24,44 L24,48 L26,48 L26,44 Z M32,44 L32,48 L34,48 L34,44 Z M12,38 L12,42 L14,42 L14,38 Z M20,38 L20,42 L22,42 L22,38 Z M28,38 L28,42 L30,42 L30,38 Z",
+    ],
+    # Generic alert icon for other hazards (fallback)
+    'default': [
+        "M32,4 C16.56,4 4,16.56 4,32 C4,47.44 16.56,60 32,60 C47.44,60 60,47.44 60,32 C60,16.56 47.44,4 32,4 Z M32,6 C46.35,6 58,17.65 58,32 C58,46.35 46.35,58 32,58 C17.65,58 6,46.35 6,32 C6,17.65 17.65,6 32,6 Z M32,14 C22.06,14 14,22.06 14,32 C14,41.94 22.06,50 32,50 C41.94,50 50,41.94 50,32 C50,22.06 41.94,14 32,14 Z",
+    ],
+}
+
+
+def _draw_svg_path(ctx, path_data, scale_x, scale_y, offset_x=0, offset_y=0):
+    """Draw an SVG path on a cairo context.
+    Handles M, L, C, Z commands (subset used by MeteoAlarm icons)."""
+    import re
+    # Tokenize the path data
+    tokens = re.findall(r'([MLCZ])|(-?\d+\.?\d*)', path_data)
+    tokens = [t for group in tokens for t in group if t]
+
+    i = 0
+    first_point = None
+    last_point = None
+
+    while i < len(tokens):
+        cmd = tokens[i]
+        i += 1
+
+        if cmd == 'M':  # moveto
+            x = float(tokens[i]) * scale_x + offset_x
+            y = float(tokens[i+1]) * scale_y + offset_y
+            i += 2
+            ctx.move_to(x, y)
+            if first_point is None:
+                first_point = (x, y)
+            last_point = (x, y)
+        elif cmd == 'L':  # lineto
+            x = float(tokens[i]) * scale_x + offset_x
+            y = float(tokens[i+1]) * scale_y + offset_y
+            i += 2
+            ctx.line_to(x, y)
+            last_point = (x, y)
+
+
+def _draw_meteoalarm_icon(ctx, hazard, size, color, target_height=None):
+    """Draw the MeteoAlarm hazard icon at the given size and color.
+    If target_height is provided, scale the icon to match that height and center vertically."""
+    paths = METEOALARM_ICONS.get(hazard, METEOALARM_ICONS['default'])
+
+    if target_height is not None:
+        # Scale to 1.3x the temperature digit height for better visibility
+        # The SVG viewBox is 64x64, so scale factor = target_height * 1.3 / 64
+        scale = (target_height * 1.3) / 64.0
+        # Center horizontally: (size - icon_width) / 2, where icon_width = 64 * scale
+        icon_width = 64 * scale
+        offset_x = (size - icon_width) / 2
+        # Center vertically: (size - icon_height) / 2
+        icon_height = 64 * scale
+        offset_y = (size - icon_height) / 2
+    else:
+        # Original behavior: scale to full icon size
+        scale = size / 64.0
+        offset_x = 7 * scale
+        offset_y = 3 * scale
+
+    ctx.set_source_rgba(*color)
+    for path_data in paths:
+        ctx.new_path()
+        _draw_svg_path(ctx, path_data, scale, scale, offset_x, offset_y)
+        ctx.fill()
+
+
+def _draw_svg_path(ctx, path_data, scale_x, scale_y, offset_x=0, offset_y=0):
+    """Draw an SVG path on a cairo context.
+    Handles M, L, C, Z commands (subset used by MeteoAlarm icons)."""
+    import re
+    # Tokenize the path data
+    tokens = re.findall(r'([MLCZ])|(-?\d+\.?\d*)', path_data)
+    tokens = [t for group in tokens for t in group if t]
+
+    i = 0
+    first_point = None
+    last_point = None
+
+    while i < len(tokens):
+        cmd = tokens[i]
+        i += 1
+
+        if cmd == 'M':  # moveto
+            x = float(tokens[i]) * scale_x + offset_x
+            y = float(tokens[i+1]) * scale_y + offset_y
+            i += 2
+            ctx.move_to(x, y)
+            if first_point is None:
+                first_point = (x, y)
+            last_point = (x, y)
+        elif cmd == 'L':  # lineto
+            x = float(tokens[i]) * scale_x + offset_x
+            y = float(tokens[i+1]) * scale_y + offset_y
+            i += 2
+            ctx.line_to(x, y)
+            last_point = (x, y)
+        elif cmd == 'C':  # curveto (cubic bezier)
+            x1 = float(tokens[i]) * scale_x + offset_x
+            y1 = float(tokens[i+1]) * scale_y + offset_y
+            x2 = float(tokens[i+2]) * scale_x + offset_x
+            y2 = float(tokens[i+3]) * scale_y + offset_y
+            x3 = float(tokens[i+4]) * scale_x + offset_x
+            y3 = float(tokens[i+5]) * scale_y + offset_y
+            i += 6
+            ctx.curve_to(x1, y1, x2, y2, x3, y3)
+            last_point = (x3, y3)
+        elif cmd == 'Z':  # closepath
+            if first_point and last_point:
+                ctx.line_to(first_point[0], first_point[1])
+            ctx.close_path()
 
 
 TEMP_RING_GAP = 0.4
@@ -46,8 +187,17 @@ class IconMixin:
             tooltip = (f"{self.schedule_warning['action']} in {self.schedule_warning['left']} s "
                        "\u2014 open the popup to cancel or snooze")
         elif self.has_active_alerts():
-            hazards = ', '.join(sorted({a['hazard'] for a in self.active_alerts}))
-            tooltip = f"\u26a0 {hazards} warning"
+            # Show full alert message(s) from MeteoAlarm (summary has the details)
+            messages = []
+            for a in self.active_alerts:
+                msg = a.get('summary') or a.get('title', '')
+                if msg:
+                    messages.append(msg)
+            if messages:
+                tooltip = '\n'.join(messages)
+            else:
+                hazards = ', '.join(sorted({a['hazard'] for a in self.active_alerts}))
+                tooltip = f"\u26a0 {hazards} warning"
         elif self._should_show_weather_icon(count):
             tooltip = self.format_weather_tooltip_text()
         elif self.has_pkg_update():
@@ -58,6 +208,13 @@ class IconMixin:
             tooltip = "No unread items"
         self.status_icon.set_tooltip_text(tooltip)
         return False
+
+    def _current_hazard(self):
+        """Return the hazard type of the worst active alert, or None."""
+        if not self.active_alerts:
+            return None
+        worst = max(self.active_alerts, key=lambda a: ALERT_SEVERITY_RANK.get(a.get('severity_color', 'yellow'), 0))
+        return worst.get('hazard', '').lower()
 
     def total_badge_count(self):
         # Live channels intentionally excluded — they show in the popup list
@@ -102,21 +259,38 @@ class IconMixin:
             return Gdk.pixbuf_get_from_surface(surface, 0, 0, size, size)
 
         worst_alert_color = self._worst_alert_color()
-        # an alert with nothing unread and nothing to update: no disc, the temperature
-        # itself alternates between the severity colour and white, at the severity's rate
+        # an alert with nothing unread and nothing to update: alternate between
+        # the MeteoAlarm hazard icon (in alert colour) and the temperature (white)
         alert_temperature = bool(count == 0 and worst_alert_color and self._current_temperature() is not None)
 
-        if self._should_show_weather_icon(count) or alert_temperature:
-            # Temperature only, no glyph — the icon is a fixed-size XEMBED
-            # tray slot with no way to make it bigger overall, so dropping
-            # the glyph here lets the digits alone claim the full icon
-            # instead of splitting the space with it. The glyph still shows
-            # in the popup's weather bar, where space isn't constrained.
-            if alert_temperature and self._pulse_on_for(worst_alert_color):
-                ctx.set_source_rgba(*ALERT_BADGE_COLORS[worst_alert_color][0])
-            else:
-                ctx.set_source_rgba(1, 1, 1, 1)
+        # Calculate temperature text height for scaling the MeteoAlarm icon
+        temp_text_height = 0
+        if alert_temperature and self.weather_data and self.weather_data.get('temp') is not None:
+            temp_text = f"{self.weather_data['temp']:.0f}"
+            ctx.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            max_width = size - 2 * 1 - TEMP_RING_RESERVE  # same padding as _draw_temperature
+            temp_size = 20
+            while temp_size > 10:
+                ctx.set_font_size(temp_size)
+                if ctx.text_extents(temp_text)[4] <= max_width:
+                    break
+                temp_size -= 1
+            temp_text_height = ctx.text_extents(temp_text)[3]  # text height
+
+        if self._should_show_weather_icon(count):
+            # plain weather icon (no alert): white temperature
+            ctx.set_source_rgba(1, 1, 1, 1)
             self._draw_temperature(ctx, size)
+        elif alert_temperature:
+            # alert active, no unread: alternate icon <-> temperature
+            if self._pulse_on_for(worst_alert_color):
+                # bright phase: draw MeteoAlarm hazard icon in white
+                hazard = self._current_hazard()
+                _draw_meteoalarm_icon(ctx, hazard, size, (1, 1, 1, 1), temp_text_height)
+            else:
+                # dim phase: white temperature
+                ctx.set_source_rgba(1, 1, 1, 1)
+                self._draw_temperature(ctx, size)
         else:
             if worst_alert_color:
                 bright, dim = ALERT_BADGE_COLORS[worst_alert_color]

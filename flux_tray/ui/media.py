@@ -1,16 +1,22 @@
 """Podcasts, series and movies: checking sources, keeping the next episodes
 downloaded, playing them in mpv and remembering what was watched."""
 
+import json
 import os
 import threading
 import time as time_module
+from datetime import datetime, timezone
+from pathlib import Path
 
-from ..gi_env import GLib, Gdk, Gio, Gtk, Pango
+# For async poster loading in tooltips
+import urllib.request
+
+from ..gi_env import GLib, Gdk, GdkPixbuf, Gio, Gtk, Pango
 from ..config import load_media_movies, load_media_settings, load_media_sources, remove_media_sources
-from ..constants import CONFIG_FILE
+from ..constants import CONFIG_FILE, MEDIA_PLUGIN_DIR
 from ..desktop import move_to_trash, primary_monitor_size
 from ..fileutil import remove_empty_dirs
-from ..hls import is_hls
+from ..hls import DownloadCancelled, is_hls
 from ..media import (
     clean_title,
     download_episode,
@@ -23,16 +29,22 @@ from ..media import (
     unwatched_count,
     upcoming,
 )
-from ..mediasources import NoDriver, normalize_files, normalize_saved
+from ..mediasources import MediaSources, NoDriver, normalize_files, normalize_saved
 from ..network import run_when_online
-from ..playback import counts_as_watched, play_media_file, resume_point
+from ..playback import counts_as_watched, is_media_playing, mpv_append_playlist, play_media_file, resume_point
 from ..screen import media_target_size, remember_screen_size
-from ..state import new_media_entry, save_media
+from ..state import new_media_entry, save_media, save_state
+from ..metadata import get_media_metadata, get_cached_metadata, refresh_metadata_cache
+from ..media_cache import (
+    load_media_cache, save_media_cache, get_or_create_entry,
+    get_new_items, mark_seen, is_seen, get_all_cached_items, prune_seen_set
+)
+from ..log import _log
 
 
 MEDIA_CONFIG_DEBOUNCE_MS = 800  # an editor or the browser extension may write the file in several steps
 PLAY_PARTIAL_MIN_BYTES = 1_500_000  # enough of a download for mpv to start on (about a minute of video)
-MEDIA_MARKER_COLORS = {'ready': '#2e8b57', 'busy': '#d08000', 'failed': '#c0392b', 'idle': '#808080'}
+MEDIA_MARKER_COLORS = {'ready': '#2e8b57', 'busy': '#d08000', 'failed': '#c0392b', 'idle': '#808080', 'playing': '#2980b9'}
 
 
 def duration_text(seconds):
@@ -45,13 +57,21 @@ def duration_text(seconds):
     return f'{minutes} min'
 
 
-def media_row_view(name, entry, order, downloaded, status, error=None, now=None):
+def media_row_view(name, entry, order, downloaded, status, error=None, now=None, url=None, is_playing=False):
     """What a source's row shows: (name, next episode text, stats text, tooltip,
     marker colour key). `downloaded` is whether the next episode is on disk and
     `status` its entry in the downloads' progress ('queued', 'downloading' with a
     percent, or 'failed' with an error), None when nothing is going on. `error` is
     why the source's last check failed, if it did. A watched movie that is due to be
-    removed says when."""
+    removed says when. `is_playing` indicates if this source is currently playing in mpv."""
+    # Extract IMDb/TMDb IDs from the next episode (or entry for movies)
+    imdb_id = None
+    tmdb_id = None
+    if entry.get('episodes'):
+        nxt = upcoming(entry.get('episodes', []), entry.get('watched', []), order, 1)
+        if nxt:
+            imdb_id = nxt[0].get('imdb_id')
+            tmdb_id = nxt[0].get('tmdb_id')
     last = entry.get('last_watched')
     last_line = f"Last watched: {last.get('title') or last['id']}" if last else ''
     error_line = f'Last check failed: {error}' if error else ''
@@ -68,7 +88,13 @@ def media_row_view(name, entry, order, downloaded, status, error=None, now=None)
             removal_line = f'Removed with its file in {duration_text(left)}. Right-click it and choose "I didn\'t finish it" to keep it.'
         return name, text, stats, '\n'.join(p for p in (removal_line, last_line, error_line) if p), 'idle'
     episode = nxt[0]
-    label = episode_label(episode)
+    # Get total episodes from cached metadata (TMDb/OMDB)
+    total_episodes = None
+    title = entry.get('title') or name
+    meta = get_cached_metadata(title, url=url, imdb_id=imdb_id, tmdb_id=tmdb_id)
+    if meta and meta.get('total_episodes'):
+        total_episodes = meta['total_episodes']
+    label = episode_label(episode, total_episodes)
     text = ' '.join(p for p in (label, clean_title(episode.get('title'), (name, entry.get('title')))) if p)
     state = (status or {}).get('state')
     if state == 'downloading':
@@ -77,13 +103,30 @@ def media_row_view(name, entry, order, downloaded, status, error=None, now=None)
         stats, color, hint = 'queued', 'busy', 'Waiting to download'
     elif state == 'failed':
         stats, color, hint = 'failed', 'failed', f"Download failed: {status.get('error') or 'unknown error'} (retried at the next check; click to retry now)"
+    elif is_playing:
+        stats, color, hint = 'playing', 'playing', 'Playing in mpv'
     elif downloaded:
         stats, color, hint = 'ready', 'ready', 'Click to play'
     else:
         stats, color, hint = 'not downloaded', 'idle', 'Click to download'
     if news:
         stats = f'{stats} - {news} new' if stats else f'{news} new'
-    tooltip = '\n'.join(p for p in (text, hint, f'{unwatched_count(entry)} unwatched', last_line, error_line) if p)
+
+    # Build tooltip with metadata
+    tooltip_parts = [text, hint, f'{unwatched_count(entry)} unwatched', last_line, error_line]
+    # Add TMDb/OMDB metadata for the series/movie (not the episode)
+    title = entry.get('title') or name
+    meta = get_media_metadata(title, url=url, imdb_id=imdb_id, tmdb_id=tmdb_id)
+    if meta:
+        tooltip_parts.insert(1, meta)  # Insert after the episode text
+    # Escape plain text parts, metadata already has markup
+    escaped_parts = []
+    for i, p in enumerate(tooltip_parts):
+        if p and i == 1 and meta:  # metadata part - already has markup
+            escaped_parts.append(p)
+        elif p:
+            escaped_parts.append(GLib.markup_escape_text(p))
+    tooltip = '\n'.join(escaped_parts)
     return name, text, stats, tooltip, color
 
 
@@ -94,6 +137,224 @@ def describe_media_error(error):
     if isinstance(error, (NoDriver, ValueError)) and message:
         return message[:300]
     return f'{error.__class__.__name__}: {message}'[:300].rstrip(': ')
+
+
+def create_metadata_tooltip(meta):
+    """Create a custom tooltip widget with poster image and metadata.
+    Layout: top-left image, top-right details, bottom plot (full width).
+    Returns a Gtk.Box widget or None if no metadata."""
+    if not meta:
+        return None
+
+    # Main vertical container: top section (horizontal), bottom plot (full width)
+    main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    main_box.set_margin_start(8)
+    main_box.set_margin_end(8)
+    main_box.set_margin_top(6)
+    main_box.set_margin_bottom(6)
+
+    # Top horizontal section: image on left, details on right
+    top_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+    top_box.set_valign(Gtk.Align.START)
+
+    # Poster image (top-left, 200px max width)
+    imdb_id = meta.get('imdb_id')
+    tmdb_id = meta.get('tmdb_id')
+    title = meta.get('title') or meta.get('Title')
+    poster_path = None
+    if title:
+        from ..metadata import get_cached_poster
+        poster_path = get_cached_poster(title, imdb_id=imdb_id, tmdb_id=tmdb_id)
+
+    if poster_path:
+        try:
+            image = Gtk.Image()
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file(poster_path)
+            # Scale to reasonable width (200px max)
+            if pixbuf.get_width() > 200:
+                pixbuf = pixbuf.scale_simple(200, int(200 * pixbuf.get_height() / pixbuf.get_width()), GdkPixbuf.InterpType.BILINEAR)
+            image.set_from_pixbuf(pixbuf)
+            image.set_halign(Gtk.Align.START)
+            image.set_valign(Gtk.Align.START)
+            top_box.pack_start(image, False, False, 0)
+        except Exception:
+            pass
+    else:
+        # Fallback: load from URL in background (for cases where poster not yet cached)
+        poster_url = meta.get('poster') or meta.get('Poster')
+        if poster_url and poster_url != 'N/A':
+            try:
+                image = Gtk.Image()
+                image.set_halign(Gtk.Align.START)
+                image.set_valign(Gtk.Align.START)
+                # Load poster asynchronously in background
+                def load_poster():
+                    try:
+                        import urllib.request
+                        from ..metadata import TMDB_USER_AGENT
+                        ua = TMDB_USER_AGENT if 'image.tmdb.org' in poster_url else 'flux-tray/1.0'
+                        req = urllib.request.Request(poster_url, headers={'User-Agent': ua})
+                        with urllib.request.urlopen(req, timeout=5) as resp:
+                            data = resp.read()
+                        loader = GdkPixbuf.PixbufLoader()
+                        loader.write(data)
+                        loader.close()
+                        pixbuf = loader.get_pixbuf()
+                        # Scale to reasonable width (200px max)
+                        if pixbuf.get_width() > 200:
+                            pixbuf = pixbuf.scale_simple(200, int(200 * pixbuf.get_height() / pixbuf.get_width()), GdkPixbuf.InterpType.BILINEAR)
+                        GLib.idle_add(image.set_from_pixbuf, pixbuf)
+                    except Exception:
+                        GLib.idle_add(image.set_from_icon_name, 'image-missing', Gtk.IconSize.DIALOG)
+                threading.Thread(target=load_poster, daemon=True).start()
+                top_box.pack_start(image, False, False, 0)
+            except Exception:
+                pass
+
+    # Details on the right (top-right)
+    details_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+    details_box.set_valign(Gtk.Align.START)
+    details_box.set_hexpand(True)
+
+    # Title + year
+    title = meta.get('title') or meta.get('Title')
+    year = meta.get('year') or meta.get('Year')
+    if title:
+        year_str = f" ({year})" if year else ''
+        # Escape title for markup (e.g., "Law & Order" -> "Law & Order")
+        escaped_title = GLib.markup_escape_text(title)
+        title_label = Gtk.Label(label=f'{title}{year_str}')
+        title_label.set_markup(f'<b><span size="large">{escaped_title}{year_str}</span></b>')
+        title_label.set_xalign(0)
+        title_label.set_line_wrap(True)
+        title_label.set_max_width_chars(60)
+        title_label.set_margin_bottom(8)  # empty row below title
+        details_box.pack_start(title_label, False, False, 0)
+
+    # Helper to add a field row
+    def add_field(label_text, value_text):
+        if value_text is None or value_text == '' or value_text == 'N/A':
+            return
+        field_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        field_box.set_margin_top(1)
+        field_box.set_margin_bottom(1)
+        label = Gtk.Label(label=label_text)
+        label.set_xalign(0)
+        label.get_style_context().add_class('menu-text')
+        label.set_markup(f'<b>{GLib.markup_escape_text(label_text)}</b>')
+        value = Gtk.Label(label=value_text)
+        value.set_xalign(0)
+        value.set_line_wrap(True)
+        value.set_max_width_chars(50)
+        field_box.pack_start(label, False, False, 0)
+        field_box.pack_start(value, True, True, 0)
+        details_box.pack_start(field_box, False, False, 0)
+
+    # Ratings: combine rating + votes on same line
+    imdb_rating = meta.get('imdb_rating') or meta.get('imdbRating')
+    imdb_votes = meta.get('imdb_votes') or meta.get('imdbVotes')
+    if imdb_rating is not None and imdb_rating != 'N/A':
+        rating_str = f'{imdb_rating:.1f}/10'
+        if imdb_votes and imdb_votes != 'N/A':
+            rating_str += f' ({imdb_votes} votes)'
+        add_field('IMDb', rating_str)
+
+    tmdb_rating = meta.get('tmdb_rating') or meta.get('tmdbRating')
+    tmdb_votes = meta.get('tmdb_votes') or meta.get('tmdbVotes')
+    if tmdb_rating is not None and tmdb_rating != 'N/A':
+        rating_str = f'{tmdb_rating:.1f}/10'
+        if tmdb_votes and tmdb_votes != 'N/A':
+            rating_str += f' ({tmdb_votes} votes)'
+        add_field('TMDb', rating_str)
+
+    metascore = meta.get('metascore') or meta.get('Metascore')
+    if metascore is not None and metascore != 'N/A':
+        add_field('Metascore', f'{metascore}/100')
+
+    # Ratings from OMDB (Rotten Tomatoes, etc.) - exclude IMDb/TMDb/Metacritic since shown above
+    ratings = meta.get('ratings') or meta.get('Ratings')
+    if ratings:
+        for r in ratings:
+            if isinstance(r, dict) and r.get('Source') and r.get('Value'):
+                source = r['Source']
+                if source not in ('Internet Movie Database', 'Metacritic'):
+                    add_field(source, r['Value'])
+
+    # Fields to display (excluding: production countries, production companies, imdb id, tmdb id, homepage, status, spoken languages, source, plot)
+    field_mappings = [
+        ('Type', ['type', 'Type']),
+        ('Rated', ['Rated']),
+        ('Genre', ['genre', 'Genre']),
+        ('Runtime', ['runtime', 'Runtime']),
+        ('Released', ['released', 'Released']),
+        ('Language', ['language', 'Language']),
+        ('Country', ['country', 'Country']),
+        ('Awards', ['awards', 'Awards']),
+        ('Director', ['director', 'Director']),
+        ('Writer', ['writer', 'Writer']),
+        ('Actors', ['actors', 'Actors']),
+        ('Tagline', ['tagline']),
+        ('Total Seasons', ['total_seasons', 'totalSeasons']),
+        ('Total Episodes', ['total_episodes', 'totalEpisodes']),
+        ('DVD', ['DVD']),
+        ('Box Office', ['BoxOffice']),
+    ]
+
+    # Find value from any of the possible keys
+    for display_label, keys in field_mappings:
+        value = None
+        for key in keys:
+            value = meta.get(key)
+            if value is not None and value != '':
+                break
+        if value is not None:
+            # Format lists/arrays
+            if isinstance(value, list):
+                if value and isinstance(value[0], dict):
+                    value = ', '.join(str(v.get('name', v)) for v in value)
+                else:
+                    value = ', '.join(str(v) for v in value)
+            # Format numbers
+            elif isinstance(value, float):
+                value = f'{value:.1f}'
+            # Skip null/empty/N/A
+            elif value == '' or value == 'null' or value == 'N/A':
+                continue
+
+            # Limit writers to first 1, actors to first 3
+            if display_label == 'Writer':
+                parts = [p.strip() for p in str(value).split(',')]
+                value = parts[0] if parts else str(value)
+            elif display_label == 'Actors':
+                parts = [p.strip() for p in str(value).split(',')]
+                value = ', '.join(parts[:3]) if parts else str(value)
+
+            add_field(display_label, str(value))
+
+    top_box.pack_start(details_box, True, True, 0)
+    main_box.pack_start(top_box, False, False, 0)
+
+    # Plot: full-width at bottom (below both image and details)
+    plot_value = None
+    for key in ['overview', 'Plot']:
+        v = meta.get(key)
+        if v is not None and v != '' and v != 'N/A':
+            plot_value = v
+            break
+
+    if plot_value:
+        plot_label = Gtk.Label(label=str(plot_value))
+        plot_label.set_line_wrap(True)
+        plot_label.set_max_width_chars(80)
+        plot_label.set_xalign(0)
+        plot_label.set_yalign(0)
+        plot_label.set_margin_top(8)
+        plot_label.set_margin_bottom(4)
+        plot_label.get_style_context().add_class('menu-text')
+        main_box.pack_start(plot_label, False, False, 0)
+
+    main_box.show_all()
+    return main_box
 
 
 class MediaMixin:
@@ -110,6 +371,134 @@ class MediaMixin:
         # re-arm with the interval currently in config.conf, so edits apply after the next check
         GLib.timeout_add_seconds(load_media_settings()['interval'], self.periodic_media_check)
         return False
+
+    def periodic_discovery_check(self):
+        self.start_discovery_fetch()
+        # re-arm with the interval currently in config.conf
+        GLib.timeout_add_seconds(load_media_settings()['interval'], self.periodic_discovery_check)
+        return False
+
+    def initial_discovery_check(self):
+        """Run discovery fetch on startup after a short delay."""
+        run_when_online(self.start_discovery_fetch)
+        return False
+
+    # ---- Discovery feed (plugins with fetch_discovery) --------------------------
+
+    def start_discovery_fetch(self):
+        """Fetch discovery items from all plugins that support it."""
+        threading.Thread(target=self._fetch_discovery_bg, daemon=True).start()
+
+    def _fetch_discovery_bg(self):
+        try:
+            self.media_registry.refresh()
+            # Collect all media URLs from configured sources and dynamically added sources
+            existing_media_urls = set()
+            with self._media_data_lock:
+                for url, entry in self.media['sources'].items():
+                    if url.startswith('discovery:'):
+                        continue
+                    if entry.get('episodes'):
+                        for ep in entry['episodes']:
+                            existing_media_urls.add(ep.get('ref') or ep.get('url') or ep.get('id'))
+
+            # Get discovery types from config (movies, series, or both)
+            discovery_types = load_media_settings()['discovery_types']
+
+            all_new_items = []
+            for plugin in self.media_registry.discovery_plugins():
+                try:
+                    items = plugin.module.fetch_discovery(types=discovery_types, existing_media_urls=existing_media_urls)
+                    for item in items:
+                        item['_plugin'] = plugin.name
+                    all_new_items.extend(items)
+                except Exception as e:
+                    _log(f'discovery fetch error from {plugin.name}: {e}')
+        except Exception as e:
+            _log(f'discovery fetch error: {e}')
+            return
+        GLib.idle_add(self._on_discovery_fetched, all_new_items)
+
+    def _on_discovery_fetched(self, new_items):
+        state = self.state
+        # Use unified seen set (keyed by TMDB/IMDb ID)
+        seen = set(state.get('media_discovery_seen', []))
+
+        # Load unified media cache
+        cache = load_media_cache()
+
+        # Filter to truly new items (not in seen, not in existing media)
+        truly_new = get_new_items(cache, new_items, seen)
+
+        if truly_new:
+            _log(f'discovery: {len(truly_new)} truly new items')
+            # Save updated cache
+            save_media_cache(cache)
+            # Trigger background metadata cache refresh for new items
+            threading.Thread(
+                target=refresh_metadata_cache,
+                args=([item['title'] for item in truly_new], [item.get('type', 'series') for item in truly_new]),
+                daemon=True
+            ).start()
+            # Auto-open popup like media/feeds checks do
+            GLib.idle_add(self.on_new_items)
+        else:
+            _log('discovery: no new items')
+
+        # Also trigger metadata refresh for cached items missing IDs
+        # (runs in background, limited to 10 lookups per call by refresh_metadata_cache)
+        threading.Thread(
+            target=self._refresh_missing_metadata,
+            daemon=True
+        ).start()
+
+        if self.popup and self.popup.get_visible():
+            self.refresh_list()
+
+    def _on_discovery_dismiss(self, _btn, item):
+        state = self.state
+        # Use unified seen set (keyed by TMDB/IMDb ID)
+        seen = set(state.get('media_discovery_seen', []))
+        mark_seen(seen, item)
+        state['media_discovery_seen'] = list(seen)
+        save_state(state)
+        # Defer refresh to main loop to ensure state is visible
+        GLib.idle_add(self.refresh_list, True)
+
+    def _on_discovery_row_activated(self, item):
+        plugin_name = item.get('_plugin', 'unknown')
+        # Item has 'id' (first URL) and 'urls' (dict of all source URLs)
+        source_url = item.get('id') or (list(item['urls'].values())[0] if item.get('urls') else None)
+        if not source_url:
+            _log(f'discovery row activated but no URL: {item}')
+            return
+        source_url = f"{plugin_name}:{source_url}"
+        display_name = item['title']
+
+        with self._media_data_lock:
+            if source_url not in self.media['sources']:
+                self.media['sources'][source_url] = new_media_entry()
+            self.media['sources'][source_url]['title'] = display_name
+        self.start_media_check(only=[source_url])
+        self._on_discovery_dismiss(None, item)
+
+    def _refresh_missing_metadata(self):
+        """Refresh metadata for cached discovery items that don't have TMDb/IMDb IDs."""
+        try:
+            from ..metadata import refresh_metadata_cache
+            from ..media_cache import load_media_cache, get_all_cached_items
+            cache = load_media_cache()
+            items = get_all_cached_items(cache)
+            # Filter items without TMDb/IMDb IDs
+            missing = [item for item in items if not item.get('tmdb_id') and not item.get('imdb_id')]
+            if missing:
+                _log(f'refreshing metadata for {len(missing)} items without IDs')
+                refresh_metadata_cache(
+                    [item['title'] for item in missing],
+                    [item.get('type', 'movie') for item in missing]
+                )
+        except Exception as e:
+            _log(f'error refreshing missing metadata: {e}')
 
     def start_media_check(self, only=None):
         """Checks every source, or just those in `only` (sources that were added to
@@ -165,8 +554,38 @@ class MediaMixin:
                 entry = self.media['sources'].setdefault(url, new_media_entry())
                 new_total += len(merge_episodes(entry, title, episodes, configured or driver.order))
                 save_media(self.media)
+
+        # Also check dynamically added sources (not in config) that are in `only`
+        if only is not None:
+            with self._media_data_lock:
+                for url in only:
+                    if url in self.media['sources'] and url not in self.media_errors:
+                        # Check if this is a config source
+                        config_sources = {u for u, _n, _o in load_media_sources()}
+                        if url not in config_sources:
+                            try:
+                                driver, target = self.media_registry.driver_for(url)
+                                title, episodes = driver.list_episodes(target)
+                            except Exception as error:
+                                self.media_errors[url] = describe_media_error(error)
+                                if not isinstance(error, (NoDriver, ValueError)):
+                                    self.note_request_failure()
+                                continue
+                            self.media_errors.pop(url, None)
+                            entry = self.media['sources'].setdefault(url, new_media_entry())
+                            new_total += len(merge_episodes(entry, title, episodes, driver.order))
+                            save_media(self.media)
+
         GLib.idle_add(self._on_media_new if new_total else self._refresh_media_rows)
         self._plan_media_downloads()
+        # Trigger background metadata cache refresh only when new episodes found
+        if new_total > 0:
+            titles = [entry.get('title') or url for url, _n, _o in load_media_sources() if self.media['sources'].get(url)]
+            threading.Thread(
+                target=refresh_metadata_cache,
+                args=(titles, ['series'] * len(titles)),
+                daemon=True
+            ).start()
 
     def _measure_screen(self):
         """Remembers the monitor's size for the download threads, which choose how large
@@ -218,15 +637,46 @@ class MediaMixin:
         return bool(files) and os.path.exists(files['video'])
 
     def _plan_media_downloads(self):
-        """Queues the next `ahead` unwatched episodes of every source that are not on disk."""
+        """Queues the next `ahead` unwatched episodes of every source that are not on disk.
+        Includes both configured sources and dynamically added sources (from discovery clicks)."""
         ahead = load_media_settings()['ahead']
         wanted = []
         if ahead > 0:
+            config_sources = {u for u, _n, _o in load_media_sources()}
+            # Get plugin names for identifying discovery-triggered sources (format: plugin_name:source_url)
+            plugin_names = set()
+            if hasattr(self, 'media_registry'):
+                # MediaSources registry has drivers() method returning Driver objects with .name attribute
+                if hasattr(self.media_registry, 'drivers'):
+                    plugin_names = set(d.name for d in self.media_registry.drivers())
+                elif hasattr(self.media_registry, 'plugins'):
+                    plugin_names = set(self.media_registry.plugins.keys())
+                elif hasattr(self.media_registry, 'by_source'):
+                    # Test FakeRegistry has by_source dict
+                    plugin_names = set(d.name for d in self.media_registry.by_source.values())
             with self._media_data_lock:
+                # Configured sources
                 for url, _name, order in load_media_sources():
                     entry = self.media['sources'].get(url)
                     if entry:
                         for episode in upcoming(entry['episodes'], entry['watched'], self._effective_order(url, order), ahead):
+                            if not self._media_file_ready(entry, episode['id']):
+                                wanted.append((url, episode['id']))
+                # Dynamically added sources (from discovery clicks) - not in config, format: plugin_name:source_url
+                for url, entry in self.media['sources'].items():
+                    if url in config_sources or url.startswith('discovery:'):
+                        continue
+                    # Only treat as dynamic source if URL starts with a known plugin name (e.g., "fsonline_one:...")
+                    prefix = url.split(':', 1)[0]
+                    if prefix not in plugin_names:
+                        continue  # stale/orphaned source, not a discovery click
+                    if entry.get('episodes'):
+                        # Use driver's default order for dynamic sources
+                        try:
+                            order = self.media_registry.driver_for(url)[0].order
+                        except Exception:
+                            order = 'newest'
+                        for episode in upcoming(entry['episodes'], entry['watched'], order, ahead):
                             if not self._media_file_ready(entry, episode['id']):
                                 wanted.append((url, episode['id']))
         self._enqueue_media(wanted)
@@ -267,6 +717,38 @@ class MediaMixin:
         configured = {u: n for u, n, _o in load_media_sources()}.get(url)
         return configured or entry.get('title') or url
 
+    def _cleanup_partial_files(self, url, episode_id, name, taken, title):
+        """Delete partial/unfinished download files for an episode."""
+        import os
+        root = load_media_settings()['path']
+        entry = self.media['sources'].get(url)
+        if not entry:
+            return
+        episode = next((e for e in entry['episodes'] if e['id'] == episode_id), None)
+        if not episode:
+            return
+        paths = episode_paths(root, name or entry.get('title') or url, episode, files={}, taken=taken, names=(entry.get('title'),))
+        # Check for .part files and the actual file if it exists but is incomplete
+        for file_key in ('video', 'subs'):
+            if file_key == 'subs':
+                # For subs, paths is a dict of lists
+                for path in paths.get('subs', []):
+                    part_path = path + '.part'
+                    for p in (part_path, path):
+                        try:
+                            if os.path.exists(p):
+                                os.remove(p)
+                        except OSError:
+                            pass
+            else:
+                part_path = paths.get('video', '') + '.part'
+                for p in (part_path, paths.get('video', '')):
+                    try:
+                        if os.path.exists(p):
+                            os.remove(p)
+                    except OSError:
+                        pass
+
     def _download_media_episode(self, url, episode_id):
         key = (url, episode_id)
         with self._media_data_lock:
@@ -282,6 +764,11 @@ class MediaMixin:
         shown = [-1]
         watchable = {}  # filled in for an HLS download to .ts or .mkv: its partial file plays while it grows
 
+        def cancelled():
+            """Check if this download has been cancelled."""
+            with self._media_queue_lock:
+                return key in self._media_cancel
+
         def progress(done, total):
             percent = int(done * 100 / total) if total else 0
             if percent != shown[0]:
@@ -295,23 +782,45 @@ class MediaMixin:
             root, names = load_media_settings()['path'], (entry.get('title'),)
             if driver.download:  # the driver fetches the files itself (yt-dlp, a plugin)
                 base = episode_basepath(root, name, episode, taken, names=names)
-                saved = normalize_saved(driver.download(episode, base, progress, lambda: False))
+                saved = normalize_saved(driver.download(episode, base, progress, cancelled))
             else:
                 files = normalize_files(driver.resolve(episode) if driver.resolve else resolve_files(episode))
                 paths = episode_paths(root, name, episode, files, taken, names=names)
                 if is_hls(files['video']['url']) and paths['video'].lower().endswith(('.ts', '.mkv')):
                     watchable['part'] = paths['video'] + '.part'
                     self.media_status[key] = {'state': 'downloading', 'percent': max(shown[0], 0), **watchable}
-                saved = download_episode(paths, files, progress=progress, screen=media_target_size())
+                saved = download_episode(paths, files, progress=progress, cancelled=cancelled, screen=media_target_size())
         except Exception as error:  # the partial file stays, so the next try carries on
+            # Check if it was a cancellation
+            if isinstance(error, DownloadCancelled) or (cancelled() and 'cancelled' in str(error).lower()):
+                self.media_status.pop(key, None)
+                # Clean up partial files
+                self._cleanup_partial_files(url, episode_id, name, taken, entry.get('title') if entry else None)
+                GLib.idle_add(self._refresh_media_rows)
+                return
             self.media_status[key] = {'state': 'failed', 'error': describe_media_error(error)}
             GLib.idle_add(self._refresh_media_rows)
             return
         with self._media_data_lock:
             entry['files'][episode_id] = saved
             save_media(self.media)
+            # If this source is currently playing in mpv, append the new episode
+            is_playing = is_media_playing(url)
+            episode = next((e for e in entry['episodes'] if e['id'] == episode_id), None)
+            ep_path = saved['video']
+            # Get total episodes from cached metadata
+            total_episodes = None
+            title = entry.get('title') or name
+            imdb_id = episode.get('imdb_id') if episode else None
+            tmdb_id = episode.get('tmdb_id') if episode else None
+            meta = get_cached_metadata(title, url=url, imdb_id=imdb_id, tmdb_id=tmdb_id)
+            if meta and meta.get('total_episodes'):
+                total_episodes = meta['total_episodes']
+            ep_title = f"{name} · {episode_label(episode, total_episodes)} {clean_title(episode.get('title'), (name, entry.get('title')))}".strip() if episode else name
         self.media_status.pop(key, None)
         GLib.idle_add(self._refresh_media_rows)
+        if is_playing and episode:
+            mpv_append_playlist(ep_path, ep_title)
 
     # ---- playing and remembering ---------------------------------------------
 
@@ -328,7 +837,8 @@ class MediaMixin:
         return self._effective_order(url, next((o for u, _n, o in load_media_sources() if u == url), None))
 
     def on_media_row_clicked(self, url):
-        """Plays a source's next unwatched episode, or starts downloading it first."""
+        """Plays a source's next unwatched episode, or starts downloading it first.
+        For series, loads all downloaded unwatched episodes as a playlist."""
         order = self._media_source_order(url)
         with self._media_data_lock:
             entry = self.media['sources'].get(url)
@@ -336,19 +846,39 @@ class MediaMixin:
             if not nxt:
                 retry = not (entry and entry['episodes']) and url in self.media_errors
                 if retry:
-                    self.start_media_check()  # an unreadable source: try it again now
+                    self.start_media_check()
                 return
             episode = nxt[0]
-            start = (entry.get('resume') or {}).get(episode['id'])  # where it stopped last time
+            start = (entry.get('resume') or {}).get(episode['id'])
             ready = self._media_file_ready(entry, episode['id'])
             path = entry['files'][episode['id']]['video'] if ready else None
             name = self._media_display_name(url, entry)
-        length = None  # the playlist's length, when playing a download that is not finished
+            is_movie = url in load_media_movies()
+            # Build playlist for series: all downloaded unwatched episodes in watch order
+            playlist = []
+            playlist_episode_ids = []  # track episode_ids in playlist order
+            total_episodes = None
+            if not is_movie and entry:
+                # Get total episodes from cached metadata
+                total_episodes = None
+                title = entry.get('title') or name
+                imdb_id = episode.get('imdb_id')
+                tmdb_id = episode.get('tmdb_id')
+                meta = get_cached_metadata(title, url=url, imdb_id=imdb_id, tmdb_id=tmdb_id)
+                if meta and meta.get('total_episodes'):
+                    total_episodes = meta['total_episodes']
+                for ep in upcoming(entry['episodes'], entry['watched'], order, 100):  # large count = all
+                    if self._media_file_ready(entry, ep['id']):
+                        ep_path = entry['files'][ep['id']]['video']
+                        ep_title = clean_title(ep.get('title'), (name, entry.get('title')))
+                        playlist.append((ep_path, f"{name} \u00b7 {episode_label(ep, total_episodes)} {ep_title}".strip()))
+                        playlist_episode_ids.append(ep['id'])
+        length = None
         if not ready:
             status = self.media_status.get((url, episode['id']), {})
             part = status.get('part')
             if status.get('state') == 'downloading' and part and self._file_size(part) >= PLAY_PARTIAL_MIN_BYTES:
-                path, length = part, status.get('length')  # watch it while it downloads
+                path, length = part, status.get('length')
             else:
                 if status.get('state') not in ('queued', 'downloading'):
                     self._enqueue_media([(url, episode['id'])], front=True)
@@ -356,17 +886,30 @@ class MediaMixin:
         if self.popup:
             self.popup.hide()
         shown = clean_title(episode.get('title'), (name, entry.get('title')))
-        title = f"{name} \u00b7 {' '.join(p for p in (episode_label(episode), shown) if p)}"
+        title = f"{name} \u00b7 {' '.join(p for p in (episode_label(episode, total_episodes), shown) if p)}"
         episode_id = episode['id']
-        # A partial file's own length is only an estimate, so how far it got is measured against the
-        # playlist's; without that, playing it is not tracked at all.
         track = ready or bool(length)
-        stopped = {}  # where it stopped and how much of it was played, filled in when playback ends
+        stopped = {}
+        # Store playlist episode_ids for this source to track playlist position
+        if playlist_episode_ids:
+            self._media_playlist_episodes[url] = playlist_episode_ids
+            # Set initial playing episode
+            from ..playback import set_media_playing
+            set_media_playing(url, episode_id)
+        # Play first episode, then append playlist for series
         play_media_file(path, title, total_seconds=length, start=start, on_stopped=stopped.update,
                         sleep_seconds=load_media_settings()['sleep'],
                         on_finished=(lambda percent, remaining:
                                      GLib.idle_add(self._on_media_played, url, episode_id, percent, remaining,
-                                                   dict(stopped), start)) if track else None)
+                                                   dict(stopped), start)) if track else None,
+                        on_playlist_advance=(lambda playlist_pos:
+                                             GLib.idle_add(self._on_playlist_advanced, url, playlist_pos)) if playlist else None)
+        # Append remaining episodes to mpv playlist for series
+        if playlist:
+            from ..playback import mpv_append_playlist
+            # Skip first episode (already playing)
+            for ep_path, ep_title in playlist[1:]:
+                mpv_append_playlist(ep_path, ep_title)
 
     def _on_media_played(self, url, episode_id, percent, remaining, info=None, start=None):
         """Playback of an episode ended. `info` says where it stopped and how much of it was
@@ -382,6 +925,28 @@ class MediaMixin:
                 self._schedule_movie_removal(url)
         elif info.get('position') is not None:  # nothing seen means nothing to change
             self._set_media_resume(url, episode_id, resume_point(info['position'], watched=False))
+        # Clear playlist tracking and playing state when playback ends
+        self._media_playlist_episodes.pop(url, None)
+        from ..playback import clear_media_playing
+        clear_media_playing()
+        GLib.idle_add(self._refresh_media_rows)
+        return False
+
+    def _on_playlist_advanced(self, url, playlist_pos):
+        """Called when mpv advances to the next playlist item (user pressed 'next').
+        Triggers download planning to queue the next episode per the 'ahead' setting.
+        Also updates the currently playing episode tracker."""
+        # playlist_pos is 1-indexed. Position 1 is the first episode.
+        # When it advances to position 2, we should plan downloads for the next episodes.
+        self._plan_media_downloads()
+        # Update the currently playing episode tracker
+        playlist_eps = self._media_playlist_episodes.get(url)
+        if playlist_eps and playlist_pos <= len(playlist_eps):
+            new_episode_id = playlist_eps[playlist_pos - 1]  # 1-indexed to 0-indexed
+            from ..playback import set_media_playing
+            set_media_playing(url, new_episode_id)
+            # Refresh the row to show playing state
+            GLib.idle_add(self._refresh_media_rows)
         return False
 
     def _set_media_resume(self, url, episode_id, seconds):
@@ -591,9 +1156,77 @@ class MediaMixin:
         if not self.listbox.get_children():
             self.refresh_list(keep_open=True)  # nothing left at all: say so
 
+    def _cancel_source_downloads(self, url):
+        """Cancel any ongoing download for the given source and clean up partial files.
+        This signals the download worker to stop and waits for it to finish."""
+        import time
+        # Find all episodes being downloaded for this source
+        with self._media_queue_lock:
+            to_cancel = {key for key in self._media_queue if key[0] == url}
+            current = self._media_current
+            if current and current[0] == url:
+                to_cancel.add(current)
+            self._media_cancel.update(to_cancel)
+        # Remove pending downloads from queue
+        with self._media_queue_lock:
+            self._media_queue = [key for key in self._media_queue if key[0] != url]
+        # Wait for current download to finish (it checks _media_cancel periodically)
+        if current and current[0] == url:
+            # Wait up to 5 seconds for the download to notice cancellation
+            for _ in range(50):
+                time.sleep(0.1)
+                with self._media_queue_lock:
+                    if self._media_current != current:
+                        break
+        # Clean up cancel set
+        with self._media_queue_lock:
+            for key in to_cancel:
+                self._media_cancel.discard(key)
+
     def _media_menu_remove(self, _button, popover, urls):
         popover.popdown()
+        # Cancel ongoing downloads for these sources
+        for url in urls:
+            self._cancel_source_downloads(url)
         self.remove_consumed_media(urls)
+
+    def _media_menu_remove_dynamic(self, _button, popover, url):
+        """Remove a dynamically added source (from discovery click): remove from list,
+        mark discovery item as seen, delete downloaded files, stop ongoing download,
+        and remove partial files."""
+        popover.popdown()
+        # Find the discovery item that corresponds to this URL
+        # The URL format is "plugin_name:source_url"
+        plugin_name, _, source_url = url.partition(':')
+        # Get the discovery item from cache to mark as seen
+        from ..media_cache import load_media_cache, get_all_cached_items, mark_seen
+        from ..state import load_state, save_state
+        cache = load_media_cache()
+        state = load_state()
+        seen = set(state.get('media_discovery_seen', []))
+        # Find matching item by URL
+        for item in get_all_cached_items(cache):
+            urls = item.get('urls', {})
+            if plugin_name in urls and urls[plugin_name] == source_url:
+                mark_seen(seen, item)
+                break
+        state['media_discovery_seen'] = list(seen)
+        save_state(state)
+        # Cancel ongoing download if any
+        self._cancel_source_downloads(url)
+        # Trash the source files (completed downloads)
+        self._trash_source_files(url)
+        # Remove from media sources
+        with self._media_data_lock:
+            self.media['sources'].pop(url, None)
+            save_media(self.media)
+        # Remove any pending downloads for this source
+        with self._media_queue_lock:
+            self._media_queue = [key for key in self._media_queue if key[0] != url]
+        # Remove status entries
+        for key in [k for k in self.media_status if k[0] == url]:
+            del self.media_status[key]
+        self._media_rows_removed([url])
 
     def _media_menu_unwatch(self, _button, popover, url, episode_id):
         popover.popdown()
@@ -604,9 +1237,13 @@ class MediaMixin:
         everything in it is watched (the button says why when it is not; for a movie it
         takes the file to the Trash too), taking the last watched episode back as not
         watched (for a movie waiting to be removed: "I didn't finish it"), and, when more
-        than one source is finished, removal of all of those at once."""
+        than one source is finished, removal of all of those at once.
+        For dynamically added sources (from discovery clicks), also offers to remove
+        from list, mark as seen in discovery, and delete files."""
         consumed = self._consumed_media_sources()
         movies = load_media_movies()
+        config_sources = {u for u, _n, _o in load_media_sources()}
+        is_dynamic = url not in config_sources and not url.startswith('discovery:')
         with self._media_data_lock:
             entry = self.media['sources'].get(url)
             read = bool(entry and entry.get('episodes'))
@@ -637,6 +1274,14 @@ class MediaMixin:
             one.set_tooltip_text(f'{left} unwatched episode{"" if left == 1 else "s"} left' if read
                                  else 'This source has not been read yet')
         box.pack_start(one, False, False, 0)
+
+        # For dynamically added sources (from discovery clicks), add option to remove,
+        # mark as seen in discovery, and delete files
+        if is_dynamic:
+            dyn_btn = Gtk.Button(label='Remove from list, mark seen, delete files')
+            dyn_btn.set_tooltip_text('Removes this source from the list, marks the discovery item as seen (so it won\'t reappear), stops any ongoing download, and moves all downloaded files to the Trash.')
+            dyn_btn.connect('clicked', self._media_menu_remove_dynamic, popover, url)
+            box.pack_start(dyn_btn, False, False, 0)
 
         if can_unwatch:
             undo = Gtk.Button(label="I didn't finish it" if pending is not None else 'Mark as not watched')
@@ -677,14 +1322,97 @@ class MediaMixin:
 
     # ---- the popup's rows ----------------------------------------------------
 
+    def _is_discovery_url(self, url):
+        """Check if a URL is a plugin discovery item."""
+        return url.startswith('discovery:')
+
     def media_source_urls(self):
         """The configured sources that have been read at least once, or that could not
-        be, in config order."""
+        be, in config order. Fully watched series (unwatched_count == 0) with no active
+        downloads are hidden; they reappear when a new episode appears or download starts.
+        Also includes dynamically added sources (from discovery clicks)."""
         with self._media_data_lock:
-            return [url for url, _n, _o in load_media_sources()
-                    if self.media['sources'].get(url, {}).get('episodes') or url in self.media_errors]
+            sources = self.media['sources']
+            urls = []
+            config_sources = {u for u, _n, _o in load_media_sources()}
+
+            # Config sources in config order
+            for url, _name, _order in load_media_sources():
+                # Sources with errors are always shown (so user can retry)
+                if url in self.media_errors:
+                    urls.append(url)
+                    continue
+                entry = sources.get(url)
+                if not entry:
+                    continue
+                if not entry.get('episodes'):
+                    continue
+                # Show if there are unwatched episodes, or if there's an active download
+                if unwatched_count(entry) > 0:
+                    urls.append(url)
+                else:
+                    # Check if there's an active download for this source
+                    has_active_download = any(
+                        k[0] == url and v.get('state') in ('queued', 'downloading')
+                        for k, v in self.media_status.items()
+                    )
+                    if has_active_download:
+                        urls.append(url)
+                    # else: fully watched with no active downloads - hide it
+
+            # Dynamically added sources (from discovery clicks) - show at top if they have episodes
+            # These are sources in media['sources'] but not in config
+            dynamic_sources = []
+            for url in sources:
+                if url in config_sources:
+                    continue
+                if url.startswith('discovery:'):
+                    continue  # discovery items handled separately
+                entry = sources.get(url)
+                if not entry or not entry.get('episodes'):
+                    continue
+                if unwatched_count(entry) > 0:
+                    dynamic_sources.append(url)
+                else:
+                    has_active_download = any(
+                        k[0] == url and v.get('state') in ('queued', 'downloading')
+                        for k, v in self.media_status.items()
+                    )
+                    if has_active_download:
+                        dynamic_sources.append(url)
+            # Prepend dynamic sources (newest first) so clicked items appear at top
+            urls = dynamic_sources + urls
+            return urls
+
+    def discovery_source_urls(self):
+        """Return only discovery item URLs (unseen items from unified cache).
+        These are the items shown in the discovery section of the media list."""
+        cache = load_media_cache()
+        seen = set(self.state.get('media_discovery_seen', []))
+        urls = []
+        for item in get_all_cached_items(cache):
+            if not is_seen(seen, item):
+                urls.append(f'discovery:{item["_cache_key"]}')
+        return urls
+
+    def get_discovery_items(self):
+        """Get current discovery items from unified cache, filtered by dismissal state."""
+        cache = load_media_cache()
+        seen = set(self.state.get('media_discovery_seen', []))
+        items = []
+        for item in get_all_cached_items(cache):
+            if not is_seen(seen, item):
+                # Add _plugin for backward compatibility (use first URL's plugin)
+                urls = item.get('urls', {})
+                item['_plugin'] = list(urls.keys())[0] if urls else 'unknown'
+                items.append(item)
+        return items
 
     def build_media_row(self, url):
+        # Check if this is a discovery item
+        if self._is_discovery_url(url):
+            return self._build_discovery_media_row(url)
+
         row = Gtk.ListBoxRow()
         row.set_selectable(False)
         row.set_activatable(True)
@@ -705,11 +1433,133 @@ class MediaMixin:
         filler.set_hexpand(True)
         box.pack_start(filler, True, True, 0)
         row.add(box)
+
+        # Enable enter/leave events on the box (ListBoxRow is no-window, box receives events)
+        box.set_events(box.get_events() | Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+
         self._update_media_row(row, {u: (n, o) for u, n, o in load_media_sources()})
+        return row
+
+    def _build_discovery_media_row(self, url):
+        """Build a row for a plugin discovery item in the Media list."""
+        # Parse the virtual URL: discovery:<cache_key>
+        prefix, _, cache_key = url.partition(':')
+        # Find the item by fetching current discovery items
+        items = self.get_discovery_items()
+        item = next((i for i in items if i.get('_cache_key') == cache_key), None)
+        if not item:
+            return None
+
+        row = Gtk.ListBoxRow()
+        row.set_selectable(False)
+        row.set_activatable(True)
+        row.media_source = url  # virtual URL for identification
+        row.discovery_item = item  # for click/dismiss handlers
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        box.set_margin_top(3)
+        box.set_margin_bottom(3)
+
+        badge_text = '🎬' if item.get('type') == 'movie' else '📺'
+        badge = Gtk.Label(label=badge_text)
+        badge.set_margin_end(6)
+        box.pack_start(badge, False, False, 0)
+
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text_box.set_hexpand(True)
+        title_label = Gtk.Label()
+        title_label.set_markup(f'<b>{GLib.markup_escape_text(item["title"])}</b>')
+        title_label.set_xalign(0)
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        title_label.set_hexpand(True)
+        text_box.pack_start(title_label, False, False, 0)
+
+        # Show genre for both movies and series - use API genre from TMDb/OMDB cache
+        # Pass first URL for year extraction if title doesn't have year
+        first_url = next(iter(item.get('urls', {}).values()), None)
+        meta = get_cached_metadata(
+            item['title'],
+            media_type=item.get('type', 'movie'),
+            url=first_url,
+            imdb_id=item.get('imdb_id'),
+            tmdb_id=item.get('tmdb_id')
+        )
+        api_genre = meta.get('genre') if meta else None
+        # Fall back to site genre if API genre not available
+        site_genre = ', '.join(item['genre']) if item.get('genre') else None
+        genre = api_genre or site_genre
+
+        # Show genre and source on the same row
+        genre_source_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        genre_source_box.set_hexpand(True)
+        genre_source_box.set_halign(Gtk.Align.FILL)
+        if genre:
+            genre_label = Gtk.Label(label=f'🎭 {genre}')
+            genre_label.set_xalign(0)
+            genre_label.get_style_context().add_class('menu-text')
+            genre_label.set_ellipsize(Pango.EllipsizeMode.END)
+            genre_label.set_max_width_chars(60)
+            genre_source_box.pack_start(genre_label, False, False, 0)
+
+        # Show source badges (which sites have this movie/series) on the same row as genre, at the end
+        urls = item.get('urls', {})
+        if urls:
+            # Create a filler to push sources to the right
+            filler = Gtk.Box()
+            filler.set_hexpand(True)
+            genre_source_box.pack_start(filler, True, True, 0)
+
+            source_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            for source_name in urls.keys():
+                # Convert plugin name to real site address (e.g., fsonline_one -> fsonline.one)
+                display_name = source_name.replace('_', '.')
+                src_label = Gtk.Label(label=display_name)
+                src_label.set_margin_end(4)
+                src_label.get_style_context().add_class('menu-text')
+                src_label.set_markup(f'<span size="small"><b>{GLib.markup_escape_text(display_name)}</b></span>')
+                source_box.pack_start(src_label, False, False, 0)
+            genre_source_box.pack_start(source_box, False, False, 0)
+
+        if genre or urls:
+            text_box.pack_start(genre_source_box, True, True, 0)  # expand to fill width
+
+        box.pack_start(text_box, True, True, 0)
+
+        # Show quality badge for movies (from fsonline plugin)
+        if item.get('type') == 'movie' and item.get('quality'):
+            quality = item['quality'].upper()
+            quality_label = Gtk.Label(label=f'  {quality}  ')
+            quality_label.set_margin_start(6)
+            quality_label.set_margin_end(6)
+            if quality == 'HD':
+                quality_label.get_style_context().add_class('quality-hd')
+            else:
+                quality_label.get_style_context().add_class('quality-low')
+            box.pack_start(quality_label, False, False, 0)
+
+        # Add custom metadata tooltip with poster (TMDb/OMDB) - using Popover on left of popup
+        # Store item on box for listbox motion tracking
+        box.popover_data = {
+            'type': 'discovery',
+            'title': item['title'],
+            'media_type': item.get('type', 'movie'),
+            'urls': item.get('urls', {}),
+            'imdb_id': item.get('imdb_id'),
+            'tmdb_id': item.get('tmdb_id'),
+        }
+
+        row.add(box)
         return row
 
     def _update_media_row(self, row, configured):
         url = row.media_source
+        # Handle discovery items
+        if self._is_discovery_url(url):
+            # These are static - no need to update
+            return
+
         with self._media_data_lock:
             entry = self.media['sources'].get(url)
             error = self.media_errors.get(url)
@@ -721,13 +1571,203 @@ class MediaMixin:
             nxt = upcoming(entry['episodes'], entry['watched'], order, 1)
             ready = bool(nxt) and self._media_file_ready(entry, nxt[0]['id'])
             status = self.media_status.get((url, nxt[0]['id'])) if nxt else None
+            is_playing = is_media_playing(url)
             name, text, stats, tooltip, color = media_row_view(
-                name or entry.get('title') or url, entry, order, ready, status, error)
+                name or entry.get('title') or url, entry, order, ready, status, error, url=url, is_playing=is_playing)
         escape = GLib.markup_escape_text
         row.media_marker.set_markup(f'<span foreground="{MEDIA_MARKER_COLORS[color]}">\u25cf</span>')
         row.media_label.set_markup(f'<span foreground="#000000"><b>{escape(name)}</b> - {escape(text)}</span>')
         row.media_stats.set_markup(f'<span foreground="#000000">- {escape(stats)}</span>' if stats else '')
-        row.set_tooltip_text(tooltip or None)
+        # Fallback tooltip text for testing and accessibility
+        tooltip_text = tooltip or None
+        row.set_tooltip_markup(tooltip_text)
+
+        # Set up custom metadata popover on left of popup (overrides fallback when triggered)
+        # Store data on box for handler access
+        box = row.get_child()
+        if box:
+            box.popover_data = {
+                'entry': entry,
+                'url': url,
+                'name': name,
+                'tooltip_text': tooltip_text,
+            }
+            box.connect('enter-notify-event', self._on_media_row_enter)
+            box.connect('leave-notify-event', self._on_media_row_leave)
+
+    def _show_metadata_popover(self, row, content_widget):
+        """Show a metadata popover on the left side of the main popup (towards screen center).
+        Uses a separate window positioned relative to the main popup."""
+        _log(f'DEBUG: _show_metadata_popover called, popup visible: {self.popup.get_visible() if self.popup else "no popup"}')
+        if not self.popup or not self.popup.get_visible():
+            return
+        # Don't recreate if already showing for this row
+        if hasattr(self, '_metadata_popover_row') and self._metadata_popover_row == row:
+            return
+        # Remove any existing popover
+        self._hide_metadata_popover()
+
+        # Create a separate popup window for the metadata (not a Gtk.Popover, which is constrained to parent window)
+        meta_window = Gtk.Window(type=Gtk.WindowType.POPUP)
+        meta_window.set_decorated(False)
+        meta_window.set_skip_taskbar_hint(True)
+        meta_window.set_skip_pager_hint(True)
+        meta_window.set_type_hint(Gdk.WindowTypeHint.TOOLTIP)
+        meta_window.set_keep_above(True)
+        meta_window.add(content_widget)
+        content_widget.show_all()
+
+        # Position to the LEFT of the main popup (towards screen center)
+        # Get main popup position and size
+        main_x, main_y = self.popup.get_position()
+        main_w, main_h = self.popup.get_size()
+
+        # Get row position relative to the main popup
+        # The row is inside listbox -> scrolled_window -> content_overlay -> outer -> popup
+        # We need to translate coordinates from row to popup
+        alloc = row.get_allocation()
+        _log(f'DEBUG: row allocation: x={alloc.x}, y={alloc.y}, w={alloc.width}, h={alloc.height}')
+
+        # Convert row allocation to coordinates relative to the main popup window
+        # Get the row's position relative to the popup window
+        row_x, row_y = row.translate_coordinates(self.popup, alloc.x, alloc.y)
+        _log(f'DEBUG: row position in popup: x={row_x}, y={row_y}')
+
+        # Metadata window width = main popup width (same width)
+        meta_window_width = main_w
+        meta_window_height = 400  # Fixed height for metadata
+
+        # Calculate metadata window position: left of main popup, aligned top with main popup
+        meta_x = main_x - meta_window_width - 12  # 12px gap from main popup
+        meta_y = main_y  # Align top with main popup
+
+        # Ensure on screen
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        geo = monitor.get_geometry()
+        if meta_x < geo.x:
+            meta_x = geo.x
+        if meta_y < geo.y:
+            meta_y = geo.y
+        if meta_y + meta_window_height > geo.y + geo.height:
+            meta_y = geo.y + geo.height - meta_window_height
+
+        meta_window.move(meta_x, meta_y)
+        meta_window.resize(meta_window_width, meta_window_height)
+        meta_window.show_all()
+
+        _log(f'DEBUG: meta window shown at ({meta_x}, {meta_y}), main popup at ({main_x}, {main_y})')
+
+        # Store reference
+        self._metadata_popover = meta_window
+        self._metadata_popover_row = row
+
+    def _hide_metadata_popover(self):
+        """Hide the metadata popover if visible."""
+        if hasattr(self, '_metadata_popover') and self._metadata_popover:
+            self._metadata_popover.destroy()
+            self._metadata_popover = None
+            self._metadata_popover_row = None
+
+    def _on_media_row_enter(self, widget, event):
+        """Handle enter event for media rows (called from listbox motion).
+        Handles both discovery and regular media rows."""
+        data = widget.popover_data
+        if not data:
+            return False
+
+        if data.get('type') == 'discovery':
+            title = data['title']
+            media_type = data.get('media_type', 'movie')
+            urls = data.get('urls', {})
+            imdb_id = data.get('imdb_id')
+            tmdb_id = data.get('tmdb_id')
+            _log(f'DEBUG: on_enter discovery for {title}')
+            meta = get_cached_metadata(
+                title,
+                media_type=media_type,
+                url=list(urls.values())[0] if urls else None,
+                imdb_id=imdb_id,
+                tmdb_id=tmdb_id,
+            )
+        else:
+            # Regular media row
+            entry = data['entry']
+            url = data['url']
+            name = data['name']
+            tooltip_text = data['tooltip_text']
+            title = entry.get('title') or name
+            _log(f'DEBUG: on_enter regular for {title}')
+            # Get IMDb/TMDb IDs from next episode
+            imdb_id = None
+            tmdb_id = None
+            if entry.get('episodes'):
+                nxt_ep = upcoming(entry['episodes'], entry.get('watched', []), self._effective_order(url, None), 1)
+                if nxt_ep:
+                    imdb_id = nxt_ep[0].get('imdb_id')
+                    tmdb_id = nxt_ep[0].get('tmdb_id')
+            meta = get_cached_metadata(title, url=url, imdb_id=imdb_id, tmdb_id=tmdb_id)
+            tooltip_text = data.get('tooltip_text')
+
+        _log(f'DEBUG: meta found: {meta is not None}')
+        if meta:
+            custom_widget = create_metadata_tooltip(meta)
+            _log(f'DEBUG: tooltip_widget: {custom_widget is not None}')
+            if custom_widget:
+                self._show_metadata_popover(widget.get_parent(), custom_widget)
+                return True
+
+        # Fallback to text tooltip for regular rows
+        if not data.get('type') == 'discovery' and tooltip_text:
+            label = Gtk.Label(label=tooltip_text)
+            label.set_line_wrap(True)
+            label.set_max_width_chars(50)
+            label.set_margin_start(8)
+            label.set_margin_end(8)
+            label.set_margin_top(6)
+            label.set_margin_bottom(6)
+            label.set_selectable(True)
+            self._show_metadata_popover(widget.get_parent(), label)
+            return True
+        return False
+
+    def _on_media_row_leave(self, widget, event):
+        # Mouse left the row - hide popover
+        GLib.timeout_add(100, self._hide_metadata_popover)
+        return False
+
+    def _on_listbox_motion(self, listbox, event):
+        """Track mouse motion over listbox to show metadata popover for hovered row."""
+        # Get row at current Y position
+        row = listbox.get_row_at_y(int(event.y))
+        if row and hasattr(row, 'media_source'):
+            box = row.get_child()
+            if box and hasattr(box, 'popover_data') and box.popover_data:
+                # Check if this is a different row than currently hovered
+                if self._hovered_row != row:
+                    self._hovered_row = row
+                    # Trigger enter handler
+                    self._on_media_row_enter(box, None)
+        elif self._hovered_row:
+            # Mouse left all media rows
+            self._hovered_row = None
+            GLib.timeout_add(100, self._hide_metadata_popover)
+        return False
+
+    def _on_listbox_leave(self, listbox, event):
+        """Mouse left the listbox entirely."""
+        self._hovered_row = None
+        GLib.timeout_add(100, self._hide_metadata_popover)
+        return False
+
+    def _setup_listbox_hover_events(self):
+        """Connect motion and leave events to listbox for metadata popover tracking."""
+        if self.listbox:
+            self.listbox.connect('motion-notify-event', self._on_listbox_motion)
+            self.listbox.connect('leave-notify-event', self._on_listbox_leave)
+            # Enable motion and leave events
+            self.listbox.set_events(self.listbox.get_events() | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+            self._hovered_row = None
 
     def _refresh_media_rows(self):
         """Updates the rows in place: rebuilding the list would collapse a popup

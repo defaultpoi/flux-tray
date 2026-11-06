@@ -64,11 +64,12 @@ class FeedsMixin:
         mute_phrases = load_mute_filters()
         now = time_module.time()
         with self.lock:
-            seen_ids = set(self.state.get('seen', {}).keys())
+            seen = dict(self.state.get('seen', {}))
             last_checked = dict(self.state.get('last_checked', {}))
         feed_mute_rules = load_feed_mute_rules()
         feed_later_rules = load_feed_readlater_rules()
         newly_seen_ids, new_items, later_items, feed_links = set(), [], [], {}
+        has_live_updates = False
         for url, interval in feeds_due(feeds, last_checked, now, force):
             try:
                 parsed = feedparser.parse(url)
@@ -82,18 +83,23 @@ class FeedsMixin:
             site_link = (getattr(parsed, 'feed', None) or {}).get('link')
             if isinstance(site_link, str) and site_link:
                 feed_links[url] = site_link
-            fresh, later, seen = items_from_entries(
-                parsed.entries, url, seen_ids, mute_phrases,
+            fresh, later, seen_ids = items_from_entries(
+                parsed.entries, url, seen, mute_phrases,
                 feed_mute_rules.get(url, ()), feed_later_rules.get(url, ()))
+            # Check if any fresh items are live updates
+            if any(item.get('live') for item in fresh):
+                has_live_updates = True
             new_items += fresh
             later_items += later
-            newly_seen_ids |= seen
+            newly_seen_ids |= seen_ids
         with self.lock:
+            # Update the seen dict in state with the potentially modified one
+            self.state['seen'] = seen
             new_items, later_items = merge_feed_check(
                 self.state, now, newly_seen_ids, last_checked, feed_links, new_items, later_items)
             save_state(self.state)
         if new_items:
-            GLib.idle_add(self.on_new_items)
+            GLib.idle_add(self.on_new_items, has_live_updates)
         if later_items:
             GLib.idle_add(self._read_later_changed)
 
@@ -104,9 +110,12 @@ class FeedsMixin:
             self.refresh_list(keep_open=True)
         return False
 
-    def on_new_items(self):
+    def on_new_items(self, has_live_updates=False):
         self.update_icon()
         play_notification_sound()
+        if has_live_updates:
+            # Double sound for live updates: play again after a short delay
+            GLib.timeout_add(300, play_notification_sound)
         self.show_popup(auto=True)  # auto-open whenever new unread items, updates, or live channels arrive
         return False
 

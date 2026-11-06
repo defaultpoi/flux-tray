@@ -334,6 +334,8 @@ class TestRefreshListOrphans(unittest.TestCase):
             self.build_twitch_row = self.build_youtube_row = mock.Mock(return_value=mock.MagicMock())
             self.media_urls = []
             self.media_source_urls = lambda: list(self.media_urls)
+            self.media_discovery_urls = []
+            self.discovery_source_urls = lambda: list(self.media_discovery_urls)
             self.build_media_row = mock.Mock(return_value=mock.MagicMock())
 
     def refresh(self, stub, nudge=True):

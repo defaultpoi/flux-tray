@@ -1,0 +1,185 @@
+"""Template for flux-tray test files.
+
+Copy this file to test_<module>.py and replace:
+- <MODULE> with the module name (e.g., config, media, ui_popup)
+- <TestClassName> with descriptive test class names
+- <test_method> with actual test methods
+
+Run with:
+    python3 -m unittest tests.test_<module>          # Real GTK
+    python3 tests/run_stubbed.py tests.test_<module>  # Stubbed GTK
+"""
+import threading
+import unittest
+from unittest import mock
+
+from facade import rt
+from helpers import TmpConfigCase, ts, dt
+
+
+# =============================================================================
+# PATTERN 1: Config/State Tests (use TmpConfigCase)
+# =============================================================================
+class Test<Module>Config(TmpConfigCase):
+    """Tests that need isolated config/state files."""
+
+    def test_<scenario>(self):
+        # Write test config
+        self.conf('[section]\nkey=value\n')
+
+        # Call function under test
+        result = rt.<function_under_test>()
+
+        # Assert
+        self.assertEqual(result, <expected>)
+
+    def test_<another_scenario>(self):
+        # Write test state
+        self.state_text('{"key": "value"}')
+
+        result = rt.<function_under_test>()
+        self.assertEqual(result, <expected>)
+
+
+# =============================================================================
+# PATTERN 2: GTK UI Tests (dual-mode: real + stubbed)
+# =============================================================================
+def setUpModule():
+    """Shared GTK patches for tests that build widgets."""
+    patcher = mock.patch.object(rt, '_available_icon', return_value='icon-name')
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
+
+class Test<Module>UI(unittest.TestCase):
+    """Tests for UI methods using the Stub pattern."""
+
+    class Stub:
+        """Minimal FluxTray stub with only the method under test + required attrs."""
+
+        # Bind the real method from the mixin
+        <method_under_test> = rt.FluxTray.<method_under_test>
+
+        def __init__(self, **kwargs):
+            # Required attributes the method accesses
+            self.lock = threading.RLock()
+            self.popup = mock.MagicMock()
+            self.popup.get_visible.return_value = kwargs.get('visible', False)
+            self.listbox = mock.MagicMock()
+            self.listbox.get_children.return_value = []
+            self.headers = []
+
+            # Mock builder methods the method calls
+            self.build_header_row = mock.Mock(return_value=mock.MagicMock())
+            self.build_row = mock.Mock(return_value=mock.MagicMock())
+            self.build_info_row = mock.Mock(return_value=mock.MagicMock())
+            self.refresh_list = mock.Mock()
+            self.check_orphans_if_due = mock.Mock()
+            self.position_popup = mock.Mock()
+            self._fit_popup_width = mock.Mock()
+            self._update_scroller_max_height = mock.Mock()
+            self.on_save_clicked = mock.Mock()
+            self.on_read_later_remove_clicked = mock.Mock()
+
+            # Any additional attributes from kwargs
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    def test_<method>_<scenario>(self):
+        stub = self.Stub(visible=<True/False>)
+
+        # Patch GTK for stubbed run compatibility
+        with mock.patch.object(rt, 'Gtk', mock.MagicMock()), \
+                mock.patch.object(rt, 'Gdk', mock.MagicMock()), \
+                mock.patch.object(rt, 'GLib', mock.MagicMock()), \
+                mock.patch.object(rt, 'load_feeds', return_value=[]), \
+                mock.patch.object(rt, 'load_highlight_words', return_value=('breaking',)):
+
+            # Call method under test
+            stub.<method_under_test>(<args>)
+
+        # Assert on mocks
+        stub.<mock>.assert_called_once_with(<expected_args>)
+        self.assertEqual(stub.headers, [<expected>])
+
+
+# =============================================================================
+# PATTERN 3: Functional Tests (no GTK, pure logic)
+# =============================================================================
+class Test<Module>Logic(unittest.TestCase):
+    """Tests for pure functions without GTK dependencies."""
+
+    def test_<function>_<scenario>(self):
+        result = rt.<function>(<args>)
+        self.assertEqual(result, <expected>)
+
+    def test_<function>_<edge_case>(self):
+        # Test edge cases: empty input, None, invalid types, boundaries
+        self.assertEqual(rt.<function>([]), <expected>)
+        self.assertEqual(rt.<function>(None), <expected>)
+        self.assertRaises(ValueError, rt.<function>, <invalid_input>)
+
+
+# =============================================================================
+# PATTERN 4: Network/Thread Tests (with FakeSite, run_when_online, etc.)
+# =============================================================================
+class Test<Module>Network(unittest.TestCase):
+    """Tests involving network I/O (use FakeSite from test_media.py pattern)."""
+
+    def setUp(self):
+        # If needed, set up FakeSite or other network fixtures
+        pass
+
+    def test_<network_function>_<scenario>(self):
+        with mock.patch.object(rt.urllib.request, 'urlopen') as urlopen:
+            # Configure mock response
+            urlopen.return_value.__enter__.return_value.read.return_value = b'{"key": "value"}'
+
+            result = rt.<network_function>()
+
+            urlopen.assert_called_once_with(<expected_url>, timeout=<expected>)
+            self.assertEqual(result, <expected>)
+
+
+# =============================================================================
+# PATTERN 5: Golden Popup Tests (in tests/golden/)
+# =============================================================================
+# See tests/test_golden_popup.py for pattern.
+# Add new scenario JSON files to tests/golden/ and update render_popup.py
+
+
+# =============================================================================
+# PATTERN 6: Mixin-Specific Tests
+# =============================================================================
+# Each mixin has dedicated test patterns:
+#
+# ConnectivityMixin: test_network.py, test_ui_connectivity.py
+#   - probe_connectivity, diagnose_connectivity, run_when_online
+#
+# FeedsMixin: test_config.py, test_ui_feeds.py
+#   - load_feeds, merge_feed_check, refresh_list
+#
+# IconMixin: test_ui_icon.py
+#   - update_icon, badge count, tooltip
+#
+# LiveMixin: test_live.py, test_playback.py
+#   - check_live, open_twitch_stream, open_youtube_stream
+#
+# MediaMixin: test_media.py, test_mediasources.py, test_ui_media.py
+#   - MediaSources, drivers, download, episode normalization
+#
+# PopupMixin: test_ui_popup.py, test_golden_popup.py
+#   - build_popup_window, refresh_list, row activation, menus
+#
+# TimerMixin: test_ui_timer.py
+#   - timer modes, schedule, countdown, actions
+#
+# UpdatesMixin: test_updates.py
+#   - check_updates, install_updates, orphan handling
+#
+# WeatherMixin: test_weather.py, test_ui_weather.py
+#   - fetch_weather, alerts, MeteoAlarm, weather bar
+
+
+if __name__ == '__main__':
+    unittest.main()

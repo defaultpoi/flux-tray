@@ -97,6 +97,7 @@ def ensure_config():
             "# screen=<width>x<height> the video size to download: the best that fits it, or the\n"
             "# smallest there is when none does (default: the monitor's own size)\n"
             "# ytdlp=<arguments> added to every yt-dlp run, e.g. -S res:720 --cookies-from-browser firefox\n"
+            "# discovery_types=movies,series (comma-separated; default: movies,series)\n"
             "# One source per line: url|display name (optional)|order (optional)\n"
             "#   url: an archive.org collection or item (https://archive.org/details/...),\n"
             "#        a YouTube channel, playlist or video, or any podcast / video RSS or Atom feed.\n"
@@ -594,7 +595,7 @@ MAX_MEDIA_AHEAD = 20
 DEFAULT_MEDIA_GRACE_HOURS = 24
 MAX_MEDIA_BEHIND = 1000
 MIN_MEDIA_SLEEP_MINUTES = 5
-_MEDIA_SETTINGS = ('path', 'interval', 'ahead', 'behind', 'grace', 'sleep', 'ytdlp', 'screen')
+_MEDIA_SETTINGS = ('path', 'interval', 'ahead', 'behind', 'grace', 'sleep', 'ytdlp', 'screen', 'omdb_key', 'tmdb_key')
 _MEDIA_SOURCE_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.\-_]*:\S')  # https://..., yt-dlp:https://..., mysite:show-1
 
 
@@ -611,8 +612,8 @@ def load_media_settings():
     (watched episodes whose files are kept, None for all of them), 'grace' (seconds
     a watched movie waits before it is removed), 'sleep' (seconds without any key or
     mouse input after which playback is paused, 0 for never), 'ytdlp' (extra yt-dlp
-    arguments, a list), 'screen' ((width, height) or None for the monitor's own)}
-    from [media], defaults for anything missing or unusable."""
+    arguments, a list), 'screen' ((width, height) or None for the monitor's own),
+    'omdb_key', 'tmdb_key', 'discovery_types'} from [media], defaults for anything missing or unusable."""
     path = _media_setting('path') or DEFAULT_MEDIA_PATH
     try:
         minutes = max(MIN_MEDIA_CHECK_MINUTES, int(_media_setting('interval')))
@@ -641,8 +642,17 @@ def load_media_settings():
         ytdlp = []
     size = re.fullmatch(r'(\d{3,5})\s*x\s*(\d{3,5})', (_media_setting('screen') or '').lower())
     screen = (int(size.group(1)), int(size.group(2))) if size else None
+    discovery_types = _media_setting('discovery_types')
+    if discovery_types:
+        discovery_types = tuple(t.strip() for t in discovery_types.split(',') if t.strip())
+    else:
+        discovery_types = ('movies', 'series')
     return {'path': os.path.expanduser(path), 'interval': minutes * 60, 'ahead': ahead, 'behind': behind,
-            'grace': int(grace_hours * 3600), 'sleep': sleep_minutes * 60, 'ytdlp': ytdlp, 'screen': screen}
+            'grace': int(grace_hours * 3600), 'sleep': sleep_minutes * 60, 'ytdlp': ytdlp, 'screen': screen,
+            'omdb_key': _media_setting('omdb_key'), 'tmdb_key': _media_setting('tmdb_key'),
+            'discovery_types': discovery_types}
+
+
 
 
 def _media_source_line(line):

@@ -19,6 +19,7 @@ from ..weather import (
     reverse_geocode_region,
     weather_code_glyph,
     weather_row_pad,
+    _map_alerts_to_forecast_days,
 )
 
 
@@ -118,9 +119,26 @@ class WeatherMixin:
         return info
 
     def _worst_alert_color(self):
+        """Worst alert severity among *currently active* alerts (for tray icon)."""
         colors = [a.get('severity_color', 'yellow') for a in self.active_alerts]
         if not colors:
             return None
+        return max(colors, key=lambda c: ALERT_SEVERITY_RANK.get(c, 0))
+
+    def _worst_forecast_alert_color(self):
+        """Worst alert severity among alerts overlapping the 5-day forecast period.
+        The forward arrow leads to the forecast view, so its color should reflect
+        what the user will see there."""
+        d = self.weather_data
+        if not d:
+            return None
+        daily_dates = d.get('daily_dates', [])
+        if not daily_dates:
+            return None
+        alert_map = _map_alerts_to_forecast_days(self.active_alerts, daily_dates)
+        if not alert_map:
+            return None
+        colors = [info['color'] for info in alert_map.values()]
         return max(colors, key=lambda c: ALERT_SEVERITY_RANK.get(c, 0))
 
     def _pulse_on_for(self, color_name):
@@ -149,31 +167,58 @@ class WeatherMixin:
             if signature != self._last_pulse_signature:  # yellow/orange flip far less often than red
                 self._last_pulse_signature = signature
                 self.update_icon()
-                if self.popup and self.popup.get_visible():
+                # Only rebuild on pulse if showing 'today' view (forecast glyphs don't pulse)
+                if self.popup and self.popup.get_visible() and self.weather_view == 'today':
                     self.rebuild_weather_bar()
         return True
 
     def build_forecast_weather_segments(self):
         """Returns one markup segment per forecast day (rain glyph + high/low),
         or [] if there's no forecast. Rendered by rebuild_weather_bar exactly
-        like the 'today' segments: spread across the bar, bullet-separated."""
+        like the 'today' segments: spread across the bar, bullet-separated.
+        Glyphs are colored by overlapping alert severity."""
         d = self.weather_data
         if not d:
             return []
+
+        # Map active alerts to forecast days
+        daily_dates = d.get('daily_dates', [])
+        alert_map = _map_alerts_to_forecast_days(self.active_alerts, daily_dates) if daily_dates else {}
+
         segments = []
+        # Store tooltips for later application on label widgets
+        self._forecast_tooltips = []
         pad = weather_row_pad(getattr(self, 'weather_box', None))
-        for day in d.get('forecast_days', []):
+        for day_idx, day in enumerate(d.get('forecast_days', [])):
             segment = ''
+            glyph_markup = ''
+            # Determine glyph: rain glyph if rain_prob > 0, else weather glyph from code
+            glyph = None
             if day.get('rain_prob') is not None and day['rain_prob'] > 0:
-                segment += mono_glyph_markup('\u2614') + ' '
+                glyph = '☔'  # umbrella
+            # Check for alert coloring on this day
+            alert_info = alert_map.get(day_idx)
+            if alert_info:
+                color_name = alert_info['color']
+                bright, _ = ALERT_TEXT_COLORS[color_name]
+                glyph_color = bright
+                # Store tooltip for this segment index
+                tooltip = '\n'.join(alert_info['titles'])
+                self._forecast_tooltips.append(tooltip)
+            else:
+                glyph_color = WEATHER_GLYPH_COLOR
+                self._forecast_tooltips.append(None)
+
+            if glyph:
+                glyph_markup = mono_glyph_markup(glyph, glyph_color) + ' '
+
             if day.get('max_temp') is not None and day.get('min_temp') is not None:
                 segment += GLib.markup_escape_text(
                     f"{day['max_temp']:.0f}/{day['min_temp']:.0f}°C"
                 )
             if segment:
-                segments.append(f'<span size="large"><b>{segment}{pad}</b></span>')
+                segments.append(f'<span size="large"><b>{glyph_markup}{segment}{pad}</b></span>')
         return segments
-
     def build_today_weather_segments(self):
         """Returns a list of independently-markup'd segments (temp, high/low,
         wind, rain) for the 'today' view — rendered as separate widgets so
@@ -257,6 +302,10 @@ class WeatherMixin:
             lbl.set_hexpand(True)
             lbl.set_xalign(0.5)
             lbl.set_valign(Gtk.Align.BASELINE)
+            # Apply tooltip for forecast view segments
+            if (self.weather_view == 'forecast' and hasattr(self, '_forecast_tooltips')
+                    and n < len(self._forecast_tooltips) and self._forecast_tooltips[n]):
+                lbl.set_tooltip_text(self._forecast_tooltips[n])
             row.pack_start(lbl, True, True, 0)
         return row
 
@@ -289,6 +338,25 @@ class WeatherMixin:
             fwd_btn.set_tooltip_text('Show 5-day forecast')
             fwd_btn.connect('clicked', self.on_weather_arrow_clicked, 'forecast')
             fwd_btn.set_valign(Gtk.Align.CENTER)
+            # Color the forward arrow button background by worst alert severity in forecast period
+            worst_color = self._worst_forecast_alert_color()
+            if worst_color:
+                bright, _ = ALERT_TEXT_COLORS[worst_color]
+                fwd_btn.get_style_context().add_class('weather-alert-btn')
+                css = f'''
+                    .weather-alert-btn {{
+                        background: {bright};
+                        background-color: {bright};
+                        background-image: none;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                    }}
+                '''
+                provider = Gtk.CssProvider()
+                provider.load_from_data(css.encode())
+                context = fwd_btn.get_style_context()
+                context.add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
             self.weather_box.pack_start(fwd_btn, False, False, 0)
 
         self.weather_box.show_all()

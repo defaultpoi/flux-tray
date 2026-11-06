@@ -61,6 +61,9 @@ class FakeRegistry:
                 return driver
         raise rt.NoDriver(f'the {name} source plugin is not loaded')
 
+    def discovery_plugins(self):
+        return []
+
 
 class Stub:
     _effective_order = rt.FluxTray._effective_order
@@ -89,6 +92,7 @@ class Stub:
     _consumed_media_sources = rt.FluxTray._consumed_media_sources
     remove_consumed_media = rt.FluxTray.remove_consumed_media
     _media_menu_remove = rt.FluxTray._media_menu_remove
+    _cancel_source_downloads = rt.FluxTray._cancel_source_downloads
     _drop_media_sources = rt.FluxTray._drop_media_sources
     _set_media_resume = rt.FluxTray._set_media_resume
     mark_media_unwatched = rt.FluxTray.mark_media_unwatched
@@ -97,6 +101,11 @@ class Stub:
     _trash_episode_files = rt.FluxTray._trash_episode_files
     remove_due_movies = rt.FluxTray.remove_due_movies
     _prune_watched_files = rt.FluxTray._prune_watched_files
+    _is_discovery_url = rt.FluxTray._is_discovery_url
+    get_discovery_items = rt.FluxTray.get_discovery_items
+    start_discovery_fetch = rt.FluxTray.start_discovery_fetch
+    _on_media_row_enter = rt.FluxTray._on_media_row_enter
+    _on_media_row_leave = rt.FluxTray._on_media_row_leave
 
     def __init__(self):
         self.media = {'sources': {}}
@@ -115,6 +124,8 @@ class Stub:
         self._media_queue = []
         self._media_current = None
         self._media_worker_running = False
+        self._media_cancel = set()
+        self._media_playlist_episodes = {}
         self.popup = mock.MagicMock()
         self.popup.get_visible.return_value = False
         self.listbox = mock.MagicMock()
@@ -138,7 +149,9 @@ class MediaCase(unittest.TestCase):
         for name, value in (('load_media_sources', mock.Mock(side_effect=lambda: list(self.sources))),
                             ('load_media_movies', mock.Mock(side_effect=lambda: set(self.movies))),
                             ('load_media_settings', mock.Mock(side_effect=lambda: dict(self.settings))),
-                            ('save_media', mock.Mock())):
+                            ('save_media', mock.Mock()),
+                            ('load_media_cache', mock.Mock(return_value={})),
+                            ('get_all_cached_items', mock.Mock(return_value=[]))):
             patcher = mock.patch.object(rt, name, value)
             setattr(self, name, patcher.start())
             self.addCleanup(patcher.stop)
@@ -162,7 +175,7 @@ class MediaCase(unittest.TestCase):
 
 class TestMediaRowView(unittest.TestCase):
     def view(self, entry, order='oldest', downloaded=False, status=None, name='Show'):
-        return rt.media_row_view(name, entry, order, downloaded, status)
+        return rt.media_row_view(name, entry, order, downloaded, status, is_playing=False)
 
     def test_a_ready_episode(self):
         entry = entry_with(ep('a', 1), ep('b', 2))
@@ -229,19 +242,19 @@ class TestMediaRowView(unittest.TestCase):
         self.assertEqual(self.view(entry_with())[1:3], ('no episodes yet', ''))
 
     def test_a_source_that_cannot_be_read_shows_why_and_offers_a_retry(self):
-        name, text, stats, tooltip, color = rt.media_row_view('Show', entry_with(), 'oldest', False, None, 'yt-dlp is not installed')
+        name, text, stats, tooltip, color = rt.media_row_view('Show', entry_with(), 'oldest', False, None, 'yt-dlp is not installed', is_playing=False)
         self.assertEqual((text, stats, color), ('cannot be read', '', 'failed'))
         self.assertEqual(tooltip.split('\n'), ['yt-dlp is not installed', 'Click to try again'])
 
     def test_a_source_with_episodes_that_failed_its_last_check_keeps_its_row_and_notes_it(self):
         entry = entry_with(ep('a', 1))
-        _, text, stats, tooltip, color = rt.media_row_view('Show', entry, 'oldest', True, None, 'OSError: offline')
+        _, text, stats, tooltip, color = rt.media_row_view('Show', entry, 'oldest', True, None, 'OSError: offline', is_playing=False)
         self.assertEqual((text, stats, color), ('S01E01 a', 'ready', 'ready'))
         self.assertIn('Last check failed: OSError: offline', tooltip)
 
     def test_the_error_is_in_the_tooltip_when_everything_is_watched_too(self):
         entry = entry_with(ep('a', 1), watched=['a'])
-        self.assertEqual(rt.media_row_view('Show', entry, 'oldest', False, None, 'x')[3], 'Last check failed: x')
+        self.assertEqual(rt.media_row_view('Show', entry, 'oldest', False, None, 'x', is_playing=False)[3], 'Last check failed: x')
 
     def test_the_tooltip_has_the_episode_the_hint_the_count_and_the_last_watched(self):
         entry = entry_with(ep('a', 1), ep('b', 2), ep('c', 3), watched=['a'], last={'id': 'a', 'title': 'A title'})
@@ -627,10 +640,10 @@ class TestWatchingWhileItDownloads(MediaCase):
 
     def test_the_row_says_it_can_be_watched(self):
         entry = entry_with(ep('a', 1))
-        view = rt.media_row_view('Show', entry, 'oldest', False, dict(self.DOWNLOADING))
+        view = rt.media_row_view('Show', entry, 'oldest', False, dict(self.DOWNLOADING), is_playing=False)
         self.assertEqual(view[2], '30%')
         self.assertIn('Click to watch while it downloads', view[3])
-        plain = rt.media_row_view('Show', entry, 'oldest', False, {'state': 'downloading', 'percent': 30})
+        plain = rt.media_row_view('Show', entry, 'oldest', False, {'state': 'downloading', 'percent': 30}, is_playing=False)
         self.assertNotIn('Click to watch', plain[3])  # ("unwatched" is in there, so the whole word is not the test)
         self.assertIn('Downloading', plain[3])
 
@@ -1332,7 +1345,8 @@ class TestRows(MediaCase):
         stub.media['sources'][URL] = entry_with(ep('a', 1))
         stub.media['sources']['https://c.example/x'] = entry_with()  # read, but nothing in it yet
         stub.media['sources']['https://removed.example/'] = entry_with(ep('a', 1))
-        self.assertEqual(stub.media_source_urls(), [URL, POD])  # config order, no removed sources, no empty ones
+        # Dynamic sources (from discovery clicks) prepended, then config sources in config order
+        self.assertEqual(stub.media_source_urls(), ['https://removed.example/', URL, POD])
 
     def test_a_source_that_could_not_be_read_is_listed_too(self):
         self.sources = [(URL, None, None), (POD, None, None)]
@@ -1348,7 +1362,7 @@ class TestRows(MediaCase):
         self.assertEqual(row.media_label.set_markup.call_args.args[0],
                          '<span foreground="#000000"><b>My Show</b> - cannot be read</span>')
         self.assertIn('#c0392b', row.media_marker.set_markup.call_args.args[0])
-        self.assertIn('yt-dlp is not installed', row.set_tooltip_text.call_args.args[0])
+        self.assertIn('yt-dlp is not installed', row.set_tooltip_markup.call_args.args[0])
         self.assertNotIn(URL, stub.media['sources'])  # showing it creates no state
 
     def test_a_row_for_a_source_with_neither_state_nor_error_is_left_alone(self):
@@ -1380,7 +1394,7 @@ class TestRows(MediaCase):
         row.media_label.set_markup.assert_called_with('<span foreground="#000000"><b>Show</b> - S01E01 Pilot</span>')
         row.media_stats.set_markup.assert_called_with('<span foreground="#000000">- ready - 1 new</span>')
         row.media_marker.set_markup.assert_called_with('<span foreground="#2e8b57">\u25cf</span>')
-        self.assertIn('Click to play', row.set_tooltip_text.call_args.args[0])
+        self.assertIn('Click to play', row.set_tooltip_markup.call_args.args[0])
 
     def test_the_configured_name_and_order_are_used(self):
         stub = Stub()
@@ -1475,7 +1489,7 @@ class TestRowOfAMovieThatIsGoing(unittest.TestCase):
     def view(self, **fields):
         entry = entry_with(ep('f', 1), watched=['f'], title='Film')
         entry.update(fields)
-        return rt.media_row_view('The Film', entry, None, False, None, now=NOW)
+        return rt.media_row_view('The Film', entry, None, False, None, now=NOW, is_playing=False)
 
     def test_a_watched_movie_that_is_to_be_removed_says_when_and_how_to_keep_it(self):
         _name, text, stats, tooltip, color = self.view(remove_at=NOW + 23 * 3600)
@@ -1493,7 +1507,7 @@ class TestRowOfAMovieThatIsGoing(unittest.TestCase):
     def test_a_removal_is_not_mentioned_while_something_is_unwatched(self):
         entry = entry_with(ep('a', 1), ep('b', 2), watched=['a'])
         entry['remove_at'] = NOW + 3600
-        _name, _text, stats, tooltip, _color = rt.media_row_view('Show', entry, 'oldest', True, None, now=NOW)
+        _name, _text, stats, tooltip, _color = rt.media_row_view('Show', entry, 'oldest', True, None, now=NOW, is_playing=False)
         self.assertNotIn('removed in', stats + tooltip)
 
 

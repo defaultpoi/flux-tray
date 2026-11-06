@@ -588,7 +588,8 @@ class TestMediaConfig(TmpConfigCase):
         self.conf('[feeds]\nhttps://example.com/feed.xml\n')
         self.assertEqual(rt.load_media_settings(),
                          {'path': os.path.expanduser('~/videos'), 'interval': 3600, 'ahead': 2, 'behind': None,
-                          'grace': 24 * 3600, 'sleep': 0, 'ytdlp': [], 'screen': None})
+                          'grace': 24 * 3600, 'sleep': 0, 'ytdlp': [], 'screen': None,
+                          'omdb_key': None, 'tmdb_key': None, 'discovery_types': ('movies', 'series')})
         self.assertEqual(rt.load_media_sources(), [])
 
     def test_defaults_without_a_config_file(self):
@@ -598,7 +599,8 @@ class TestMediaConfig(TmpConfigCase):
     def test_settings_are_read_and_the_path_is_expanded(self):
         self.conf('[media]\npath=~/shows\ninterval=30\nahead=4\n')
         self.assertEqual(rt.load_media_settings(), {'path': os.path.expanduser('~/shows'), 'interval': 1800, 'ahead': 4,
-                                                    'behind': None, 'grace': 24 * 3600, 'sleep': 0, 'ytdlp': [], 'screen': None})
+                                                    'behind': None, 'grace': 24 * 3600, 'sleep': 0, 'ytdlp': [], 'screen': None,
+                                                    'omdb_key': None, 'tmdb_key': None, 'discovery_types': ('movies', 'series')})
 
     def test_the_interval_has_a_minimum_and_ahead_a_range(self):
         self.conf('[media]\ninterval=1\nahead=500\n')

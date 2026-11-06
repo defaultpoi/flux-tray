@@ -447,9 +447,9 @@ class TestWatchLocalPlayback(WatcherCase):
 
     def test_it_always_asks_for_the_time_and_the_length_since_it_measures_what_was_played(self):
         self.watch([None])
-        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause'])
+        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause', 'playlist-pos', 'playlist-pos-1'])
         self.watch([None], total=100)
-        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause'])
+        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause', 'playlist-pos', 'playlist-pos-1'])
 
     def test_the_furthest_point_and_the_least_remaining_are_kept_against_a_known_length(self):
         at = lambda pos: {'path': '/v/a.mp4', 'percent-pos': 1, 'time-remaining': 1, 'time-pos': pos}
@@ -482,7 +482,7 @@ class TestPlayMediaFile(unittest.TestCase):
         load.assert_called_once_with('/v/a.mp4', 'Show \u00b7 Pilot', start=None)
         self.assertEqual(thread.call_args.kwargs['target'], rt._watch_local_playback)
         self.assertEqual(thread.call_args.kwargs['args'], ('/v/a.mp4', done))
-        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': None, 'on_stopped': None, 'sleep_seconds': 0})
+        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': None, 'on_stopped': None, 'sleep_seconds': 0, 'on_playlist_advance': None})
         thread.return_value.start.assert_called_once_with()
 
     def test_the_length_of_an_unfinished_download_is_handed_to_the_watcher(self):
@@ -490,7 +490,7 @@ class TestPlayMediaFile(unittest.TestCase):
                 mock.patch.object(rt, '_load_in_mpv', return_value=True), \
                 mock.patch.object(rt.threading, 'Thread') as thread:
             rt.play_media_file('/v/a.ts.part', 'T', mock.Mock(), total_seconds=2501)
-        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': 2501, 'on_stopped': None, 'sleep_seconds': 0})
+        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': 2501, 'on_stopped': None, 'sleep_seconds': 0, 'on_playlist_advance': None})
 
     def test_without_a_callback_nothing_is_watched(self):
         with mock.patch.object(rt.shutil, 'which', return_value='/usr/bin/mpv'), \

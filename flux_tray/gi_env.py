@@ -1,7 +1,8 @@
 """The GObject-introspection imports, in one place."""
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib, Gdk, Gio, Pango
+gi.require_version('GdkPixbuf', '2.0')
+from gi.repository import Gtk, GLib, Gdk, GdkPixbuf, Gio, Pango
 try:
     gi.require_version('Wnck', '3.0')
     from gi.repository import Wnck
@@ -14,4 +15,4 @@ except Exception:
     GLibUnix = None
 import cairo
 
-__all__ = ['Gtk', 'GLib', 'Gdk', 'Gio', 'Pango', 'Wnck', 'GLibUnix', 'cairo']
+__all__ = ['Gtk', 'GLib', 'Gdk', 'GdkPixbuf', 'Gio', 'Pango', 'Wnck', 'GLibUnix', 'cairo']

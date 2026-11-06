@@ -234,7 +234,8 @@ class TestFeedMuteRules(TmpConfigCase):
 
     def test_such_items_raise_no_new_item_alert_only_a_quiet_refresh(self):
         stub, idle = self.check_with('[feeds]\nhttps://a.example/feed||||category=plants\n')
-        idle.assert_any_call(stub.on_new_items)  # the two other items still alert
+        # on_new_items is called with (has_live_updates=False)
+        idle.assert_any_call(stub.on_new_items, False)
         idle.assert_any_call(stub._read_later_changed)
         stub2, idle2 = self.check_with('[feeds]\nhttps://a.example/feed||||category=*\n')
         self.assertEqual(stub2.state['unread'], [])
@@ -556,26 +557,32 @@ class TestItemsFromEntries(unittest.TestCase):
     URL = 'https://a.example/feed'
 
     def run_entries(self, entries, seen=None, phrases=(), mute_rules=(), later_rules=()):
-        seen_ids = set() if seen is None else seen
-        return rt.items_from_entries(entries, self.URL, seen_ids, list(phrases), mute_rules, later_rules), seen_ids
+        seen_dict = {} if seen is None else seen
+        return rt.items_from_entries(entries, self.URL, seen_dict, list(phrases), mute_rules, later_rules), seen_dict
 
     def test_a_new_entry_becomes_an_unread_item_with_its_details(self):
         entry = {'id': 'e1', 'title': 'Hello', 'link': 'https://a.example/1', 'tags': [{'term': 'World'}], 'author': 'A. Writer'}
-        (new, later, newly_seen), seen_ids = self.run_entries([entry])
+        (new, later, newly_seen), seen_dict = self.run_entries([entry])
         eid = rt.entry_id(entry, self.URL)
         self.assertEqual(new, [{'id': eid, 'title': 'Hello', 'link': 'https://a.example/1', 'feed_url': self.URL,
-                                'pkg_match': None, 'tags': ['World'], 'author': 'A. Writer'}])
-        self.assertEqual((later, newly_seen, seen_ids), ([], {eid}, {eid}))
+                                'pkg_match': None, 'tags': ['World'], 'author': 'A. Writer', 'live': False}])
+        self.assertEqual(later, [])
+        self.assertEqual(newly_seen, {eid})
+        self.assertIn(eid, seen_dict)
+        self.assertIsInstance(seen_dict[eid]['seen_at'], float)
+        self.assertIsNone(seen_dict[eid]['updated'])
 
     def test_an_entry_without_a_title_or_link_still_gets_an_item(self):
         (new, _later, _seen), _ = self.run_entries([{'id': 'e1'}])
         self.assertEqual((new[0]['title'], new[0]['link']), ('(untitled)', ''))
         self.assertNotIn('tags', new[0])
         self.assertNotIn('author', new[0])
+        self.assertFalse(new[0].get('live'))
 
     def test_an_entry_already_seen_is_skipped_entirely(self):
         entry = {'id': 'e1', 'title': 'Hello'}
-        (new, later, newly_seen), _ = self.run_entries([entry], seen={rt.entry_id(entry, self.URL)})
+        eid = rt.entry_id(entry, self.URL)
+        (new, later, newly_seen), _ = self.run_entries([entry], seen={eid: {'seen_at': 1000, 'updated': None}})
         self.assertEqual((new, later, newly_seen), ([], [], set()))
 
     def test_the_same_entry_twice_in_one_feed_is_one_item(self):
@@ -584,10 +591,11 @@ class TestItemsFromEntries(unittest.TestCase):
         self.assertEqual((len(new), len(newly_seen)), (1, 1))
 
     def test_a_muted_entry_counts_as_seen_but_is_not_surfaced(self):
-        (new, later, newly_seen), seen_ids = self.run_entries([{'id': 'e1', 'title': 'Sports roundup'}], phrases=['sports'])
+        (new, later, newly_seen), seen_dict = self.run_entries([{'id': 'e1', 'title': 'Sports roundup'}], phrases=['sports'])
         self.assertEqual((new, later), ([], []))
         self.assertEqual(len(newly_seen), 1)
-        self.assertEqual(seen_ids, newly_seen)
+        eid = list(newly_seen)[0]
+        self.assertIn(eid, seen_dict)
 
     def test_an_entry_older_than_a_day_counts_as_seen_but_is_not_surfaced(self):
         old = time.gmtime(time.time() - rt.MAX_ITEM_AGE_SECONDS - 3600)

@@ -40,6 +40,7 @@ class FluxTray(ConnectivityMixin, FeedsMixin, IconMixin, LiveMixin, MediaMixin, 
         self.media_errors = {}  # source -> why its last check failed, in memory only
         self._media_header_row = None  # the 'Media' heading in the list, while there is one
         self.media_registry = MediaSources(MEDIA_PLUGIN_DIR)  # built-in drivers and the plugins
+        self._media_playlist_episodes = {}  # source_url -> list of episode_ids in playlist order
         self._media_request_lock = threading.Lock()  # guards the four fields below
         self._media_checking = False  # a media-check thread is running
         self._media_pending_all = False  # a full check was asked for while one was running
@@ -52,6 +53,7 @@ class FluxTray(ConnectivityMixin, FeedsMixin, IconMixin, LiveMixin, MediaMixin, 
         self._media_queue = []
         self._media_current = None
         self._media_worker_running = False
+        self._media_cancel = set()  # set of (url, episode_id) to cancel
         self.popup = None
         self.popup_width = WINDOW_WIDTH  # WINDOW_WIDTH, or wider when the weather bar needs it (see _fit_popup_width)
         self.listbox = None
@@ -132,6 +134,10 @@ class FluxTray(ConnectivityMixin, FeedsMixin, IconMixin, LiveMixin, MediaMixin, 
         GLib.timeout_add_seconds(load_youtube_check_interval(), self.periodic_youtube_check)
         GLib.timeout_add_seconds(5, self.initial_media_check)
         GLib.timeout_add_seconds(load_media_settings()['interval'], self.periodic_media_check)
+        # Discovery feed: periodic (uses media interval) and on manual refresh
+        GLib.timeout_add_seconds(load_media_settings()['interval'], self.periodic_discovery_check)
+        # Initial discovery check after 6 seconds (lets other checks run first)
+        GLib.timeout_add_seconds(6, self.initial_discovery_check)
         self.watch_media_config()
         self._measure_screen()
         GLib.timeout_add_seconds(1, self._timer_tick)

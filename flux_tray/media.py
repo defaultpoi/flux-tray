@@ -84,10 +84,14 @@ def clean_title(title, names=()):
     return text or (title or '')
 
 
-def episode_label(episode):
-    """'S01E05' when the title carried a number, else the date, else ''."""
+def episode_label(episode, total_episodes=None):
+    """'S01E05' when the title carried a number, else the date, else ''.
+    If total_episodes is provided, shows 'S01E05/8' format for series."""
     if episode.get('season') is not None and episode.get('episode') is not None:
-        return f"S{episode['season']:02d}E{episode['episode']:02d}"
+        base = f"S{episode['season']:02d}E{episode['episode']:02d}"
+        if total_episodes is not None:
+            return f"{base}/{total_episodes}"
+        return base
     return episode.get('date') or ''
 
 
