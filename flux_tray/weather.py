@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from .config import load_weather_settings
 from .constants import WEATHER_GLYPH_COLOR
+from .log import _log
 
 
 def build_weather_api_url(lat, lon):
@@ -122,41 +123,95 @@ def _parse_meteoalarm_time(value):
         return None
 
 
-def _fetch_meteoalarm_detail(feed_entry_id):
-    """Fetch the MeteoAlarm CAP XML from the feed entry's ID and extract the description.
-    Returns the description text or None on failure."""
-    # The feed entry ID looks like:
-    # https://feeds.meteoalarm.org/api/v1/warnings/feeds-romania/<uuid>?index_info=1&index_area=2&index_geocode=0
-    # We want the base URL without query params to get the CAP XML
-    base_url = feed_entry_id.split('?')[0] if feed_entry_id else ''
-    if not base_url:
+METEOALARM_DETAIL_MAX_BYTES = 1_000_000
+_ALERT_DETAIL_CACHE = {}  # CAP url -> its description text (or None), so a check does not refetch what it has
+
+
+def _meteoalarm_detail_url(feed_entry_id):
+    """The CAP document's address from a feed entry's id (its query dropped), or
+    None unless it is an https address on meteoalarm.org: the id comes from a feed,
+    so it is checked before anything is fetched from it."""
+    base = (feed_entry_id or '').split('?')[0]
+    parts = urllib.parse.urlsplit(base)
+    host = parts.hostname or ''
+    if parts.scheme != 'https' or not (host == 'meteoalarm.org' or host.endswith('.meteoalarm.org')):
         return None
+    return base
+
+
+def _fetch_meteoalarm_detail(feed_entry_id):
+    """The description (or else the headline) in the alert's CAP XML, or None if
+    there is no usable address, the fetch fails or the document has neither."""
+    url = _meteoalarm_detail_url(feed_entry_id)
+    if not url:
+        return None
+    if url in _ALERT_DETAIL_CACHE:
+        return _ALERT_DETAIL_CACHE[url]
+    text = None
     try:
-        req = urllib.request.Request(
-            base_url,
-            headers={'User-Agent': 'flux-tray/1.0 (personal use)'}
-        )
+        req = urllib.request.Request(url, headers={'User-Agent': 'flux-tray'})
         with urllib.request.urlopen(req, timeout=10) as resp:
-            xml_text = resp.read().decode('utf-8')
-        # Parse CAP XML
-        root = ET.fromstring(xml_text)
-        # Namespace
+            root = ET.fromstring(resp.read(METEOALARM_DETAIL_MAX_BYTES))
         ns = {'cap': 'urn:oasis:names:tc:emergency:cap:1.2'}
-        # Try <description> first, then <headline>
         for tag in ('description', 'headline'):
             elem = root.find(f'.//cap:info/cap:{tag}', ns)
-            if elem is not None and elem.text:
-                return elem.text.strip()
-    except Exception:
-        pass
+            if elem is not None and elem.text and elem.text.strip():
+                text = elem.text.strip()
+                break
+    except Exception as e:
+        _log(f'MeteoAlarm detail fetch failed: {e}')
+    if len(_ALERT_DETAIL_CACHE) >= 50:
+        _ALERT_DETAIL_CACHE.clear()
+    _ALERT_DETAIL_CACHE[url] = text
+    return text
+
+
+_AWARENESS_TYPES = {
+    1: 'Wind', 2: 'Snow/Ice', 3: 'Thunderstorm', 4: 'Rain', 5: 'Fog', 6: 'High Temperature',
+    7: 'Low Temperature', 8: 'Coastal Event', 9: 'Forest Fire', 10: 'Avalanches', 11: 'Rain/Flood',
+}
+_AWARENESS_LEVELS = {1: 'Green', 2: 'Yellow', 3: 'Orange', 4: 'Red'}
+
+
+def _awareness_number(cap_event, key):
+    """The number after `key=` in a cap_event such as "awareness_type=1, awareness_level=2",
+    or None."""
+    for part in (cap_event or '').split(','):
+        name, _, value = part.strip().partition('=')
+        if name == key:
+            try:
+                return int(value)
+            except ValueError:
+                return None
     return None
 
 
-def fetch_meteoalarm_alerts(region, country, now=None):
+def meteoalarm_summary(entry, hazard, onset, expires):
+    """A one-sentence description built from an entry's own fields, for when the
+    CAP document cannot be had: "Yellow Wind Warning for Buzau. Valid from ... to ...".
+    Times are in the local time zone."""
+    event = _AWARENESS_TYPES.get(_awareness_number(entry.get('cap_event'), 'awareness_type'), hazard)
+    level = _AWARENESS_LEVELS.get(_awareness_number(entry.get('cap_event'), 'awareness_level'),
+                                  (entry.get('cap_severity') or '').capitalize())
+    def local(t):
+        return t.astimezone().strftime('%Y-%m-%d %H:%M %Z') if t else 'unknown'
+    return f"{level} {event} Warning for {entry.get('cap_areadesc', '')}. Valid from {local(onset)} to {local(expires)}."
+
+
+FORECAST_DAYS = 5  # the days after today that the weather bar's forecast shows
+
+
+def fetch_meteoalarm_alerts(region, country, now=None, upcoming_days=0):
     """Fetches `country`'s MeteoAlarm feed and returns the entries whose area
     matches `region` (case-insensitive) AND whose time window currently
     covers `now` (defaults to the real current time), as a list of
-    {'hazard', 'segment', 'title', 'expires', 'severity_color', 'summary'} dicts.
+    {'hazard', 'segment', 'title', 'summary', 'onset', 'expires',
+    'severity_color', 'upcoming'} dicts; 'summary' is the CAP document's text for an
+    alert in force, else a sentence built from the entry (so an alert still to start
+    costs no extra request). With `upcoming_days`, entries that have not started yet
+    but start before the end of that many days after today are included too,
+    with 'upcoming' True; the feed lists as far ahead as the country publishes,
+    so what is there is what is shown.
     Returns None on a feed fetch failure (distinct from [] = feed fetched
     fine, nothing active for this region right now).
 
@@ -173,6 +228,10 @@ def fetch_meteoalarm_alerts(region, country, now=None):
     if now is None:
         now = datetime.now(timezone.utc)
     region_lower = (region or '').strip().lower()
+    horizon = None
+    if upcoming_days:
+        local_midnight = now.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        horizon = local_midnight + timedelta(days=upcoming_days + 1)
     alerts = []
     for entry in parsed.entries:
         if entry.get('cap_areadesc', '').strip().lower() != region_lower:
@@ -184,68 +243,58 @@ def fetch_meteoalarm_alerts(region, country, now=None):
             _parse_meteoalarm_time(entry.get('cap_onset'))
             or _parse_meteoalarm_time(entry.get('cap_effective'))
         )
-        if onset is not None and now < onset:
-            continue  # not started yet
+        upcoming = onset is not None and now < onset
+        if upcoming and (horizon is None or onset >= horizon):
+            continue  # not started yet, and not wanted that far ahead
         expires = _parse_meteoalarm_time(entry.get('cap_expires'))
         if expires is not None and now > expires:
             continue  # expired
-        # Build a detailed message from CAP fields since the feed lacks a description field
-        # cap_event format: "awareness_type=1, awareness_level=2"
-        cap_event = entry.get('cap_event', '')
-        event_type = None
-        event_level = None
-        for part in cap_event.split(','):
-            part = part.strip()
-            if part.startswith('awareness_type='):
-                try:
-                    event_type = int(part.split('=')[1])
-                except (ValueError, IndexError):
-                    pass
-            elif part.startswith('awareness_level='):
-                try:
-                    event_level = int(part.split('=')[1])
-                except (ValueError, IndexError):
-                    pass
-        # awareness_type: 1=Wind, 2=Snow/Ice, 3=Thunderstorm, 4=Rain, 5=Fog, 6=High Temp, 7=Low Temp, 8=Coastal, 9=Forest Fire, 10=Avalanches, 11=Rain-Flood
-        # awareness_level: 1=Green, 2=Yellow, 3=Orange, 4=Red
-        event_names = {
-            1: 'Wind', 2: 'Snow/Ice', 3: 'Thunderstorm', 4: 'Rain',
-            5: 'Fog', 6: 'High Temperature', 7: 'Low Temperature',
-            8: 'Coastal Event', 9: 'Forest Fire', 10: 'Avalanches', 11: 'Rain/Flood'
-        }
-        level_names = {1: 'Green', 2: 'Yellow', 3: 'Orange', 4: 'Red'}
-        event_name = event_names.get(event_type, hazard)
-        level_name = level_names.get(event_level, entry.get('cap_severity', '').capitalize())
-        area = entry.get('cap_areadesc', '')
-        # Format times in local timezone for readability
-        if onset:
-            onset_local = onset.astimezone()
-            onset_str = onset_local.strftime('%Y-%m-%d %H:%M %Z')
-        else:
-            onset_str = 'unknown'
-        if expires:
-            expires_local = expires.astimezone()
-            expires_str = expires_local.strftime('%Y-%m-%d %H:%M %Z')
-        else:
-            expires_str = 'unknown'
-        summary = f'{level_name} {event_name} Warning for {area}. Valid from {onset_str} to {expires_str}.'
-        # Try to fetch detailed description from the MeteoAlarm CAP XML API
-        feed_entry_id = entry.get('id', '')
-        detail_summary = None
-        if feed_entry_id:
-            detail_summary = _fetch_meteoalarm_detail(feed_entry_id)
-        # Fall back to constructed message if detail fetch failed
-        if not detail_summary:
-            detail_summary = summary
+        summary = None if upcoming else _fetch_meteoalarm_detail(entry.get('id', ''))
         alerts.append({
             'hazard': hazard,
             'segment': _hazard_to_segment(hazard),
             'title': entry.get('title', ''),
-            'summary': detail_summary,
+            'summary': summary or meteoalarm_summary(entry, hazard, onset, expires),
+            'onset': entry.get('cap_onset') or entry.get('cap_effective') or '',
             'expires': entry.get('cap_expires', ''),
             'severity_color': _severity_to_color(entry.get('cap_severity')),
+            'upcoming': upcoming,
         })
     return alerts
+
+
+_SEVERITY_ORDER = ('yellow', 'orange', 'red')
+
+
+def worst_severity(alerts):
+    """The most severe colour name among alerts' 'severity_color', None for none."""
+    colors = [a.get('severity_color', 'yellow') for a in alerts]
+    return max(colors, key=lambda c: _SEVERITY_ORDER.index(c) if c in _SEVERITY_ORDER else 0) if colors else None
+
+
+def forecast_alerts_by_day(alerts, today, days=FORECAST_DAYS, tz=None):
+    """{n: [alerts]} for each forecast day n (1 = tomorrow ... `days`) that has any: the
+    alerts whose time window overlaps that day, a day being midnight to midnight where
+    the person is (`tz`, the local time zone by default; `today` is a date). A window with
+    no start reaches back indefinitely; one with no end is taken to cover only the day
+    it starts in, since an open end would paint every day ahead."""
+    tz = tz or datetime.now().astimezone().tzinfo
+
+    def midnight(day):
+        return datetime.combine(day, datetime.min.time(), tzinfo=tz)
+
+    result = {}
+    for alert in alerts:
+        onset = _parse_meteoalarm_time(alert.get('onset'))
+        expires = _parse_meteoalarm_time(alert.get('expires'))
+        if expires is None:
+            first_day = onset.astimezone(tz).date() if onset else today
+            expires = midnight(first_day + timedelta(days=1))
+        for n in range(1, days + 1):
+            day_start = midnight(today + timedelta(days=n))
+            if (onset is None or onset < day_start + timedelta(days=1)) and expires > day_start:
+                result.setdefault(n, []).append(alert)
+    return result
 
 
 def fetch_weather():
@@ -276,23 +325,15 @@ def fetch_weather():
         daily_min = daily.get('temperature_2m_min', [])
         daily_rain_prob = daily.get('precipitation_probability_max', [])
         daily_precip_sum = daily.get('precipitation_sum', [])
-        daily_times = daily.get('time', [])
 
         forecast_days = []
-        daily_dates = []
-        for i in range(1, 6):
+        for i in range(1, FORECAST_DAYS + 1):
             if i < len(daily_max) and i < len(daily_min):
                 forecast_days.append({
                     'max_temp': daily_max[i],
                     'min_temp': daily_min[i],
                     'rain_prob': daily_rain_prob[i] if i < len(daily_rain_prob) else None,
                 })
-                if i < len(daily_times):
-                    # Parse date string like "2026-09-30" to datetime at midnight UTC
-                    try:
-                        daily_dates.append(datetime.fromisoformat(daily_times[i]).replace(tzinfo=timezone.utc))
-                    except Exception:
-                        daily_dates.append(None)
 
         return {
             'temp': current.get('temperature_2m'),
@@ -304,7 +345,6 @@ def fetch_weather():
             'today_rain_prob': daily_rain_prob[0] if len(daily_rain_prob) > 0 else None,
             'today_precip_sum': daily_precip_sum[0] if len(daily_precip_sum) > 0 else None,
             'forecast_days': forecast_days,
-            'daily_dates': daily_dates,
         }
     except Exception:
         return None
@@ -375,47 +415,3 @@ def mono_glyph_markup(glyph, color=WEATHER_GLYPH_COLOR, rise=0):
     rise_attr = f' rise="{rise}"' if rise else ''
     return (f'<span foreground="{color}" font_family="DejaVu Sans"{rise_attr}>'
             f'{glyph}\ufe0e</span>')
-
-
-def _map_alerts_to_forecast_days(alerts, forecast_dates):
-    """Map active alerts to the forecast days they overlap.
-
-    Args:
-        alerts: List of alert dicts with 'onset', 'expires' (datetime),
-                'severity_color' (str: 'yellow'|'orange'|'red'), 'title' (str).
-        forecast_dates: List of datetime objects (one per forecast day, midnight UTC).
-
-    Returns:
-        Dict mapping forecast day index (0-based, skipping today) to:
-        {'color': severity_color, 'titles': [alert_title, ...]}
-        Only includes days that have at least one overlapping alert.
-        When multiple alerts overlap a day, the worst severity wins.
-    """
-    if not alerts or not forecast_dates:
-        return {}
-
-    # Severity ranking: yellow=1, orange=2, red=3
-    severity_rank = {'yellow': 1, 'orange': 2, 'red': 3}
-
-    day_alerts = {}  # day_index -> list of (severity_color, title)
-    for alert in alerts:
-        onset = alert.get('onset')
-        expires = alert.get('expires')
-        color = alert.get('severity_color', 'yellow')
-        title = alert.get('title', '')
-        if not onset or not expires:
-            continue
-        # Check each forecast day for overlap
-        for day_idx, day_start in enumerate(forecast_dates):
-            day_end = day_start + timedelta(days=1)
-            # Alert overlaps day if onset < day_end AND expires > day_start
-            if onset < day_end and expires > day_start:
-                day_alerts.setdefault(day_idx, []).append((color, title))
-
-    # Resolve to worst severity per day
-    result = {}
-    for day_idx, alert_list in day_alerts.items():
-        worst = max(alert_list, key=lambda x: severity_rank.get(x[0], 0))
-        titles = [t for c, t in alert_list]
-        result[day_idx] = {'color': worst[0], 'titles': titles}
-    return result

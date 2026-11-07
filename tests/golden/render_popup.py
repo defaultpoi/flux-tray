@@ -1,11 +1,13 @@
 """Builds the real popup from fixed data and prints its widget tree as JSON.
 
-Usage: render_popup.py full|quiet|media_menu|media_removed. `full` shows every
+Usage: render_popup.py full|quiet|media_menu|media_removed|weather_alerts. `full` shows every
 section; `quiet` has only a saved item, so the popup says there is nothing unread;
 `media_menu` has a podcast with an episode left, a series and a film that are all
 watched, and prints the right-click menu of each of their rows; `media_removed`
 presses "Remove all 2 fully watched" in the series' menu and prints what is left
-(the popup, config.conf, the sources in media.json).
+(the popup, config.conf, the sources in media.json); `weather_alerts` has a forecast
+with alerts for some of its days, and prints the weather bar in both views, with the
+background colour the toggle really ends up with.
 
 Run by tests/test_golden_popup.py in a child process, under a display, with its
 own HOME: the paths are fixed when flux_tray is imported. Nothing here touches
@@ -28,6 +30,7 @@ import time
 NOW = 1_793_000_000  # a fixed 'now' (late October 2026) so elapsed times read the same every run
 HOME = tempfile.mkdtemp(prefix='flux-tray-golden-')
 os.environ['HOME'] = HOME
+os.environ['TZ'] = 'UTC'  # the days of a forecast are local dates: the same on every machine
 os.environ['XDG_DATA_HOME'] = HOME + '/.local/share'  # where the desktop Trash is: never the real one
 os.environ.pop('FLUX_TRAY_DEBUG', None)
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
@@ -112,6 +115,9 @@ elif SCENARIO in ('media_menu', 'media_removed'):
         'title': 'Example Film', 'baselined': True, 'episodes': [episode(1, 'Example Film', '2026-08-01')],
         'known': ['ep1'], 'new': [], 'watched': ['ep1'], 'files': {'ep1': {'video': str(film_file), 'subs': []}},
         'last_watched': {'id': 'ep1', 'title': 'Example Film', 'at': NOW - 3600}, 'remove_at': NOW + 5 * 3600}
+elif SCENARIO == 'weather_alerts':
+    STATE = {'seen': {}, 'unread': [], 'read_later': STATE['read_later']}
+    MEDIA = {'sources': {}}
 elif SCENARIO != 'full':
     raise SystemExit(f'unknown scenario {SCENARIO!r}')
 
@@ -121,6 +127,7 @@ config_dir.mkdir(parents=True)
 (config_dir / 'state.json').write_text(json.dumps(STATE))
 (config_dir / 'media.json').write_text(json.dumps(MEDIA))
 
+time.tzset()
 time.time = lambda: NOW
 
 from flux_tray.gi_env import GLib, Gtk  # noqa: E402
@@ -213,13 +220,68 @@ def media_scenario(tray):
             'popup': describe(tray.popup)}
 
 
+def weather_scenario(tray):
+    from datetime import datetime, timedelta, timezone
+
+    def stamp(days, hour):
+        base = datetime.fromtimestamp(NOW, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        return (base + timedelta(days=days, hours=hour)).isoformat()
+
+    def alert(hazard, color, segment, onset, expires, upcoming):
+        return {'hazard': hazard, 'segment': segment, 'title': f'{hazard} warning', 'onset': onset, 'expires': expires,
+                'severity_color': color, 'upcoming': upcoming}
+
+    days = [{'max_temp': 12.0, 'min_temp': 4.0, 'rain_prob': 60}, {'max_temp': 14.0, 'min_temp': 6.0, 'rain_prob': 0},
+            {'max_temp': 15.0, 'min_temp': 7.0, 'rain_prob': 30}, {'max_temp': 16.0, 'min_temp': 8.0, 'rain_prob': 0},
+            {'max_temp': 13.0, 'min_temp': 5.0, 'rain_prob': 0}]
+    tray.weather_data = {'temp': 9.0, 'weather_code': 3, 'today_max_temp': 11.0, 'today_min_temp': 3.0, 'wind': 12.0,
+                         'today_max_wind': 30.0, 'today_rain_prob': 20.0, 'today_precip_sum': 0.4, 'forecast_days': days}
+    out = {}
+
+    def snapshot(label):
+        tray.weather_view = 'today'
+        tray.rebuild_weather_bar()
+        pump()
+        toggle = next(w for w in walk(tray.weather_box) if isinstance(w, Gtk.Button))
+        context = toggle.get_style_context()
+        colour = context.get_property('background-color', Gtk.StateFlags.NORMAL)
+        image = context.get_property('background-image', Gtk.StateFlags.NORMAL)
+        text = next(w for w in walk(toggle) if isinstance(w, Gtk.Label)).get_style_context().get_color(Gtk.StateFlags.NORMAL)
+        today_view = describe(tray.weather_box)
+        toggle.clicked()
+        pump()
+        rgba = lambda c: [round(c.red, 3), round(c.green, 3), round(c.blue, 3), round(c.alpha, 3)]
+        out[label] = {'toggle_background': rgba(colour), 'toggle_text': rgba(text),
+                      'toggle_has_gradient': image is not None, 'today': today_view, 'forecast': describe(tray.weather_box)}
+
+    tray.active_alerts, tray.upcoming_alerts = [], []
+    snapshot('no_alerts')
+    # a yellow rain alert on day 1 and an orange wind one on day 3 (both days have a rain glyph), a red
+    # wind one on day 4 (which has none, so it gets a warning glyph); nothing for day 2 or 5
+    tray.active_alerts = []
+    tray.upcoming_alerts = [alert('Rain', 'yellow', 'rain', stamp(1, 6), stamp(1, 18), True),
+                            alert('Wind', 'orange', 'wind', stamp(3, 0), stamp(3, 12), True),
+                            alert('Wind', 'red', 'wind', stamp(4, 6), stamp(4, 18), True)]
+    snapshot('alerts_ahead')
+    tray.active_alerts = [alert('Wind', 'orange', 'wind', stamp(0, 0), stamp(1, 5), False)]
+    tray.upcoming_alerts = []
+    snapshot('in_force_into_tomorrow')
+    tray.active_alerts = [alert('Wind', 'red', 'wind', stamp(0, 0), stamp(0, 20), False)]
+    tray.upcoming_alerts = []
+    snapshot('only_today')
+    tray.active_alerts, tray.upcoming_alerts = [], [alert('Rain', 'yellow', 'rain', stamp(2, 0), stamp(2, 12), True)]
+    snapshot('yellow_only')
+    return {'scenarios': out}
+
+
 def main():
     from flux_tray.ui.popup import POPUP_CSS
     tray = app_module.FluxTray()
     tray.show_popup()
     pump()
-    if SCENARIO in ('media_menu', 'media_removed'):
-        json.dump(media_scenario(tray), sys.stdout, indent=1, sort_keys=True, ensure_ascii=False)
+    if SCENARIO in ('media_menu', 'media_removed', 'weather_alerts'):
+        json.dump(weather_scenario(tray) if SCENARIO == 'weather_alerts' else media_scenario(tray),
+                  sys.stdout, indent=1, sort_keys=True, ensure_ascii=False)
         sys.stdout.write('\n')
         return
     window = tray.popup

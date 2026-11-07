@@ -27,6 +27,7 @@ Tick an item only after doing it, and write down what was not done in
 - [ ] Right-click a Media row: the menu opens beside it and the popup stays open; *Remove from list* is greyed (with the count in its tooltip) while episodes are unwatched and works when all are watched, taking the row (and the Media heading with the last one) out without the popup closing or the other rows moving; *Remove all N fully watched* appears with two or more such sources; the line is gone from `[media]` and the downloaded files are still there.
 - [ ] Launch opens the configured entries; Edit config opens the file in the editor.
 - [ ] Weather: today and forecast, the arrow button, the popup refits when data arrives; an alert changes the icon.
+- [ ] With the MeteoAlarm feed listing an alert for a coming day: the `›` button on the first slide takes the severity colour (its arrow stays readable), its tooltip names the day and the hazard, and on the forecast slide that day's glyph has the colour (a ⚠ if the day had no rain glyph). Note how many days ahead your country's feed really goes, and whether an alert that spans midnight lands on the right days.
 
 ## 3. Background activity, network and the real tools
 

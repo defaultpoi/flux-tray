@@ -58,6 +58,9 @@ class TestPopupAppearance(unittest.TestCase):
     def test_removing_the_watched_sources_through_the_menu_end_to_end(self):
         self.check('media_removed')
 
+    def test_the_weather_bar_with_alerts_ahead_in_both_slides_and_the_colours_gtk_computes(self):
+        self.check('weather_alerts')
+
     def test_the_run_is_repeatable(self):
         self.assertEqual(self.render('full'), self.render('full'))
 

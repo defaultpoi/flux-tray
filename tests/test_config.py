@@ -500,7 +500,7 @@ class TestFetchAlertsBg(TmpConfigCase):
         with mock.patch.object(rt, 'reverse_geocode_region', return_value=('Exampleland', 'Northshire', 'RO')), \
                 mock.patch.object(rt, 'fetch_meteoalarm_alerts', return_value=[]) as fetch:
             self.assertEqual(self.Stub()._fetch_alerts_bg(), [])
-        fetch.assert_called_once_with('Northshire', 'Exampleland')
+        fetch.assert_called_once_with('Northshire', 'Exampleland', upcoming_days=rt.FORECAST_DAYS)
         s = rt.load_weather_settings()
         self.assertTrue(s['alerts_enabled'])
         self.assertEqual((s['country'], s['region']), ('Exampleland', 'Northshire'))
@@ -517,7 +517,7 @@ class TestFetchAlertsBg(TmpConfigCase):
                 mock.patch.object(rt, 'fetch_meteoalarm_alerts', return_value=[]) as fetch:
             self.Stub()._fetch_alerts_bg()
         geocode.assert_not_called()
-        fetch.assert_called_once_with('Northshire', 'Exampleland')
+        fetch.assert_called_once_with('Northshire', 'Exampleland', upcoming_days=rt.FORECAST_DAYS)
 
     def test_lookup_runs_again_once_the_values_are_deleted(self):
         self.conf('[weather]\n10.0|20.0\nalerts=true\ncountry=Exampleland\n')  # region missing

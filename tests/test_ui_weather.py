@@ -7,6 +7,8 @@ from facade import rt
 class TestForecastSegments(unittest.TestCase):
     class Stub:
         build_forecast_weather_segments = rt.FluxTray.build_forecast_weather_segments
+        _forecast_alerts_by_day = rt.FluxTray._forecast_alerts_by_day
+        active_alerts = upcoming_alerts = ()
 
     def _segments(self, weather_data):
         s = self.Stub()
@@ -83,6 +85,8 @@ class TestMonoGlyph(unittest.TestCase):
     def test_forecast_umbrella_is_monochrome(self):
         class Stub:
             build_forecast_weather_segments = rt.FluxTray.build_forecast_weather_segments
+            _forecast_alerts_by_day = rt.FluxTray._forecast_alerts_by_day
+            active_alerts = upcoming_alerts = ()
             weather_data = {'forecast_days': [{'max_temp': 5.0, 'min_temp': 1.0, 'rain_prob': 50}]}
         with mock.patch.object(rt.GLib, 'markup_escape_text', side_effect=lambda x: x):
             seg = Stub().build_forecast_weather_segments()[0]
@@ -94,8 +98,9 @@ class TestWeatherArrowStaysInPlace(unittest.TestCase):
     class Stub:
         rebuild_weather_bar = rt.FluxTray.rebuild_weather_bar
         on_weather_arrow_clicked = rt.FluxTray.on_weather_arrow_clicked
-        _worst_alert_color = lambda self: None  # No alerts by default
-        _worst_forecast_alert_color = lambda self: None  # No forecast alerts by default
+        _forecast_alerts_by_day = rt.FluxTray._forecast_alerts_by_day
+        _forecast_alert_lines = staticmethod(rt.FluxTray._forecast_alert_lines)
+        active_alerts = upcoming_alerts = ()
 
         def __init__(self, view):
             self.weather_view = view
@@ -147,225 +152,163 @@ class TestWeatherFetchedRefitsThePopup(unittest.TestCase):
         self.assertEqual(stub.calls, ['bar', 'refit', 'icon'])
 
 
-class TestForecastAlertGlyphColoring(unittest.TestCase):
-    """Test that forecast day glyphs are colored by overlapping alert severity."""
-
-    class Stub:
-        build_forecast_weather_segments = rt.FluxTray.build_forecast_weather_segments
-        _map_alerts_to_forecast_days = rt._map_alerts_to_forecast_days
-
-        def __init__(self, weather_data, alerts=None):
-            self.weather_data = weather_data
-            self.active_alerts = alerts or []
-
-    def _segments(self, weather_data, alerts=None):
-        s = self.Stub(weather_data, alerts)
-        with mock.patch.object(rt.GLib, 'markup_escape_text', side_effect=lambda x: x):
-            return s.build_forecast_weather_segments()
-
-    def test_forecast_glyph_colored_by_alert(self):
-        """Day with overlapping alert shows glyph in alert color."""
-        weather_data = {
-            'forecast_days': [
-                {'max_temp': 20.0, 'min_temp': 10.0, 'rain_prob': 50},
-                {'max_temp': 18.0, 'min_temp': 8.0, 'rain_prob': 0},
-            ],
-            'daily_dates': [
-                rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),
-                rt.datetime(2026, 10, 1, tzinfo=rt.timezone.utc),
-            ],
-        }
-        alerts = [{
-            'hazard': 'Wind',
-            'severity_color': 'red',
-            'onset': rt.datetime(2026, 9, 30, 6, tzinfo=rt.timezone.utc),
-            'expires': rt.datetime(2026, 9, 30, 18, tzinfo=rt.timezone.utc),
-            'title': 'Red Wind Warning issued for Country - Region',
-        }]
-        segs = self._segments(weather_data, alerts)
-        # First day (index 0 in forecast_days) should have red glyph
-        self.assertIn('foreground="#cc0000"', segs[0])  # bright red
-        self.assertIn('☔︎', segs[0])  # rain glyph
-        # Second day should not be colored (no alert overlap)
-        self.assertNotIn('foreground="#cc0000"', segs[1])
-
-    def test_forecast_glyph_tooltip_has_alert_title(self):
-        """Forecast day glyph has tooltip with alert description on hover."""
-        weather_data = {
-            'forecast_days': [
-                {'max_temp': 20.0, 'min_temp': 10.0, 'rain_prob': 50},
-            ],
-            'daily_dates': [
-                rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),
-            ],
-        }
-        alerts = [{
-            'hazard': 'Wind',
-            'severity_color': 'orange',
-            'onset': rt.datetime(2026, 9, 30, 6, tzinfo=rt.timezone.utc),
-            'expires': rt.datetime(2026, 9, 30, 18, tzinfo=rt.timezone.utc),
-            'title': 'Orange Wind Warning issued for Country - Region. Wind gusts will reach 50-70 km/h.',
-        }]
-        s = self.Stub(weather_data, alerts)
-        with mock.patch.object(rt.GLib, 'markup_escape_text', side_effect=lambda x: x):
-            segs = s.build_forecast_weather_segments()
-        # Tooltip is stored on _forecast_tooltips for later application on label widget
-        self.assertTrue(hasattr(s, '_forecast_tooltips'))
-        self.assertEqual(len(s._forecast_tooltips), 1)
-        self.assertIn('Wind gusts will reach 50-70 km/h', s._forecast_tooltips[0])
-
-    def test_forecast_multiple_alerts_worst_severity(self):
-        """When multiple alerts overlap a day, glyph uses worst severity color."""
-        weather_data = {
-            'forecast_days': [
-                {'max_temp': 20.0, 'min_temp': 10.0, 'rain_prob': 50},
-            ],
-            'daily_dates': [
-                rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),
-            ],
-        }
-        alerts = [
-            {
-                'hazard': 'Wind',
-                'severity_color': 'yellow',
-                'onset': rt.datetime(2026, 9, 30, 6, tzinfo=rt.timezone.utc),
-                'expires': rt.datetime(2026, 9, 30, 18, tzinfo=rt.timezone.utc),
-                'title': 'Yellow Wind Warning...',
-            },
-            {
-                'hazard': 'Rain',
-                'severity_color': 'red',
-                'onset': rt.datetime(2026, 9, 30, 12, tzinfo=rt.timezone.utc),
-                'expires': rt.datetime(2026, 10, 1, 12, tzinfo=rt.timezone.utc),
-                'title': 'Red Rain Warning...',
-            },
-        ]
-        s = self.Stub(weather_data, alerts)
-        with mock.patch.object(rt.GLib, 'markup_escape_text', side_effect=lambda x: x):
-            segs = s.build_forecast_weather_segments()
-        # Should use red (worst)
-        self.assertIn('foreground="#cc0000"', segs[0])
-        # Tooltip should include both titles (stored in _forecast_tooltips)
-        self.assertTrue(hasattr(s, '_forecast_tooltips'))
-        self.assertIn('Yellow Wind Warning', s._forecast_tooltips[0])
-        self.assertIn('Red Rain Warning', s._forecast_tooltips[0])
-
-    def test_forecast_no_alert_no_coloring(self):
-        """Forecast day without overlapping alert uses default glyph color."""
-        weather_data = {
-            'forecast_days': [
-                {'max_temp': 20.0, 'min_temp': 10.0, 'rain_prob': 50},
-            ],
-            'daily_dates': [
-                rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),
-            ],
-        }
-        segs = self._segments(weather_data, [])
-        # Default glyph color
-        self.assertIn(f'foreground="{rt.WEATHER_GLYPH_COLOR}"', segs[0])
-        self.assertNotIn('tooltip=', segs[0])
-
-
-class TestTodayArrowButtonBackground(unittest.TestCase):
-    """Test that the forward arrow button in today view has alert-colored background
-    based on forecast-period alerts."""
-
-    class Stub:
-        rebuild_weather_bar = rt.FluxTray.rebuild_weather_bar
-        _worst_forecast_alert_color = rt.FluxTray._worst_forecast_alert_color
-        _segment_alert_colors = rt.FluxTray._segment_alert_colors
-        _pulse_on_for = rt.FluxTray._pulse_on_for
-        _alert_pulse_counter = 0
-        on_weather_arrow_clicked = rt.FluxTray.on_weather_arrow_clicked
-        build_today_weather_segments = rt.FluxTray.build_today_weather_segments
-        build_forecast_weather_segments = rt.FluxTray.build_forecast_weather_segments
-        _build_weather_row = rt.FluxTray._build_weather_row
-        weather_row_pad = staticmethod(rt.weather_row_pad)
-
-        def __init__(self, alerts=None):
-            self.active_alerts = alerts or []
-            self.weather_view = 'today'
-            self.weather_data = {
-                'temp': 15.0, 'weather_code': 0, 'today_max_temp': 20.0, 'today_min_temp': 10.0,
-                # daily_dates contains only forecast days (1-5), matching forecast_days indices
-                'daily_dates': [
-                    rt.datetime(2026, 9, 30, tzinfo=rt.timezone.utc),  # day 1 (tomorrow)
-                    rt.datetime(2026, 10, 1, tzinfo=rt.timezone.utc),  # day 2
-                    rt.datetime(2026, 10, 2, tzinfo=rt.timezone.utc),  # day 3
-                    rt.datetime(2026, 10, 3, tzinfo=rt.timezone.utc),  # day 4
-                    rt.datetime(2026, 10, 4, tzinfo=rt.timezone.utc),  # day 5
-                ],
-            }
-            # Mock weather_box with proper font description for glyph_rise_units
-            self.weather_box = mock.Mock()
-            self.weather_box.get_children.return_value = []
-            pango_context = mock.Mock()
-            font_desc = mock.Mock()
-            font_desc.get_size.return_value = 10 * 1024  # 10pt in Pango units
-            pango_context.get_font_description.return_value = font_desc
-            self.weather_box.get_pango_context.return_value = pango_context
-
-    def _rebuild(self, alerts):
-        stub = self.Stub(alerts)
-        buttons = []
-        css_providers = []
-        with mock.patch.object(rt, 'Gtk') as gtk:
-            gtk.Button.side_effect = lambda label=None: buttons.append(mock.Mock(label=label)) or buttons[-1]
-            # Track CssProvider creation
-            def track_css_provider():
-                provider = mock.Mock()
-                css_providers.append(provider)
-                return provider
-            gtk.CssProvider.side_effect = track_css_provider
-            stub.rebuild_weather_bar()
-        return buttons, css_providers
-
-    def _alert(self, severity, day_index=0, duration_days=1):
-        """Create a mock alert overlapping a forecast day (day_index 0=day1, 1=day2, etc.)."""
-        base = rt.datetime(2026, 9, 30, 6, tzinfo=rt.timezone.utc)  # day 1
-        onset = base + rt.timedelta(days=day_index)
-        expires = onset + rt.timedelta(days=duration_days)
-        return {
-            'hazard': 'Wind',
-            'severity_color': severity,
-            'onset': onset,
-            'expires': expires,
-            'title': f'{severity.capitalize()} Wind Warning issued for Country - Region',
-        }
-
-    def test_arrow_button_background_colored_by_worst_forecast_alert(self):
-        """Forward arrow button background uses worst forecast alert severity color."""
-        alerts = [
-            self._alert('yellow', day_index=0),  # overlaps day 1
-            self._alert('red', day_index=1),     # overlaps day 2
-        ]
-        buttons, css_providers = self._rebuild(alerts)
-        # The forward arrow button (›) should have background color from worst forecast alert (red)
-        fwd_btn = buttons[0]
-        self.assertEqual(fwd_btn.label, '›')
-        # Check that CSS provider was created and added to button's style context
-        self.assertEqual(len(css_providers), 1)
-        # Verify the CSS contains the red background color
-        css_provider = css_providers[0]
-        css_provider.load_from_data.assert_called()
-        css_arg = css_provider.load_from_data.call_args[0][0].decode()
-        self.assertIn('#cc0000', css_arg)  # bright red
-        self.assertIn('color: white', css_arg)
-
-    def test_arrow_button_no_forecast_alert_no_background_color(self):
-        """Forward arrow button has no special background when no forecast alerts."""
-        # Current alerts that don't overlap forecast days (today only)
-        alerts = [
-            {'severity_color': 'red', 'onset': rt.datetime(2026, 9, 29, 6, tzinfo=rt.timezone.utc),
-             'expires': rt.datetime(2026, 9, 29, 18, tzinfo=rt.timezone.utc),  # today only
-             'hazard': 'Wind', 'title': 'Red Wind Warning...'},
-        ]
-        buttons, css_providers = self._rebuild(alerts)
-        fwd_btn = buttons[0]
-        self.assertEqual(fwd_btn.label, '›')
-        # No CSS provider should be created when no forecast alerts
-        self.assertEqual(len(css_providers), 0)
-
-
 if __name__ == '__main__':
     unittest.main()
+
+
+FORECAST = [{'max_temp': 12.0, 'min_temp': 4.0, 'rain_prob': 60}, {'max_temp': 14.0, 'min_temp': 6.0, 'rain_prob': 0},
+            {'max_temp': 15.0, 'min_temp': 7.0, 'rain_prob': 30}, {'max_temp': 16.0, 'min_temp': 8.0, 'rain_prob': 0},
+            {'max_temp': 13.0, 'min_temp': 5.0, 'rain_prob': 0}]
+
+
+class TestAlertsOnTheForecast(unittest.TestCase):
+    TODAY = rt.datetime(2026, 11, 3).date()
+
+    class Stub:
+        build_forecast_weather_segments = rt.FluxTray.build_forecast_weather_segments
+        _forecast_alerts_by_day = rt.FluxTray._forecast_alerts_by_day
+        _on_weather_fetched = rt.FluxTray._on_weather_fetched
+        _forecast_alert_lines = staticmethod(rt.FluxTray._forecast_alert_lines)
+        rebuild_weather_bar = rt.FluxTray.rebuild_weather_bar
+
+    def stub(self, active=(), upcoming=()):
+        stub = self.Stub()
+        stub.weather_data = {'forecast_days': FORECAST}
+        stub.active_alerts, stub.upcoming_alerts = list(active), list(upcoming)
+        return stub
+
+    def alert(self, onset, expires, color, hazard='Wind', upcoming=True):
+        return {'onset': onset, 'expires': expires, 'severity_color': color, 'hazard': hazard, 'upcoming': upcoming, 'segment': 'wind'}
+
+    def segments(self, stub):
+        with mock.patch.object(rt, 'date') as date, mock.patch.object(rt.GLib, 'markup_escape_text', side_effect=lambda x: x), \
+                mock.patch.object(rt, 'weather_row_pad', return_value=''):
+            date.today.return_value = self.TODAY
+            return stub.build_forecast_weather_segments()
+
+    def tomorrow(self, color='yellow', hazard='Wind'):
+        return self.alert('2026-11-04T06:00:00+00:00', '2026-11-04T18:00:00+00:00', color, hazard)
+
+    def test_without_alerts_the_slide_is_exactly_what_it_was(self):
+        segments = self.segments(self.stub())
+        self.assertIn(rt.mono_glyph_markup('\u2614', rt.WEATHER_GLYPH_COLOR), segments[0])
+        self.assertNotIn('\u26a0', ''.join(segments))
+        self.assertNotIn('#c9a600', ''.join(segments))
+
+    def test_the_glyph_of_an_alert_day_takes_the_colour_of_its_alert(self):
+        segments = self.segments(self.stub(upcoming=[self.tomorrow('red')]))
+        self.assertIn(rt.mono_glyph_markup('\u2614', rt.ALERT_TEXT_COLORS['red'][0]), segments[0])  # day 1 had rain: its glyph
+        self.assertIn(rt.mono_glyph_markup('\u2614', rt.WEATHER_GLYPH_COLOR), segments[2])           # day 3, no alert: as before
+
+    def test_an_alert_day_without_a_rain_glyph_gets_a_warning_glyph_in_the_colour(self):
+        alert = self.alert('2026-11-05T06:00:00+00:00', '2026-11-05T18:00:00+00:00', 'orange')  # day 2, no rain
+        segments = self.segments(self.stub(upcoming=[alert]))
+        self.assertIn(rt.mono_glyph_markup('\u26a0', rt.ALERT_TEXT_COLORS['orange'][0]), segments[1])
+        self.assertIn('14/6\u00b0C', segments[1])
+        self.assertNotIn('\u26a0', segments[0] + segments[2] + segments[3] + segments[4])
+
+    def test_each_day_has_its_own_colour(self):
+        alerts = [self.tomorrow('yellow'), self.alert('2026-11-06T00:00:00+00:00', '2026-11-06T12:00:00+00:00', 'red')]
+        segments = self.segments(self.stub(upcoming=alerts))
+        self.assertIn(rt.mono_glyph_markup('\u2614', rt.ALERT_TEXT_COLORS['yellow'][0]), segments[0])
+        self.assertIn(rt.mono_glyph_markup('\u2614', rt.ALERT_TEXT_COLORS['red'][0]), segments[2])
+
+    def test_the_worst_alert_of_a_day_sets_the_colour(self):
+        segments = self.segments(self.stub(upcoming=[self.tomorrow('yellow', 'Rain'), self.tomorrow('red', 'Wind')]))
+        self.assertIn(rt.mono_glyph_markup('\u2614', rt.ALERT_TEXT_COLORS['red'][0]), segments[0])
+
+    def test_an_alert_in_force_now_that_runs_into_tomorrow_colours_tomorrow(self):
+        now = self.alert('2026-11-03T08:00:00+00:00', '2026-11-04T08:00:00+00:00', 'orange', upcoming=False)
+        segments = self.segments(self.stub(active=[now]))
+        self.assertIn(rt.mono_glyph_markup('\u2614', rt.ALERT_TEXT_COLORS['orange'][0]), segments[0])
+
+    def test_the_colour_is_steady_not_pulsing(self):
+        stub = self.stub(upcoming=[self.tomorrow('red')])
+        stub._alert_pulse_counter = 0
+        first = self.segments(stub)
+        stub._alert_pulse_counter = 1
+        self.assertEqual(self.segments(stub), first)
+
+    def test_a_fetch_splits_alerts_into_in_force_and_upcoming_and_keeps_both_when_it_fails(self):
+        stub = self.stub()
+        stub.rebuild_weather_bar = stub._refit_open_popup = stub.update_icon = mock.Mock()
+        now, later = self.alert('', '', 'red', upcoming=False), self.tomorrow()
+        stub._on_weather_fetched(None, [now, later])
+        self.assertEqual((stub.active_alerts, stub.upcoming_alerts), ([now], [later]))
+        stub._on_weather_fetched(None, None)  # the feed could not be read: what is known stays
+        self.assertEqual((stub.active_alerts, stub.upcoming_alerts), ([now], [later]))
+        stub._on_weather_fetched(None, [])    # read, and nothing: both clear
+        self.assertEqual((stub.active_alerts, stub.upcoming_alerts), ([], []))
+
+    def rebuilt_toggle(self, stub, view='today'):
+        stub.weather_view = view
+        stub.weather_box = mock.Mock()
+        stub.weather_box.get_children.return_value = []
+        stub.on_weather_arrow_clicked = mock.Mock()
+        stub._build_weather_row = lambda segments, empty: object()
+        stub.build_today_weather_segments = stub.build_forecast_weather_segments = lambda: []
+        buttons = []
+        with mock.patch.object(rt, 'Gtk') as gtk, mock.patch.object(rt, 'weather_row_pad', return_value=''), \
+                mock.patch.object(rt, '_paint_button') as paint, mock.patch.object(rt, 'date') as date:
+            date.today.return_value = self.TODAY
+            gtk.Button.side_effect = lambda label=None: buttons.append(mock.Mock(label=label)) or buttons[-1]
+            stub.rebuild_weather_bar()
+        return buttons[0], paint
+
+    def test_without_alerts_the_toggle_is_plain(self):
+        button, paint = self.rebuilt_toggle(self.stub())
+        paint.assert_not_called()
+        button.set_tooltip_text.assert_called_once_with('Show 5-day forecast')
+
+    def test_with_an_alert_ahead_the_toggle_takes_the_worst_colour_and_says_what_and_when(self):
+        alerts = [self.tomorrow('yellow', 'Rain'), self.alert('2026-11-06T00:00:00+00:00', '2026-11-06T12:00:00+00:00', 'red', 'Wind')]
+        button, paint = self.rebuilt_toggle(self.stub(upcoming=alerts))
+        paint.assert_called_once_with(button, 'red')
+        tooltip = button.set_tooltip_text.call_args[0][0]
+        self.assertTrue(tooltip.startswith('Show 5-day forecast\n'))
+        self.assertIn('Wed: Rain (yellow)', tooltip)
+        self.assertIn('Fri: Wind (red)', tooltip)
+
+    def test_an_alert_that_is_over_by_tomorrow_does_not_colour_the_toggle(self):
+        today_only = self.alert('2026-11-03T08:00:00+00:00', '2026-11-03T20:00:00+00:00', 'red', upcoming=False)
+        _button, paint = self.rebuilt_toggle(self.stub(active=[today_only]))
+        paint.assert_not_called()
+
+    def test_the_back_button_of_the_forecast_slide_is_not_painted(self):
+        _button, paint = self.rebuilt_toggle(self.stub(upcoming=[self.tomorrow('red')]), view='forecast')
+        paint.assert_not_called()
+
+
+class TestSeverityButtonStyle(unittest.TestCase):
+    def test_each_severity_has_its_background_and_text_that_reads_on_it(self):
+        css = rt.severity_button_css()
+        for color, text in (('yellow', '#000000'), ('orange', '#ffffff'), ('red', '#ffffff')):
+            self.assertIn(f'button.severity-alert-{color} {{ background-image: none; background-color: '
+                          f'{rt.ALERT_TEXT_COLORS[color][0]}; color: {text}; }}', css)
+            self.assertIn(f'button.severity-alert-{color} label {{ color: {text}; }}', css)  # the label has its own colour in the popup's style
+
+    def test_the_themes_gradient_is_switched_off_in_every_state(self):
+        css = rt.severity_button_css()
+        self.assertEqual(css.count('background-image: none'), 9)  # three states of three severities
+        for color in ('yellow', 'orange', 'red'):
+            self.assertIn(f'button.severity-alert-{color}:hover', css)
+            self.assertIn(f'button.severity-alert-{color}:active', css)
+
+    def setUp(self):
+        saved = list(rt._severity_styles_installed)
+        rt._severity_styles_installed.clear()
+        self.addCleanup(lambda: rt._severity_styles_installed.__setitem__(slice(None), saved))
+
+    def test_painting_gives_the_button_the_class_of_its_severity_and_nothing_else(self):
+        button = mock.Mock()
+        with mock.patch.object(rt, 'Gtk'):
+            rt._paint_button(button, 'orange')
+        button.get_style_context.return_value.add_class.assert_called_once_with('severity-alert-orange')
+        button.get_style_context.return_value.add_provider.assert_not_called()  # a provider on the button would not reach its label
+
+    def test_the_stylesheet_goes_on_the_screen_once_however_many_buttons(self):
+        with mock.patch.object(rt, 'Gtk') as gtk, mock.patch.object(rt, 'Gdk'):
+            for color in ('red', 'red', 'yellow'):
+                rt._paint_button(mock.Mock(), color)
+        gtk.StyleContext.add_provider_for_screen.assert_called_once()
+        self.assertEqual(gtk.CssProvider.return_value.load_from_data.call_args[0][0], rt.severity_button_css().encode())
