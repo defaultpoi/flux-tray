@@ -28,6 +28,7 @@ Tick an item only after doing it, and write down what was not done in
 - [ ] Launch opens the configured entries; Edit config opens the file in the editor.
 - [ ] Weather: today and forecast, the arrow button, the popup refits when data arrives; an alert changes the icon.
 - [ ] With the MeteoAlarm feed listing an alert for a coming day: the `›` button on the first slide takes the severity colour (its arrow stays readable), its tooltip names the day and the hazard, and on the forecast slide that day's glyph has the colour (a ⚠ if the day had no rain glyph). Note how many days ahead your country's feed really goes, and whether an alert that spans midnight lands on the right days.
+- [ ] Discovery, with one plugin that has `fetch_discovery`: its new films and series show under the Media sources (title, genres, the sites, an HD or CAM badge); a left click adds the source and the row goes; a right click dismisses it for good (restart and check). New items play the sound and open the popup. Hover a row and a source: the preview opens to the left of the popup, shows the poster once it is cached, and closes when the mouse leaves. Leave a download running with the popup open for a minute and hover: the preview appears once, not repeatedly.
 
 ## 3. Background activity, network and the real tools
 
@@ -44,6 +45,7 @@ Tick an item only after doing it, and write down what was not done in
 - [ ] Suspend and resume while an episode plays: tracking carries on after the wake (finish the episode: it counts as watched).
 - [ ] Fall asleep through an episode that then plays to its end: it counts as watched (unavoidable); *Mark as not watched* puts it back. A movie marked `movie` shows "removed in 23 h"; *I didn't finish it* stops that; after the grace period the file is in the XFCE Trash and the line is gone from `[media]`.
 - [ ] `behind=1` with three watched episodes downloaded: the two older ones (and their subtitles) are in the Trash, the newest is still on disk, none is downloaded again.
+- [ ] With a real `tmdb_key` (and an `omdb_key`) in `[media]`: after a discovery check the titles get genres, posters, ratings and ids (`FLUX_TRAY_DEBUG=1` shows the lookups; no key appears in it); the same film from two sites becomes one row. With a wrong key nothing is cached as not found (fix the key: the next check looks again). Note which of TMDb's fields were empty.
 
 ## 4. Shutdown, restart and files
 

@@ -98,6 +98,9 @@ def ensure_config():
             "# smallest there is when none does (default: the monitor's own size)\n"
             "# ytdlp=<arguments> added to every yt-dlp run, e.g. -S res:720 --cookies-from-browser firefox\n"
             "# discovery_types=movies,series (comma-separated; default: movies,series)\n"
+            "# tmdb_key=<API Read Access Token> (themoviedb.org): posters, ratings and ids for the\n"
+            "# discovery list and the hover preview\n"
+            "# omdb_key=<key> (omdbapi.com): adds the IMDb rating; alone, it finds titles by name\n"
             "# One source per line: url|display name (optional)|order (optional)\n"
             "#   url: an archive.org collection or item (https://archive.org/details/...),\n"
             "#        a YouTube channel, playlist or video, or any podcast / video RSS or Atom feed.\n"
@@ -595,7 +598,8 @@ MAX_MEDIA_AHEAD = 20
 DEFAULT_MEDIA_GRACE_HOURS = 24
 MAX_MEDIA_BEHIND = 1000
 MIN_MEDIA_SLEEP_MINUTES = 5
-_MEDIA_SETTINGS = ('path', 'interval', 'ahead', 'behind', 'grace', 'sleep', 'ytdlp', 'screen', 'omdb_key', 'tmdb_key')
+_MEDIA_SETTINGS = ('path', 'interval', 'ahead', 'behind', 'grace', 'sleep', 'ytdlp', 'screen', 'omdb_key', 'tmdb_key',
+                   'discovery_types')
 _MEDIA_SOURCE_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.\-_]*:\S')  # https://..., yt-dlp:https://..., mysite:show-1
 
 

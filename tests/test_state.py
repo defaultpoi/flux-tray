@@ -193,6 +193,37 @@ class TestState(TmpConfigCase):
 
 
 
+class TestWriteAtomic(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, self.dir, ignore_errors=True)
+        self.path = os.path.join(self.dir, 'f.dat')
+
+    def test_text_is_written_whole_and_no_temp_file_stays(self):
+        rt.write_atomic(self.path, lambda f: f.write('héllo'))
+        with open(self.path, encoding='utf-8') as f:
+            self.assertEqual(f.read(), 'héllo')
+        self.assertEqual(os.listdir(self.dir), ['f.dat'])
+
+    def test_bytes_are_written_when_asked(self):
+        rt.write_atomic(self.path, lambda f: f.write(b'\x89PNG\x00'), binary=True)
+        with open(self.path, 'rb') as f:
+            self.assertEqual(f.read(), b'\x89PNG\x00')
+        self.assertEqual(os.listdir(self.dir), ['f.dat'])
+
+    def test_a_failed_write_leaves_the_old_file_and_no_temp_file(self):
+        rt.write_atomic(self.path, lambda f: f.write('old'))
+
+        def broken(f):
+            f.write('half')
+            raise OSError('disk full')
+        with self.assertRaises(OSError):
+            rt.write_atomic(self.path, broken)
+        with open(self.path) as f:
+            self.assertEqual(f.read(), 'old')
+        self.assertEqual(os.listdir(self.dir), ['f.dat'])
+
+
 class TestMediaState(TmpConfigCase):
     def setUp(self):
         super().setUp()

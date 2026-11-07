@@ -1,19 +1,14 @@
 """Podcasts, series and movies: checking sources, keeping the next episodes
 downloaded, playing them in mpv and remembering what was watched."""
 
-import json
+import html
 import os
 import threading
 import time as time_module
-from datetime import datetime, timezone
-from pathlib import Path
-
-# For async poster loading in tooltips
-import urllib.request
 
 from ..gi_env import GLib, Gdk, GdkPixbuf, Gio, Gtk, Pango
 from ..config import load_media_movies, load_media_settings, load_media_sources, remove_media_sources
-from ..constants import CONFIG_FILE, MEDIA_PLUGIN_DIR
+from ..constants import CONFIG_FILE
 from ..desktop import move_to_trash, primary_monitor_size
 from ..fileutil import remove_empty_dirs
 from ..hls import DownloadCancelled, is_hls
@@ -29,17 +24,29 @@ from ..media import (
     unwatched_count,
     upcoming,
 )
-from ..mediasources import MediaSources, NoDriver, normalize_files, normalize_saved
+from ..mediasources import NoDriver, normalize_files, normalize_saved
 from ..network import run_when_online
 from ..playback import counts_as_watched, is_media_playing, mpv_append_playlist, play_media_file, resume_point
 from ..screen import media_target_size, remember_screen_size
 from ..state import new_media_entry, save_media, save_state
-from ..metadata import get_media_metadata, get_cached_metadata, refresh_metadata_cache
+from ..metadata import format_metadata_for_tooltip, get_cached_metadata, refresh_metadata_cache
 from ..media_cache import (
-    load_media_cache, save_media_cache, get_or_create_entry,
-    get_new_items, mark_seen, is_seen, get_all_cached_items, prune_seen_set
+    load_media_cache, update_media_cache, get_new_items, mark_seen, is_seen,
+    get_all_cached_items, sync_metadata_ids, title_with_year,
 )
 from ..log import _log
+
+
+_discovery_running = threading.Lock()  # held by the discovery check that is running
+
+
+def _give_known_ids(item):
+    """Gives a discovery item the TMDb and IMDb ids the metadata cache has for its
+    title, so that it is keyed by them from the start."""
+    meta = get_cached_metadata(title_with_year(item), item.get('type') or 'movie', item.get('url') or item.get('id'))
+    if meta:
+        item['tmdb_id'] = item.get('tmdb_id') or meta.get('tmdb_id')
+        item['imdb_id'] = item.get('imdb_id') or meta.get('imdb_id')
 
 
 MEDIA_CONFIG_DEBOUNCE_MS = 800  # an editor or the browser extension may write the file in several steps
@@ -88,12 +95,10 @@ def media_row_view(name, entry, order, downloaded, status, error=None, now=None,
             removal_line = f'Removed with its file in {duration_text(left)}. Right-click it and choose "I didn\'t finish it" to keep it.'
         return name, text, stats, '\n'.join(p for p in (removal_line, last_line, error_line) if p), 'idle'
     episode = nxt[0]
-    # Get total episodes from cached metadata (TMDb/OMDB)
-    total_episodes = None
+    # What the cached metadata (TMDb/OMDb) says about the series or movie (not the episode)
     title = entry.get('title') or name
     meta = get_cached_metadata(title, url=url, imdb_id=imdb_id, tmdb_id=tmdb_id)
-    if meta and meta.get('total_episodes'):
-        total_episodes = meta['total_episodes']
+    total_episodes = meta.get('total_episodes') if meta else None
     label = episode_label(episode, total_episodes)
     text = ' '.join(p for p in (label, clean_title(episode.get('title'), (name, entry.get('title')))) if p)
     state = (status or {}).get('state')
@@ -112,22 +117,12 @@ def media_row_view(name, entry, order, downloaded, status, error=None, now=None,
     if news:
         stats = f'{stats} - {news} new' if stats else f'{news} new'
 
-    # Build tooltip with metadata
-    tooltip_parts = [text, hint, f'{unwatched_count(entry)} unwatched', last_line, error_line]
-    # Add TMDb/OMDB metadata for the series/movie (not the episode)
-    title = entry.get('title') or name
-    meta = get_media_metadata(title, url=url, imdb_id=imdb_id, tmdb_id=tmdb_id)
-    if meta:
-        tooltip_parts.insert(1, meta)  # Insert after the episode text
-    # Escape plain text parts, metadata already has markup
-    escaped_parts = []
-    for i, p in enumerate(tooltip_parts):
-        if p and i == 1 and meta:  # metadata part - already has markup
-            escaped_parts.append(p)
-        elif p:
-            escaped_parts.append(GLib.markup_escape_text(p))
-    tooltip = '\n'.join(escaped_parts)
-    return name, text, stats, tooltip, color
+    # The tooltip is markup: the plain parts are escaped, the metadata already is
+    parts = [html.escape(p, quote=False) for p in (text, hint, f'{unwatched_count(entry)} unwatched', last_line, error_line) if p]
+    markup = format_metadata_for_tooltip(meta)
+    if markup:
+        parts.insert(1 if text else 0, markup)  # after the episode text
+    return name, text, stats, '\n'.join(parts), color
 
 
 def describe_media_error(error):
@@ -386,84 +381,99 @@ class MediaMixin:
     # ---- Discovery feed (plugins with fetch_discovery) --------------------------
 
     def start_discovery_fetch(self):
-        """Fetch discovery items from all plugins that support it."""
-        threading.Thread(target=self._fetch_discovery_bg, daemon=True).start()
+        """Fetches the discovery feeds of the plugins that have one, in a thread. A fetch
+        that is still running is not started again."""
+        if _discovery_running.acquire(blocking=False):
+            threading.Thread(target=self._fetch_discovery_guarded, daemon=True).start()
 
-    def _fetch_discovery_bg(self):
+    def _fetch_discovery_guarded(self):
         try:
-            self.media_registry.refresh()
-            # Collect all media URLs from configured sources and dynamically added sources
-            existing_media_urls = set()
-            with self._media_data_lock:
-                for url, entry in self.media['sources'].items():
-                    if url.startswith('discovery:'):
-                        continue
-                    if entry.get('episodes'):
-                        for ep in entry['episodes']:
-                            existing_media_urls.add(ep.get('ref') or ep.get('url') or ep.get('id'))
-
-            # Get discovery types from config (movies, series, or both)
-            discovery_types = load_media_settings()['discovery_types']
-
-            all_new_items = []
-            for plugin in self.media_registry.discovery_plugins():
-                try:
-                    items = plugin.module.fetch_discovery(types=discovery_types, existing_media_urls=existing_media_urls)
-                    for item in items:
-                        item['_plugin'] = plugin.name
-                    all_new_items.extend(items)
-                except Exception as e:
-                    _log(f'discovery fetch error from {plugin.name}: {e}')
+            self._fetch_discovery_bg()
         except Exception as e:
             _log(f'discovery fetch error: {e}')
-            return
-        GLib.idle_add(self._on_discovery_fetched, all_new_items)
+        finally:
+            _discovery_running.release()
 
-    def _on_discovery_fetched(self, new_items):
-        state = self.state
-        # Use unified seen set (keyed by TMDB/IMDb ID)
-        seen = set(state.get('media_discovery_seen', []))
+    def _discovery_seen(self):
+        with self.lock:
+            return {key for key in self.state.get('media_discovery_seen', []) if isinstance(key, str)}
 
-        # Load unified media cache
-        cache = load_media_cache()
+    def _dismiss_discovery(self, items):
+        """Marks discovery items dismissed (in the state, under its lock)."""
+        with self.lock:
+            seen = {key for key in self.state.get('media_discovery_seen', []) if isinstance(key, str)}
+            for item in items:
+                mark_seen(seen, item)
+            self.state['media_discovery_seen'] = sorted(seen)
+            save_state(self.state)
 
-        # Filter to truly new items (not in seen, not in existing media)
-        truly_new = get_new_items(cache, new_items, seen)
-
-        if truly_new:
-            _log(f'discovery: {len(truly_new)} truly new items')
-            # Save updated cache
-            save_media_cache(cache)
-            # Trigger background metadata cache refresh for new items
-            threading.Thread(
-                target=refresh_metadata_cache,
-                args=([item['title'] for item in truly_new], [item.get('type', 'series') for item in truly_new]),
-                daemon=True
-            ).start()
-            # Auto-open popup like media/feeds checks do
-            GLib.idle_add(self.on_new_items)
+    def _fetch_discovery_bg(self):
+        """A discovery check, all of it but the window, in a thread: asks the plugins,
+        files what they found in the discovery cache (an item gets the ids that the
+        metadata cache already has for it), looks up the titles that have none, and
+        re-keys the entries that those ids reach. The popup is touched on the main loop
+        only, so no disk is read or written there on account of a check."""
+        self.media_registry.refresh()
+        existing_media_urls = set()
+        with self._media_data_lock:
+            for url, entry in self.media['sources'].items():
+                if url.startswith('discovery:'):
+                    continue
+                for ep in entry.get('episodes') or []:
+                    existing_media_urls.add(ep.get('ref') or ep.get('url') or ep.get('id'))
+        types = load_media_settings()['discovery_types']
+        found = []
+        for plugin in self.media_registry.discovery_plugins():
+            try:
+                items = plugin.module.fetch_discovery(types=types, existing_media_urls=existing_media_urls)
+            except Exception as e:
+                _log(f'discovery fetch error from {plugin.name}: {e}')
+                continue
+            for item in items:
+                item['_plugin'] = plugin.name
+                _give_known_ids(item)
+            found.extend(items)
+        seen = self._discovery_seen()
+        fresh = update_media_cache(lambda cache: get_new_items(cache, found, seen))
+        if fresh:
+            _log(f'discovery: {len(fresh)} new items')
+            GLib.idle_add(self._discovery_news)
         else:
             _log('discovery: no new items')
+        # the titles that have no id yet are looked up now (a few per check), and the entries re-keyed
+        lacking = [e for e in get_all_cached_items(load_media_cache()) if not e.get('tmdb_id') and not e.get('imdb_id')]
+        if lacking:
+            refresh_metadata_cache([title_with_year(e) for e in lacking], [e.get('type') or 'movie' for e in lacking])
+            self._sync_discovery_ids()
 
-        # Also trigger metadata refresh for cached items missing IDs
-        # (runs in background, limited to 10 lookups per call by refresh_metadata_cache)
-        threading.Thread(
-            target=self._refresh_missing_metadata,
-            daemon=True
-        ).start()
+    def _sync_discovery_ids(self):
+        """Gives the cached discovery entries the ids the metadata cache now has for them;
+        what was dismissed under the old key is dismissed under the new."""
+        def lookup(entry):
+            return get_cached_metadata(title_with_year(entry), entry.get('type') or 'movie')
+        with self.lock:
+            seen = {key for key in self.state.get('media_discovery_seen', []) if isinstance(key, str)}
+            moved = update_media_cache(lambda cache: sync_metadata_ids(cache, seen, lookup)[2])
+            if moved:
+                self.state['media_discovery_seen'] = sorted(seen)
+                save_state(self.state)
+        if moved:
+            GLib.idle_add(self._discovery_refresh)
 
+    def _discovery_news(self):
+        """New discovery items: the same sound and popup as new feed items."""
+        self.on_new_items()
+        self._discovery_refresh()
+        return False
+
+    def _discovery_refresh(self):
         if self.popup and self.popup.get_visible():
             self.refresh_list()
+        return False
 
     def _on_discovery_dismiss(self, _btn, item):
-        state = self.state
-        # Use unified seen set (keyed by TMDB/IMDb ID)
-        seen = set(state.get('media_discovery_seen', []))
-        mark_seen(seen, item)
-        state['media_discovery_seen'] = list(seen)
-        save_state(state)
-        # Defer refresh to main loop to ensure state is visible
-        GLib.idle_add(self.refresh_list, True)
+        self._dismiss_discovery([item])
+        GLib.idle_add(self.refresh_list, True)  # on the main loop, once the state is saved
 
     def _on_discovery_row_activated(self, item):
         plugin_name = item.get('_plugin', 'unknown')
@@ -481,24 +491,6 @@ class MediaMixin:
             self.media['sources'][source_url]['title'] = display_name
         self.start_media_check(only=[source_url])
         self._on_discovery_dismiss(None, item)
-
-    def _refresh_missing_metadata(self):
-        """Refresh metadata for cached discovery items that don't have TMDb/IMDb IDs."""
-        try:
-            from ..metadata import refresh_metadata_cache
-            from ..media_cache import load_media_cache, get_all_cached_items
-            cache = load_media_cache()
-            items = get_all_cached_items(cache)
-            # Filter items without TMDb/IMDb IDs
-            missing = [item for item in items if not item.get('tmdb_id') and not item.get('imdb_id')]
-            if missing:
-                _log(f'refreshing metadata for {len(missing)} items without IDs')
-                refresh_metadata_cache(
-                    [item['title'] for item in missing],
-                    [item.get('type', 'movie') for item in missing]
-                )
-        except Exception as e:
-            _log(f'error refreshing missing metadata: {e}')
 
     def start_media_check(self, only=None):
         """Checks every source, or just those in `only` (sources that were added to
@@ -1198,20 +1190,10 @@ class MediaMixin:
         # Find the discovery item that corresponds to this URL
         # The URL format is "plugin_name:source_url"
         plugin_name, _, source_url = url.partition(':')
-        # Get the discovery item from cache to mark as seen
-        from ..media_cache import load_media_cache, get_all_cached_items, mark_seen
-        from ..state import load_state, save_state
-        cache = load_media_cache()
-        state = load_state()
-        seen = set(state.get('media_discovery_seen', []))
-        # Find matching item by URL
-        for item in get_all_cached_items(cache):
-            urls = item.get('urls', {})
-            if plugin_name in urls and urls[plugin_name] == source_url:
-                mark_seen(seen, item)
-                break
-        state['media_discovery_seen'] = list(seen)
-        save_state(state)
+        # Mark the discovery item that has this URL dismissed
+        self._dismiss_discovery([
+            item for item in get_all_cached_items(load_media_cache())
+            if item.get('urls', {}).get(plugin_name) == source_url][:1])
         # Cancel ongoing download if any
         self._cancel_source_downloads(url)
         # Trash the source files (completed downloads)
@@ -1436,6 +1418,8 @@ class MediaMixin:
 
         # Enable enter/leave events on the box (ListBoxRow is no-window, box receives events)
         box.set_events(box.get_events() | Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        box.connect('enter-notify-event', self._on_media_row_enter)  # once: a row is updated at every download tick
+        box.connect('leave-notify-event', self._on_media_row_leave)
 
         self._update_media_row(row, {u: (n, o) for u, n, o in load_media_sources()})
         return row
@@ -1480,7 +1464,7 @@ class MediaMixin:
         # Pass first URL for year extraction if title doesn't have year
         first_url = next(iter(item.get('urls', {}).values()), None)
         meta = get_cached_metadata(
-            item['title'],
+            title_with_year(item),
             media_type=item.get('type', 'movie'),
             url=first_url,
             imdb_id=item.get('imdb_id'),
@@ -1543,7 +1527,7 @@ class MediaMixin:
         # Store item on box for listbox motion tracking
         box.popover_data = {
             'type': 'discovery',
-            'title': item['title'],
+            'title': title_with_year(item),
             'media_type': item.get('type', 'movie'),
             'urls': item.get('urls', {}),
             'imdb_id': item.get('imdb_id'),
@@ -1592,8 +1576,6 @@ class MediaMixin:
                 'name': name,
                 'tooltip_text': tooltip_text,
             }
-            box.connect('enter-notify-event', self._on_media_row_enter)
-            box.connect('leave-notify-event', self._on_media_row_leave)
 
     def _show_metadata_popover(self, row, content_widget):
         """Show a metadata popover on the left side of the main popup (towards screen center).
@@ -1672,7 +1654,7 @@ class MediaMixin:
     def _on_media_row_enter(self, widget, event):
         """Handle enter event for media rows (called from listbox motion).
         Handles both discovery and regular media rows."""
-        data = widget.popover_data
+        data = getattr(widget, 'popover_data', None)
         if not data:
             return False
 
@@ -1719,7 +1701,8 @@ class MediaMixin:
 
         # Fallback to text tooltip for regular rows
         if not data.get('type') == 'discovery' and tooltip_text:
-            label = Gtk.Label(label=tooltip_text)
+            label = Gtk.Label()
+            label.set_markup(tooltip_text)
             label.set_line_wrap(True)
             label.set_max_width_chars(50)
             label.set_margin_start(8)

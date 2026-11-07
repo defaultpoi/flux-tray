@@ -6,6 +6,7 @@ import unittest
 from unittest import mock
 
 from facade import rt
+from helpers import isolate_media_caches
 
 
 URL = 'https://archive.org/details/show'
@@ -38,6 +39,7 @@ class FakeRegistry:
         self.by_source = {URL: FakeDriver('archive', 'oldest'), POD: FakeDriver('feed', 'newest')}
         self.by_episode_name = {}
         self.refreshed = 0
+        self.discovery = []
 
     def refresh(self):
         self.refreshed += 1
@@ -62,7 +64,7 @@ class FakeRegistry:
         raise rt.NoDriver(f'the {name} source plugin is not loaded')
 
     def discovery_plugins(self):
-        return []
+        return self.discovery
 
 
 class Stub:
@@ -104,6 +106,14 @@ class Stub:
     _is_discovery_url = rt.FluxTray._is_discovery_url
     get_discovery_items = rt.FluxTray.get_discovery_items
     start_discovery_fetch = rt.FluxTray.start_discovery_fetch
+    _fetch_discovery_guarded = rt.FluxTray._fetch_discovery_guarded
+    _fetch_discovery_bg = rt.FluxTray._fetch_discovery_bg
+    _discovery_seen = rt.FluxTray._discovery_seen
+    _dismiss_discovery = rt.FluxTray._dismiss_discovery
+    _sync_discovery_ids = rt.FluxTray._sync_discovery_ids
+    _discovery_news = rt.FluxTray._discovery_news
+    _discovery_refresh = rt.FluxTray._discovery_refresh
+    _on_discovery_dismiss = rt.FluxTray._on_discovery_dismiss
     _on_media_row_enter = rt.FluxTray._on_media_row_enter
     _on_media_row_leave = rt.FluxTray._on_media_row_leave
 
@@ -139,6 +149,7 @@ class Stub:
 
 class MediaCase(unittest.TestCase):
     def setUp(self):
+        isolate_media_caches(self)
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
         self.sources = [(URL, None, None)]
@@ -174,8 +185,28 @@ class MediaCase(unittest.TestCase):
 
 
 class TestMediaRowView(unittest.TestCase):
+    def setUp(self):
+        isolate_media_caches(self)
+
     def view(self, entry, order='oldest', downloaded=False, status=None, name='Show'):
         return rt.media_row_view(name, entry, order, downloaded, status, is_playing=False)
+
+    def test_the_tooltip_is_escaped_markup_and_needs_no_gtk(self):
+        entry = entry_with(ep('a', 1), ep('b', 2), watched=['a'], last={'id': 'a', 'title': 'Tom & <Jerry>'})
+        tooltip = self.view(entry, name='Show')[3]
+        self.assertIn('Last watched: Tom &amp; &lt;Jerry&gt;', tooltip)
+        self.assertNotIn('<Jerry>', tooltip)
+
+    def test_cached_metadata_is_part_of_the_tooltip_after_the_episode_text(self):
+        entry = entry_with(ep('a', 1, title='Pilot'))
+        meta = {'title': 'Show', 'year': '2020', 'imdb_rating': 8.0, 'total_episodes': 30}
+        with mock.patch.object(rt, 'get_cached_metadata', return_value=meta):
+            name, text, stats, tooltip, color = self.view(entry)
+        lines = tooltip.split('\n')
+        self.assertIn('Show (2020)', lines[1])
+        self.assertIn('IMDb: 8.0/10', tooltip)
+        self.assertEqual(lines[0], text)
+        self.assertEqual(text, 'S01E01/30 Pilot')  # the total comes from the metadata too
 
     def test_a_ready_episode(self):
         entry = entry_with(ep('a', 1), ep('b', 2))
@@ -1486,6 +1517,9 @@ class TestDurationText(unittest.TestCase):
 
 
 class TestRowOfAMovieThatIsGoing(unittest.TestCase):
+    def setUp(self):
+        isolate_media_caches(self)
+
     def view(self, **fields):
         entry = entry_with(ep('f', 1), watched=['f'], title='Film')
         entry.update(fields)
@@ -1897,3 +1931,179 @@ class TestARemovedMovie(MediaCase):
 
 def time_now():
     return rt.time_module.time()
+
+
+class TestTheHoverHandlersOfARow(MediaCase):
+    def stub(self):
+        stub = Stub()
+        stub.media['sources'][URL] = entry_with(ep('a', 1), ep('b', 2))
+        return stub
+
+    def test_updating_a_row_connects_nothing(self):
+        # a row is updated at every download tick: a handler added each time piles up
+        stub, row = self.stub(), mock.MagicMock(media_source=URL)
+        for _ in range(5):
+            stub._update_media_row(row, {})
+        row.get_child.return_value.connect.assert_not_called()
+        self.assertEqual(row.get_child.return_value.popover_data['url'], URL)
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_a_real_row_has_one_enter_handler_however_often_it_is_updated(self):
+        from gi.repository import GObject
+        stub = self.stub()
+        row = stub.build_media_row(URL)
+        box = row.get_child()
+        signal = GObject.signal_lookup('enter-notify-event', rt.Gtk.Box)
+
+        def handlers():
+            kind = GObject.SignalMatchType.ID
+            n = GObject.signal_handlers_block_matched(box, kind, signal, 0, None, None, None)
+            GObject.signal_handlers_unblock_matched(box, kind, signal, 0, None, None, None)
+            return n
+        self.assertEqual(handlers(), 1)
+        for _ in range(50):
+            stub._update_media_row(row, {})
+        self.assertEqual(handlers(), 1)
+
+    def test_a_built_row_connects_the_enter_and_leave_handlers_once_each(self):
+        if not isinstance(rt.Gtk, mock.Mock):
+            self.skipTest('counted on the real widgets by the test above')
+        rt.Gtk.Box.return_value.connect.reset_mock()
+        self.stub().build_media_row(URL)
+        events = [c.args[0] for c in rt.Gtk.Box.return_value.connect.call_args_list]
+        self.assertEqual(sorted(events), ['enter-notify-event', 'leave-notify-event'])
+
+    def test_hovering_a_row_that_was_never_updated_does_nothing(self):
+        stub = self.stub()
+        self.assertFalse(stub._on_media_row_enter(mock.Mock(spec=[]), None))  # no popover_data on it
+
+
+class FakePlugin:
+    def __init__(self, name, items=(), error=None):
+        self.name = name
+        self.module = mock.Mock()
+        self.module.fetch_discovery = mock.Mock(side_effect=error, return_value=[dict(i) for i in items])
+
+
+class TestDiscoveryCheck(unittest.TestCase):
+    def setUp(self):
+        isolate_media_caches(self)
+        self.idle = []
+        self.saved = []
+        self.stub = Stub()
+        self.stub.popup.get_visible.return_value = True
+        # the state is saved under the lock, as everywhere else
+        self.lock_held_when_saved = []
+        for name, value in (
+                ('load_media_settings', mock.Mock(return_value={'discovery_types': ('movies', 'series'), 'interval': 3600})),
+                ('save_state', mock.Mock(side_effect=self.save)),
+                ('refresh_metadata_cache', mock.Mock(return_value=0)),
+                ('get_cached_metadata', mock.Mock(return_value=None))):
+            patcher = mock.patch.object(rt, name, value)
+            setattr(self, name, patcher.start())
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(rt.GLib, 'idle_add', side_effect=lambda f, *a: self.idle.append((f, a)))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def save(self, state):
+        self.lock_held_when_saved.append(self.stub.lock.locked())
+        self.saved.append(dict(state))
+
+    def check(self, *plugins):
+        self.stub.media_registry.discovery = list(plugins)
+        self.stub._fetch_discovery_bg()
+
+    def keys(self):
+        return sorted(rt.load_media_cache())
+
+    def news(self):
+        return [f for f, _ in self.idle if f == self.stub._discovery_news]
+
+    FILM = {'title': 'Dune Part Two (2024)', 'type': 'movie', 'url': 'https://f/dune', 'date': '2026-11-06'}
+    OTHER = {'title': 'Alien (1979)', 'type': 'movie', 'url': 'https://f/alien', 'date': '2026-11-06'}
+
+    def test_what_a_plugin_finds_is_filed_and_announced_once(self):
+        self.check(FakePlugin('fsonline', [self.FILM, self.OTHER]))
+        self.assertEqual(self.keys(), ['fallback:movie:alien:1979', 'fallback:movie:dune part two:2024'])
+        self.assertEqual(len(self.news()), 1)
+        self.assertEqual(rt.load_media_cache()['fallback:movie:alien:1979']['urls'], {'fsonline': 'https://f/alien'})
+
+    def test_the_plugins_are_given_the_types_and_the_urls_already_in_the_media_list(self):
+        self.stub.media['sources'][URL] = entry_with({**ep('a', 1), 'ref': 'https://f/have'})
+        plugin = FakePlugin('fsonline')
+        self.check(plugin)
+        plugin.module.fetch_discovery.assert_called_once_with(types=('movies', 'series'), existing_media_urls={'https://f/have'})
+
+    def test_a_dismissed_item_is_filed_but_not_announced(self):
+        seen = set()
+        rt.mark_seen(seen, self.FILM)
+        self.stub.state['media_discovery_seen'] = sorted(seen)
+        self.check(FakePlugin('fsonline', [self.FILM]))
+        self.assertEqual(len(self.keys()), 1)
+        self.assertEqual(self.news(), [])
+
+    def test_a_plugin_that_fails_does_not_stop_the_others(self):
+        self.check(FakePlugin('broken', error=OSError('down')), FakePlugin('fsonline', [self.FILM]))
+        self.assertEqual(len(self.keys()), 1)
+        self.assertEqual(len(self.news()), 1)
+
+    def test_an_item_gets_the_ids_the_metadata_cache_already_has(self):
+        self.get_cached_metadata.side_effect = lambda title, *a, **k: {'tmdb_id': '693134', 'imdb_id': 'tt15239678'} if 'Dune' in title else None
+        self.check(FakePlugin('fsonline', [self.FILM, self.OTHER]))
+        self.assertEqual(self.keys(), ['fallback:movie:alien:1979', 'tmdb:693134'])
+
+    def test_titles_without_ids_are_looked_up_and_their_entries_re_keyed_with_their_dismissals(self):
+        found = {}
+        self.get_cached_metadata.side_effect = lambda title, *a, **k: found.get(title)
+        self.refresh_metadata_cache.side_effect = lambda *a, **k: found.update({'Dune Part Two (2024)': {'tmdb_id': '693134'}})
+        old = rt._cache_key(self.FILM)
+        self.stub.state['media_discovery_seen'] = [old]
+        self.check(FakePlugin('fsonline', [self.FILM]))
+        titles, types = self.refresh_metadata_cache.call_args.args
+        self.assertEqual((titles, types), (['Dune Part Two (2024)'], ['movie']))
+        self.assertEqual(self.keys(), ['tmdb:693134'])
+        self.assertEqual(self.stub.state['media_discovery_seen'], ['tmdb:693134'])  # still dismissed
+        self.assertEqual(self.lock_held_when_saved, [True])
+        self.assertIn(self.stub._discovery_refresh, [f for f, _ in self.idle])
+
+    def test_nothing_is_looked_up_when_every_entry_has_its_ids(self):
+        self.get_cached_metadata.return_value = {'tmdb_id': '1'}
+        self.check(FakePlugin('fsonline', [self.FILM]))
+        self.refresh_metadata_cache.assert_not_called()
+
+    def test_the_main_loop_part_reads_and_writes_no_file(self):
+        with mock.patch.object(rt, 'load_media_cache', side_effect=AssertionError('disk on the main loop')), \
+                mock.patch.object(rt, 'update_media_cache', side_effect=AssertionError('disk on the main loop')):
+            self.assertFalse(self.stub._discovery_news())
+        self.stub.on_new_items.assert_called_once_with()
+        self.stub.refresh_list.assert_called_once_with()
+
+    def test_dismissing_saves_a_sorted_list_under_the_lock(self):
+        self.stub._dismiss_discovery([self.FILM, self.OTHER])
+        self.assertEqual(self.saved[-1]['media_discovery_seen'], sorted([rt._cache_key(self.FILM), rt._cache_key(self.OTHER)]))
+        self.assertEqual(self.lock_held_when_saved, [True])
+
+    def test_dismissing_one_keeps_the_dismissals_already_there_and_refreshes_the_list(self):
+        self.stub.state['media_discovery_seen'] = ['older']
+        self.stub._on_discovery_dismiss(None, self.FILM)
+        self.assertEqual(self.stub.state['media_discovery_seen'], sorted(['older', rt._cache_key(self.FILM)]))
+        self.assertEqual(self.idle[-1], (self.stub.refresh_list, (True,)))
+
+    def test_a_broken_dismissal_list_in_the_state_is_ignored(self):
+        self.stub.state['media_discovery_seen'] = ['ok', 5, None, ['x']]
+        self.assertEqual(self.stub._discovery_seen(), {'ok'})
+
+    def test_a_check_that_is_still_running_is_not_started_again(self):
+        with mock.patch.object(rt.threading, 'Thread') as thread:
+            self.stub.start_discovery_fetch()
+            self.stub.start_discovery_fetch()
+        self.assertEqual(thread.call_count, 1)
+        rt._discovery_running.release()  # what the thread's end would do
+
+    def test_the_guard_is_released_when_a_check_fails(self):
+        with mock.patch.object(self.stub, '_fetch_discovery_bg', side_effect=RuntimeError('boom')):
+            self.assertTrue(rt._discovery_running.acquire(blocking=False))
+            self.stub._fetch_discovery_guarded()  # does not raise
+        self.assertTrue(rt._discovery_running.acquire(blocking=False))
+        rt._discovery_running.release()

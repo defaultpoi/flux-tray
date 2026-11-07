@@ -31,6 +31,26 @@ class TmpConfigCase(unittest.TestCase):
             f.write(text)
 
 
+def isolate_media_caches(case):
+    """Points the metadata cache, the poster cache and the discovery cache of a test at
+    a temp dir (and clears what playing leaves in a module global), so that a test never
+    reads or writes the person's own."""
+    import pathlib
+    folder = pathlib.Path(tempfile.mkdtemp())
+    case.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+    patcher = mock.patch.multiple(
+        rt,
+        METADATA_CACHE_FILE=folder / 'metadata_cache.json',
+        POSTER_CACHE_DIR=folder / 'posters',
+        CACHE_FILE=folder / 'media_cache.json',
+    )
+    patcher.start()
+    case.addCleanup(patcher.stop)
+    rt.clear_media_playing()
+    case.addCleanup(rt.clear_media_playing)
+    return folder
+
+
 def ts(weekday, hour, minute=0, second=0):
     """Timestamp of a local time on the given weekday (0=Mon) of the reference week."""
     return rt.datetime(2026, 10, 5 + weekday, hour, minute, second).timestamp()
