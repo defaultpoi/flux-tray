@@ -119,10 +119,6 @@ def _make_negative_key(title, year, media_type):
     return f'neg:{clean_title.lower()}:{year or ""}:{media_type}'
 
 
-def _is_negative_cached(title, year, media_type):
-    return _make_negative_key(title, year, media_type) in _load_metadata_cache()
-
-
 def _mark_negative_cache(title, year, media_type):
     neg_key = _make_negative_key(title, year, media_type)
     _update_metadata_cache(lambda c: c.__setitem__(neg_key, {'negative': True, 'cached_at': time.time()}))

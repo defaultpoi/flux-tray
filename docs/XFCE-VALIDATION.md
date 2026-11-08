@@ -46,6 +46,8 @@ Tick an item only after doing it, and write down what was not done in
 - [ ] Fall asleep through an episode that then plays to its end: it counts as watched (unavoidable); *Mark as not watched* puts it back. A movie marked `movie` shows "removed in 23 h"; *I didn't finish it* stops that; after the grace period the file is in the XFCE Trash and the line is gone from `[media]`.
 - [ ] `behind=1` with three watched episodes downloaded: the two older ones (and their subtitles) are in the Trash, the newest is still on disk, none is downloaded again.
 - [ ] With a real `tmdb_key` (and an `omdb_key`) in `[media]`: after a discovery check the titles get genres, posters, ratings and ids (`FLUX_TRAY_DEBUG=1` shows the lookups; no key appears in it); the same film from two sites becomes one row. With a wrong key nothing is cached as not found (fix the key: the next check looks again). Note which of TMDb's fields were empty.
+- [ ] With two or more live channels, start one; **Right** and **Left** in the mpv window switch to the next and previous live channel (and not to the same one when it is the only live one). Then play a downloaded episode in the same window: Left and Right seek again. Note the mpv version.
+- [ ] A stream whose title has emoji and non-Latin text (Japanese, Cyrillic): the window title keeps the text and drops the emoji.
 
 ## 4. Shutdown, restart and files
 

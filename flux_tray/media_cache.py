@@ -173,12 +173,6 @@ def get_all_cached_items(cache: dict) -> list[dict]:
     return items
 
 
-def prune_seen_set(seen_set: set[str], cache: dict) -> set[str]:
-    """The dismissed keys that are still in the cache (a dismissal is only kept as long
-    as the item can come back)."""
-    return seen_set & set(cache)
-
-
 def sync_metadata_ids(cache: dict, seen_set: set[str], lookup) -> tuple[dict, set[str], int]:
     """Gives the entries that have no id the ids that metadata has for them.
 

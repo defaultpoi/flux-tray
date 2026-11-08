@@ -1602,7 +1602,7 @@ class MediaMixin:
         # Position to the LEFT of the main popup (towards screen center)
         # Get main popup position and size
         main_x, main_y = self.popup.get_position()
-        main_w, main_h = self.popup.get_size()
+        main_w, _main_h = self.popup.get_size()
 
         # Get row position relative to the main popup
         # The row is inside listbox -> scrolled_window -> content_overlay -> outer -> popup

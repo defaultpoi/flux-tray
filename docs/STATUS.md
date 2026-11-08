@@ -8,15 +8,20 @@ the tests' place.
 | What | How | Result |
 |------|-----|--------|
 | The 1233 tests the code had at baseline commit `eb73c7d` | real GTK under Xvfb, and GTK stubbed | pass, before any change |
-| Everything now | the same two modes, on Python 3.14.4 with PyGObject 3.50.2, GTK 3.24 | pass |
+| Everything now | the same two modes, on Python 3.14.6 with PyGObject 3.50.2, GTK 3.24 (1623 tests); `pyflakes` clean | pass |
 | Popup look and click hooks | `test_golden_popup`, two scenarios; identical on three runs and in the dark and default theme; a changed header and a changed colour digit both fail it | pass |
 | Each hardening change | its new tests run against the old code | fail there, pass now |
 | yt-dlp and ffmpeg | the real binaries in the tests that use them (ffmpeg 6.1) | pass |
+| mpv, the live-channel keys and `loadfile` with a start | the real mpv: 0.37.0 (Ubuntu) and 0.41.0 (AppImage build of 2026-10-24); `test_playback.TestLiveChannelKeysInARealMpv` on both, and the app's own `_load_in_mpv(..., start=20)` on 0.41.0, which takes the index form and starts at 20 s | pass |
+| The way the old live-channel keys were taken away (`keybind Right ''`) | the same real mpv, both versions | left Right dead: no seeking in any file played after a stream. Replaced |
+| New tests against the code they test | a deliberate break of each fix, one at a time , the new tests run | each break fails a test (19 breaks) |
 | `install.sh`, `uninstall.sh` | tests with a temporary HOME | pass |
 | Python 3.14 only | an older version number is refused at import with a message; the metadata says `>=3.14` | pass |
 | CI on GitHub | `.github/workflows/ci.yml`: uv, Python 3.14, PyGObject built from source, both test modes; runs for commits `ae91f8a`, `36aed96` and `e50d623` (on `next` and on `main`) | pass |
 
 ## What was NOT checked
+
+TMDb and OMDb answering (the lookups are tested against a fake network with the replies' shape taken from their documentation; nothing was asked of the real services, and a TMDb *API Read Access Token* is what `tmdb_key` takes), a stream surviving the app's exit (a Python child with a closed log pipe was seen to; streamlink itself was not), the licence of MeteoAlarm's wind and rain icons, mpv other than 0.37 and 0.41.0.
 
 Everything in [XFCE-VALIDATION.md](XFCE-VALIDATION.md): a real panel and tray
 host, a real mpv window, Twitch, YouTube, Open-Meteo, Meteoalarm and archive.org
@@ -38,6 +43,11 @@ differ in the classes it adds.
 - The tray icon during a weather alert with nothing unread or to update: no disc, the temperature alternates between the severity colour and white at the severity's rate (as asked; the original pulsed a disc holding the temperature). Rendered with real cairo against the original: every other icon state (12 checked: plain temperature, negative, no weather, unread counts, updates, the scheduled-action warning, an alert with unread items or updates, an alert without a temperature) is pixel-identical; only the alert-with-temperature frames differ. The popup's weather bar is unchanged.
 - Media: where an unfinished episode stopped is remembered and used (also after a stream took the mpv window, which is reused); watching is judged by time played, not by the furthest point; mpv silent for a few polls does not end the tracking; `behind`, `grace`, `sleep` and the `movie` marker; deletions go to the Trash, only for files inside the media folder; an episode can be put back as not watched. Checked on a real mpv 0.37 under Xvfb (resume, one process and one window across a stream switch, streamlink stopped, position remembered); X idle time checked against real input events under Xvfb. Not checked: mpv 0.38 or newer (the new `loadfile` form is covered by unit tests and a fallback), a real suspend, a real XFCE Trash on another disk.
 - Fully watched sources can be taken off the Media list from a right-click menu (one, or all of them); not tried on a real desktop yet. `.coverage` is no longer tracked.
+- Discovery and the metadata behind it (commit `28cd916`; first written in `18a64e2` with Claude Code, reworked here): plugins' `fetch_discovery` filed in one cache keyed by TMDb id, IMDb id, or title, year and type; the hover preview; TMDb and OMDb lookups. Reworked because the first version had no tests and: raised `NameError` on every lookup failure and then cached the title as "not found" for a week; gave the same film from two sites two entries (the discovery date stood in for the year); never re-keyed an entry (a size comparison that could not be true) and wrote `state.json` from a thread over the app's own copy; asked TMDb's `/find` for an IMDb id from a TMDb id (it cannot) so OMDb never enriched anything; did its disk and network work on the main loop; and added two hover handlers to every media row at every download tick. See README (Discovery) and F40, F41.
+- The forecast-day alerts of `ae931a9` are back: `18a64e2` had been made from its parent, so the push replaced them with a second, weaker version of the feature (its alert-to-day mapper needed an `onset` the feed code never returned, so no day was ever marked). What was new in `18a64e2` and kept: the alert's own text from the CAP document (https meteoalarm.org only, 1 MB, cached) and a sentence built from the entry when it is missing.
+- Live-channel keys: Right and Left cycle from the channel playing (the first version indexed a list of configured channels, not the live ones) through an mpv input section held over the listener's own connection (mpv drops a section with the client that defined it), instead of `keybind` set to an empty command on removal. `_strip_emojis` no longer deletes CJK, Hangul or fullwidth text.
+- News entries a feed edits come back once as `LIVE` items (`18a64e2`), now with a baseline on the first update time, at most one announcement an hour per entry, an unread item replaced in place, and the second sound only for items really added; undocumented before, README and F42 now say it.
+- The hazard icons on the tray icon: one cached parser and drawer (there were two, the first dead), the thunderstorm and flood shapes drawn for the app (the ones in `18a64e2` were not MeteoAlarm's and not recognisable), a test that every path parses and stays inside its viewBox. With nothing unread the icon alternates between the temperature and a **white** hazard icon: the severity colour of `ac0c82d` is gone from the icon, and the severity shows in the rate only (README says so).
 - Cleanup found by measuring (below): dead and duplicated code removed, `build_popup_window` (223 lines) and `check_feeds` (the most complex function) split into parts that can be read and tested on their own.
 
 ## Code health, measured
@@ -84,10 +94,17 @@ Not taken, deliberately:
 
 ## Open items found, not changed
 
+- The tray icon no longer shows an alert's severity colour (above): wanted?
+- sitefilme's discovery items are dated the day they were fetched, and fsonline's feed is read for the last 24 hours only: a check that comes more than a day after the last (the app off, or suspended) misses what appeared in between. The plugins are outside this repository.
+- The quality badge is green for `HD` and red for anything else, so `BLURAY` and `WEBRIP`, which fsonline also reports, are red.
+- `PERFORMANCE_ANALYSIS.md` is an agent's report; only the claim about `_refresh_media_rows` was checked (it was wrong, and is corrected there).
+
 - `yt-dlp` and `ffmpeg` downloads are not started in their own process group; whether quitting during a download leaves a child behind has not been checked on a desktop (XFCE-VALIDATION 4).
 - A feed is fetched with `feedparser.parse(url)`: a 15-second socket timeout applies to each read (`socket.setdefaulttimeout`), but there is no limit on the size of a response or on the total time. Fetching with explicit limits would also change how redirects, gzip and encodings are handled, which cannot be tried against real sites here.
 - `state.json` is written by `json.dump` of the whole state on every save; fine at the sizes in use.
 
 ## Evidence
 
-(Nothing yet: no run on a real desktop.)
+2026-11-08: real mpv 0.37.0 (Ubuntu 24.04) and 0.41.0 (`pkgforge-dev/mpv-AppImage`, `v0.41.0@2026-10-24`), headless and under Xvfb, no desktop: the live-channel key test passes on both, the old unbind leaves Right dead on both, and `_load_in_mpv('/tmp/t.mp4', 'Test title', start=20.0)` on 0.41.0 loaded the file with the title and started at 21.4 s.
+
+No run on a real desktop yet.

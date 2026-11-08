@@ -144,9 +144,6 @@ class TestEntries(unittest.TestCase):
         self.assertEqual(items[1]['id'], 'u1')
         self.assertEqual(items[1]['_cache_key'], 'x')
 
-    def test_a_dismissal_is_kept_only_while_the_item_is_cached(self):
-        self.assertEqual(rt.prune_seen_set({'a', 'b'}, {'a': {}}), {'a'})
-
 
 class TestGivingEntriesTheirIds(unittest.TestCase):
     def cache_of_one(self, **extra):
