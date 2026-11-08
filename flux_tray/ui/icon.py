@@ -1,6 +1,8 @@
 """Tray icon drawing and badge state."""
 
+import functools
 import math
+import re
 
 from ..gi_env import Gdk, cairo
 from ..ui.weather import ALERT_SEVERITY_RANK
@@ -21,8 +23,9 @@ TEMP_RING_RADIUS = 1.0
 TEMP_RING_LINE_WIDTH = 1.0
 
 
-# MeteoAlarm hazard SVG icons (viewBox="0 0 64 64", scaled to 24x24)
-# Path data from MeteoAlarm's SVG icons
+# Hazard icons, paths on a 64x64 viewBox (scaled to the icon): "wind" and "rain" are
+# MeteoAlarm's own icons (their licence has not been checked); "thunderstorm" (a bolt),
+# "rain-flood" (waves) and the fallback ring were drawn for this app.
 METEOALARM_ICONS = {
     'wind': [
         # Main wind shape
@@ -39,14 +42,14 @@ METEOALARM_ICONS = {
         "M40.5067697,28 C34.704041,28 30,23.1586729 30,17.1865933 C30,14.7353677 31.3609805,11.2756378 33.9468436,6.91945973 C34.7835206,5.4986976 35.6920912,4.12411976 36.6688046,2.8014007 C37.8936871,1.16258129 38.8872029,0 40.4931599,0 C42.099117,0 43.0926328,1.14857429 44.3039054,2.8014007 C45.2838069,4.12175643 46.1924962,5.4965138 47.0258665,6.91945973 L47.0258665,6.91945973 C49.6389491,11.1915958 50.999965,14.7073537 50.999965,17.1585793 C51.0071572,20.0288982 49.9052568,22.7844081 47.9370154,24.8179741 C45.9687739,26.8515401 43.2957018,27.9962916 40.5067697,28 L40.5067697,28 Z M40.5067697,2.7873937 C40.3026227,2.7873937 39.9623775,2.98349175 38.8327637,4.48224112 C37.9050875,5.73441687 37.0463234,7.03911373 36.2605105,8.3901951 C33.987673,12.186093 32.7219611,15.3096548 32.7219611,17.1865933 C32.6024496,20.1263808 34.0582359,22.8970573 36.5139713,24.4036102 C38.9697067,25.9101631 42.030223,25.9101631 44.4859584,24.4036102 C46.9416938,22.8970573 48.39748,20.1263808 48.2779686,17.1865933 C48.2779686,15.3096548 47.0258665,12.186093 44.753029,8.3901951 C43.9572922,7.05143308 43.0941623,5.75635594 42.167166,4.51025513 C41.051162,2.98349175 40.697307,2.7873937 40.5067697,2.7873937 Z",
     ],
     'thunderstorm': [
-        # Cloud with lightning bolt
-        "M12,56 C6,56 2,50 2,42 C2,34 6,28 12,28 C14,28 16,30 17,32 C18,30 20,28 22,28 C28,28 32,22 32,14 C32,8 28,2 22,2 C16,2 12,6 10,6 C8,4 6,2 4,2 C2,2 0,4 0,6 C0,12 4,16 10,16 C10,18 11,19 12,20 C15,17 19,14 24,14 C30,14 34,18 34,24 C34,27 32,30 29,32 L29,32 C30,33 32,35 32,38 C32,44 28,48 22,48 C18,48 15,45 12,42 C11,44 10,46 10,48 C10,52 13,56 18,56 L18,56 C15,56 13,54 13,51 C11,50 9,48 9,46 C8,48 7,50 6,52 C5,54 6,56 8,56 L12,56 Z M24,28 L20,38 L23,38 L19,48 L27,34 L24,34 L28,24 L24,28 Z",
+        # A lightning bolt
+        "M38,2 L14,36 L29,36 L22,62 L50,26 L34,26 L42,2 Z",
     ],
     'rain-flood': [
-        # Cloud with heavy rain / flood
-        "M12,56 C6,56 2,50 2,42 C2,34 6,28 12,28 C14,28 16,30 17,32 C18,30 20,28 22,28 C28,28 32,22 32,14 C32,8 28,2 22,2 C16,2 12,6 10,6 C8,4 6,2 4,2 C2,2 0,4 0,6 C0,12 4,16 10,16 C10,18 11,19 12,20 C15,17 19,14 24,14 C30,14 34,18 34,24 C34,27 32,30 29,32 L29,32 C30,33 32,35 32,38 C32,44 28,48 22,48 C18,48 15,45 12,42 C11,44 10,46 10,48 C10,52 13,56 18,56 L18,56 C15,56 13,54 13,51 C11,50 9,48 9,46 C8,48 7,50 6,52 C5,54 6,56 8,56 L12,56 Z",
-        # Heavy raindrops / water waves
-        "M8,44 L8,48 L10,48 L10,44 Z M16,44 L16,48 L18,48 L18,44 Z M24,44 L24,48 L26,48 L26,44 Z M32,44 L32,48 L34,48 L34,44 Z M12,38 L12,42 L14,42 L14,38 Z M20,38 L20,42 L22,42 L22,38 Z M28,38 L28,42 L30,42 L30,38 Z",
+        # Three rows of waves
+        "M4,14 C12,6 20,22 32,14 C44,6 52,22 60,14 L60,22 C52,30 44,14 32,22 C20,30 12,14 4,22 Z",
+        "M4,30 C12,22 20,38 32,30 C44,22 52,38 60,30 L60,38 C52,46 44,30 32,38 C20,46 12,30 4,38 Z",
+        "M4,46 C12,38 20,54 32,46 C44,38 52,54 60,46 L60,54 C52,62 44,46 32,54 C20,62 12,46 4,54 Z",
     ],
     # Generic alert icon for other hazards (fallback)
     'default': [
@@ -55,36 +58,49 @@ METEOALARM_ICONS = {
 }
 
 
-def _draw_svg_path(ctx, path_data, scale_x, scale_y, offset_x=0, offset_y=0):
-    """Draw an SVG path on a cairo context.
-    Handles M, L, C, Z commands (subset used by MeteoAlarm icons)."""
-    import re
-    # Tokenize the path data
-    tokens = re.findall(r'([MLCZ])|(-?\d+\.?\d*)', path_data)
-    tokens = [t for group in tokens for t in group if t]
+_PATH_ARITY = {'M': 2, 'L': 2, 'C': 6, 'Z': 0}
 
+
+@functools.lru_cache(maxsize=None)
+def _parse_svg_path(path_data):
+    """The commands of an SVG path of absolute M, L, C and Z as ((command, (numbers...)), ...).
+    Cached: the icon is drawn at every flip of the pulse. Numbers that follow a command's
+    own repeat it (as in SVG), a repeated moveto being a lineto."""
+    commands = []
+    tokens = re.findall(r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|[A-Za-z]', path_data)
     i = 0
-    first_point = None
-    last_point = None
-
     while i < len(tokens):
-        cmd = tokens[i]
+        command = tokens[i]
         i += 1
+        arity = _PATH_ARITY.get(command)
+        if arity is None:
+            raise ValueError(f'unexpected {command!r} in SVG path')
+        if arity == 0:
+            commands.append((command, ()))
+            continue
+        first = True
+        while i < len(tokens) and tokens[i] not in _PATH_ARITY:
+            numbers = tuple(float(t) for t in tokens[i:i + arity])
+            if len(numbers) < arity:
+                raise ValueError(f'{command} needs {arity} numbers in SVG path')
+            commands.append((command if first or command != 'M' else 'L', numbers))
+            first = False
+            i += arity
+    return tuple(commands)
 
-        if cmd == 'M':  # moveto
-            x = float(tokens[i]) * scale_x + offset_x
-            y = float(tokens[i+1]) * scale_y + offset_y
-            i += 2
-            ctx.move_to(x, y)
-            if first_point is None:
-                first_point = (x, y)
-            last_point = (x, y)
-        elif cmd == 'L':  # lineto
-            x = float(tokens[i]) * scale_x + offset_x
-            y = float(tokens[i+1]) * scale_y + offset_y
-            i += 2
-            ctx.line_to(x, y)
-            last_point = (x, y)
+
+def _draw_svg_path(ctx, path_data, scale_x, scale_y, offset_x=0, offset_y=0):
+    """Adds an SVG path (see _parse_svg_path) to the cairo context's path, scaled and moved."""
+    for command, n in _parse_svg_path(path_data):
+        points = [(n[k] * scale_x + offset_x, n[k + 1] * scale_y + offset_y) for k in range(0, len(n), 2)]
+        if command == 'M':
+            ctx.move_to(*points[0])
+        elif command == 'L':
+            ctx.line_to(*points[0])
+        elif command == 'C':
+            ctx.curve_to(*points[0], *points[1], *points[2])
+        else:
+            ctx.close_path()
 
 
 def _draw_meteoalarm_icon(ctx, hazard, size, color, target_height=None):
@@ -115,56 +131,23 @@ def _draw_meteoalarm_icon(ctx, hazard, size, color, target_height=None):
         ctx.fill()
 
 
-def _draw_svg_path(ctx, path_data, scale_x, scale_y, offset_x=0, offset_y=0):
-    """Draw an SVG path on a cairo context.
-    Handles M, L, C, Z commands (subset used by MeteoAlarm icons)."""
-    import re
-    # Tokenize the path data
-    tokens = re.findall(r'([MLCZ])|(-?\d+\.?\d*)', path_data)
-    tokens = [t for group in tokens for t in group if t]
-
-    i = 0
-    first_point = None
-    last_point = None
-
-    while i < len(tokens):
-        cmd = tokens[i]
-        i += 1
-
-        if cmd == 'M':  # moveto
-            x = float(tokens[i]) * scale_x + offset_x
-            y = float(tokens[i+1]) * scale_y + offset_y
-            i += 2
-            ctx.move_to(x, y)
-            if first_point is None:
-                first_point = (x, y)
-            last_point = (x, y)
-        elif cmd == 'L':  # lineto
-            x = float(tokens[i]) * scale_x + offset_x
-            y = float(tokens[i+1]) * scale_y + offset_y
-            i += 2
-            ctx.line_to(x, y)
-            last_point = (x, y)
-        elif cmd == 'C':  # curveto (cubic bezier)
-            x1 = float(tokens[i]) * scale_x + offset_x
-            y1 = float(tokens[i+1]) * scale_y + offset_y
-            x2 = float(tokens[i+2]) * scale_x + offset_x
-            y2 = float(tokens[i+3]) * scale_y + offset_y
-            x3 = float(tokens[i+4]) * scale_x + offset_x
-            y3 = float(tokens[i+5]) * scale_y + offset_y
-            i += 6
-            ctx.curve_to(x1, y1, x2, y2, x3, y3)
-            last_point = (x3, y3)
-        elif cmd == 'Z':  # closepath
-            if first_point and last_point:
-                ctx.line_to(first_point[0], first_point[1])
-            ctx.close_path()
-
-
 TEMP_RING_GAP = 0.4
 
 
 TEMP_RING_RESERVE = TEMP_RING_GAP + 2 * TEMP_RING_RADIUS + TEMP_RING_LINE_WIDTH
+
+
+def _fit_temperature_font(ctx, text, size, padding=1, max_font=20, min_font=10):
+    """Sets the bold font of the current-temperature digits: the largest from max_font down
+    whose `text` fits the width `size` leaves after `padding` and the degree ring."""
+    ctx.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    max_width = size - 2 * padding - TEMP_RING_RESERVE
+    font_size = max_font
+    while font_size > min_font:
+        ctx.set_font_size(font_size)
+        if ctx.text_extents(text)[4] <= max_width:
+            break
+        font_size -= 1
 
 
 def temp_icon_layout(size, text_width, text_height):
@@ -267,15 +250,8 @@ class IconMixin:
         temp_text_height = 0
         if alert_temperature and self.weather_data and self.weather_data.get('temp') is not None:
             temp_text = f"{self.weather_data['temp']:.0f}"
-            ctx.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-            max_width = size - 2 * 1 - TEMP_RING_RESERVE  # same padding as _draw_temperature
-            temp_size = 20
-            while temp_size > 10:
-                ctx.set_font_size(temp_size)
-                if ctx.text_extents(temp_text)[4] <= max_width:
-                    break
-                temp_size -= 1
-            temp_text_height = ctx.text_extents(temp_text)[3]  # text height
+            _fit_temperature_font(ctx, temp_text, size)
+            temp_text_height = ctx.text_extents(temp_text)[3]
 
         if self._should_show_weather_icon(count):
             # plain weather icon (no alert): white temperature
@@ -323,15 +299,7 @@ class IconMixin:
         the small degree ring centred together; the font shrinks from max_font
         until the digits fit the width left by `padding` and the ring."""
         temp_text = f"{self.weather_data['temp']:.0f}"
-        max_width = size - 2 * padding - TEMP_RING_RESERVE  # room for the ring
-
-        ctx.select_font_face('Sans', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        temp_size = max_font
-        while temp_size > min_font:
-            ctx.set_font_size(temp_size)
-            if ctx.text_extents(temp_text)[4] <= max_width:
-                break
-            temp_size -= 1
+        _fit_temperature_font(ctx, temp_text, size, padding, max_font, min_font)
 
         xb, yb, tw, th, _dx, _dy = ctx.text_extents(temp_text)
         digits_left, ring_cx, ring_cy = temp_icon_layout(size, tw, th)
