@@ -302,7 +302,7 @@ def entry_updated_timestamp(entry):
         return None
     try:
         return calendar.timegm(parsed)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -325,44 +325,62 @@ def failed_fetch_checked_at(now, interval_seconds):
     return now - interval_seconds + min(interval_seconds, FEED_RETRY_SECONDS)
 
 
+UPDATE_REANNOUNCE_SECONDS = 3600  # an entry that is updated again is announced again at most this often
+
+
 def items_from_entries(entries, feed_url, seen, mute_phrases, mute_rules, later_rules):
     """Turns the entries of one fetched feed into (new_items, later_items, newly_seen_ids).
-    `seen` is a dict {eid: {'seen_at': timestamp, 'updated': updated_timestamp_or_None}}.
-    An entry whose id is in `seen` is skipped unless it has been updated (updated_parsed
-    is newer than the stored 'updated' timestamp). Updated entries are surfaced again
-    with a 'live' flag. Every entry (new or updated) is added to `seen` with its
-    current updated_parsed timestamp. Items matching mute phrases/rules or older than
-    MAX_ITEM_AGE_SECONDS are not surfaced (but are still marked as seen)."""
+
+    `seen` is {entry id: {'seen_at': when first seen, 'updated': the entry's updated time
+    when last looked at (None if it has none), 'announced_at': when it was last announced as
+    updated (absent until then)}}, and is changed in place, so a second feed in the same round
+    sees it too. An entry in it is skipped, with two exceptions: its 'updated' time is noted
+    when this is the first time it has one (no announcement: there is nothing to compare
+    with), and an entry whose updated time has moved on becomes an item again, marked
+    'live', unless it was announced less than UPDATE_REANNOUNCE_SECONDS ago (a feed that
+    stamps every entry with the time of its fetch would otherwise announce them all at every
+    check). An entry counts as seen, but is not surfaced, when it matches a mute phrase or
+    rule or is older than MAX_ITEM_AGE_SECONDS. What is left goes to later_items when a
+    read-later rule matches it (no badge, sound or popup for those), otherwise to
+    new_items."""
     new_items, later_items, newly_seen_ids = [], [], set()
+    now = time_module.time()
     for entry in entries:
         eid = entry_id(entry, feed_url)
-        updated_ts = entry_updated_timestamp(entry)
-        seen_entry = seen.get(eid)
+        updated = entry_updated_timestamp(entry)
+        record = seen.get(eid)
         is_update = False
-        if seen_entry is not None:
-            # Already seen — check if updated
-            stored_updated = seen_entry.get('updated')
-            if updated_ts is not None and stored_updated is not None and updated_ts > stored_updated:
-                is_update = True
-            else:
-                continue  # not updated, skip
-        # New or updated entry
-        seen[eid] = {'seen_at': time_module.time(), 'updated': updated_ts}
+        if record is None:
+            seen[eid] = {'seen_at': now, 'updated': updated}
+        else:
+            stored = record.get('updated')
+            if updated is None or (stored is not None and updated <= stored):
+                continue
+            if stored is None:
+                seen[eid] = {**record, 'updated': updated}
+                continue
+            last = record.get('announced_at', record.get('seen_at', 0))
+            if now - last < UPDATE_REANNOUNCE_SECONDS:
+                seen[eid] = {**record, 'updated': updated}  # noted, not announced
+                continue
+            seen[eid] = {**record, 'updated': updated, 'announced_at': now}
+            is_update = True
         newly_seen_ids.add(eid)
         title = entry.get('title', '(untitled)')
         if is_muted(title, mute_phrases) or entry_matches_mute_rules(entry, mute_rules):
-            continue  # matches mute filters — mark as seen, don't surface
+            continue  # matches mute filters: counts as seen, is not surfaced
         age = entry_age_seconds(entry)
         if age is not None and age > MAX_ITEM_AGE_SECONDS:
-            continue  # too old — mark as seen, don't surface
+            continue  # too old: counts as seen, is not surfaced
         item = {
             'id': eid,
             'title': title,
             'link': entry.get('link', ''),
             'feed_url': feed_url,
             'pkg_match': None,
-            'live': is_update,  # True if this is an updated article
         }
+        if is_update:
+            item['live'] = True
         tags, author = entry_tag_terms(entry), entry_author_name(entry)
         if tags:
             item['tags'] = tags

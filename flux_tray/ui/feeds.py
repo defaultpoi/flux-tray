@@ -69,7 +69,6 @@ class FeedsMixin:
         feed_mute_rules = load_feed_mute_rules()
         feed_later_rules = load_feed_readlater_rules()
         newly_seen_ids, new_items, later_items, feed_links = set(), [], [], {}
-        has_live_updates = False
         for url, interval in feeds_due(feeds, last_checked, now, force):
             try:
                 parsed = feedparser.parse(url)
@@ -86,9 +85,6 @@ class FeedsMixin:
             fresh, later, seen_ids = items_from_entries(
                 parsed.entries, url, seen, mute_phrases,
                 feed_mute_rules.get(url, ()), feed_later_rules.get(url, ()))
-            # Check if any fresh items are live updates
-            if any(item.get('live') for item in fresh):
-                has_live_updates = True
             new_items += fresh
             later_items += later
             newly_seen_ids |= seen_ids
@@ -99,7 +95,11 @@ class FeedsMixin:
                 self.state, now, newly_seen_ids, last_checked, feed_links, new_items, later_items)
             save_state(self.state)
         if new_items:
-            GLib.idle_add(self.on_new_items, has_live_updates)
+            # a live update (an entry that was edited) sounds twice; one that was not really added does not count
+            if any(item.get('live') for item in new_items):
+                GLib.idle_add(self.on_new_items, True)
+            else:
+                GLib.idle_add(self.on_new_items)
         if later_items:
             GLib.idle_add(self._read_later_changed)
 
@@ -114,8 +114,7 @@ class FeedsMixin:
         self.update_icon()
         play_notification_sound()
         if has_live_updates:
-            # Double sound for live updates: play again after a short delay
-            GLib.timeout_add(300, play_notification_sound)
+            GLib.timeout_add(300, play_notification_sound)  # the second sound
         self.show_popup(auto=True)  # auto-open whenever new unread items, updates, or live channels arrive
         return False
 

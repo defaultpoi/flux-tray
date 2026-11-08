@@ -234,8 +234,7 @@ class TestFeedMuteRules(TmpConfigCase):
 
     def test_such_items_raise_no_new_item_alert_only_a_quiet_refresh(self):
         stub, idle = self.check_with('[feeds]\nhttps://a.example/feed||||category=plants\n')
-        # on_new_items is called with (has_live_updates=False)
-        idle.assert_any_call(stub.on_new_items, False)
+        idle.assert_any_call(stub.on_new_items)
         idle.assert_any_call(stub._read_later_changed)
         stub2, idle2 = self.check_with('[feeds]\nhttps://a.example/feed||||category=*\n')
         self.assertEqual(stub2.state['unread'], [])
@@ -553,6 +552,99 @@ class TestFailedFetchCheckedAt(unittest.TestCase):
         self.assertEqual(rt.failed_fetch_checked_at(now, interval), now)  # due again after its own 60 s
 
 
+class TestEntriesThatAreUpdated(unittest.TestCase):
+    URL = 'https://a.example/feed'
+    NOW = 2_000_000_000.0
+
+    def entry(self, updated=None, title='Story', eid='e1'):
+        entry = {'id': eid, 'title': title}
+        if updated is not None:
+            entry['updated_parsed'] = time.gmtime(updated)
+        return entry
+
+    def items(self, entries, seen, now=None, **kw):
+        with mock.patch.object(rt.time_module, 'time', return_value=now or self.NOW), \
+                mock.patch.object(rt, 'entry_age_seconds', return_value=0):
+            return rt.items_from_entries(entries, self.URL, seen, kw.get('phrases', []), (), ())
+
+    def eid(self):
+        return rt.entry_id({'id': 'e1'}, self.URL)
+
+    def test_the_updated_time_is_kept_with_a_new_entry(self):
+        seen = {}
+        self.items([self.entry(updated=1000)], seen)
+        self.assertEqual(seen[self.eid()], {'seen_at': self.NOW, 'updated': 1000})
+
+    def test_an_entry_with_the_same_updated_time_is_not_an_item_again(self):
+        seen = {self.eid(): {'seen_at': 1.0, 'updated': 1000}}
+        (new, later, newly), _ = self.items([self.entry(updated=1000)], seen), None
+        self.assertEqual((new, later, newly), ([], [], set()))
+
+    def test_an_older_updated_time_is_not_an_update_either(self):
+        seen = {self.eid(): {'seen_at': 1.0, 'updated': 1000}}
+        new, _later, _newly = self.items([self.entry(updated=900)], seen)
+        self.assertEqual(new, [])
+        self.assertEqual(seen[self.eid()]['updated'], 1000)
+
+    def test_a_later_updated_time_makes_a_live_item_and_is_recorded_with_when_it_was_announced(self):
+        seen = {self.eid(): {'seen_at': 1.0, 'updated': 1000}}
+        new, _later, newly = self.items([self.entry(updated=1500, title='Story (edited)')], seen)
+        self.assertEqual([(i['title'], i['live']) for i in new], [('Story (edited)', True)])
+        self.assertEqual(newly, {self.eid()})
+        self.assertEqual(seen[self.eid()], {'seen_at': 1.0, 'updated': 1500, 'announced_at': self.NOW})
+
+    def test_an_entry_that_had_no_updated_time_when_seen_only_gets_a_baseline(self):
+        # nothing to compare with: noted quietly, and the next change is the first that counts
+        seen = {self.eid(): {'seen_at': 1.0, 'updated': None}}
+        new, _later, _newly = self.items([self.entry(updated=1500)], seen)
+        self.assertEqual(new, [])
+        self.assertEqual(seen[self.eid()]['updated'], 1500)
+        new, _later, _newly = self.items([self.entry(updated=2500)], seen, now=self.NOW + rt.UPDATE_REANNOUNCE_SECONDS + 1)
+        self.assertEqual([i['live'] for i in new], [True])
+
+    def test_an_entry_that_never_has_an_updated_time_is_never_an_update(self):
+        seen = {self.eid(): {'seen_at': 1.0, 'updated': None}}
+        self.assertEqual(self.items([self.entry()], seen), ([], [], set()))
+
+    def test_an_entry_is_announced_as_updated_at_most_once_an_hour(self):
+        # a feed that stamps its entries with the time it is fetched changes them all at every check
+        seen = {self.eid(): {'seen_at': self.NOW - 10 * 3600, 'updated': 1000}}
+        first, _l, _n = self.items([self.entry(updated=1100)], seen)
+        again, _l, _n = self.items([self.entry(updated=1200)], seen, now=self.NOW + 600)
+        later, _l, _n = self.items([self.entry(updated=1300)], seen, now=self.NOW + rt.UPDATE_REANNOUNCE_SECONDS + 1)
+        self.assertEqual((len(first), len(again), len(later)), (1, 0, 1))
+        self.assertEqual(seen[self.eid()]['updated'], 1300)  # every change is noted, announced or not
+
+    def test_a_new_entry_is_not_announced_again_within_the_hour_of_being_seen(self):
+        seen = {self.eid(): {'seen_at': self.NOW - 60, 'updated': 1000}}
+        self.assertEqual(self.items([self.entry(updated=1100)], seen)[0], [])
+
+    def test_a_muted_update_is_noted_but_not_surfaced(self):
+        seen = {self.eid(): {'seen_at': 1.0, 'updated': 1000}}
+        new, _later, newly = self.items([self.entry(updated=1500, title='Sports roundup')], seen, phrases=['sports'])
+        self.assertEqual((new, newly), ([], {self.eid()}))
+        self.assertEqual(seen[self.eid()]['updated'], 1500)
+
+    def test_an_update_of_an_entry_older_than_a_day_is_not_surfaced(self):
+        seen = {self.eid(): {'seen_at': 1.0, 'updated': 1000}}
+        with mock.patch.object(rt.time_module, 'time', return_value=self.NOW), \
+                mock.patch.object(rt, 'entry_age_seconds', return_value=rt.MAX_ITEM_AGE_SECONDS + 1):
+            new, _later, _newly = rt.items_from_entries([self.entry(updated=1500)], self.URL, seen, [], (), ())
+        self.assertEqual(new, [])
+
+    def test_an_update_matching_a_read_later_rule_goes_to_read_later(self):
+        seen = {self.eid(): {'seen_at': 1.0, 'updated': 1000}}
+        entry = dict(self.entry(updated=1500), tags=[{'term': 'plants'}])
+        with mock.patch.object(rt.time_module, 'time', return_value=self.NOW), mock.patch.object(rt, 'entry_age_seconds', return_value=0):
+            new, later, _newly = rt.items_from_entries([entry], self.URL, seen, [], (), [('category', 'plants')])
+        self.assertEqual((new, [i['live'] for i in later]), ([], [True]))
+
+    def test_a_garbled_updated_time_is_none_not_an_error(self):
+        self.assertIsNone(rt.entry_updated_timestamp({'updated_parsed': 'yesterday'}))
+        self.assertIsNone(rt.entry_updated_timestamp({'updated_parsed': (2020,)}))
+        self.assertIsNone(rt.entry_updated_timestamp({}))
+
+
 class TestItemsFromEntries(unittest.TestCase):
     URL = 'https://a.example/feed'
 
@@ -565,7 +657,7 @@ class TestItemsFromEntries(unittest.TestCase):
         (new, later, newly_seen), seen_dict = self.run_entries([entry])
         eid = rt.entry_id(entry, self.URL)
         self.assertEqual(new, [{'id': eid, 'title': 'Hello', 'link': 'https://a.example/1', 'feed_url': self.URL,
-                                'pkg_match': None, 'tags': ['World'], 'author': 'A. Writer', 'live': False}])
+                                'pkg_match': None, 'tags': ['World'], 'author': 'A. Writer'}])
         self.assertEqual(later, [])
         self.assertEqual(newly_seen, {eid})
         self.assertIn(eid, seen_dict)
@@ -577,7 +669,7 @@ class TestItemsFromEntries(unittest.TestCase):
         self.assertEqual((new[0]['title'], new[0]['link']), ('(untitled)', ''))
         self.assertNotIn('tags', new[0])
         self.assertNotIn('author', new[0])
-        self.assertFalse(new[0].get('live'))
+        self.assertNotIn('live', new[0])
 
     def test_an_entry_already_seen_is_skipped_entirely(self):
         entry = {'id': 'e1', 'title': 'Hello'}

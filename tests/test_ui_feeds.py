@@ -54,6 +54,65 @@ class TestFeedCheckRobustness(TmpConfigCase):
         self.assertEqual(stub.state['last_checked']['https://a.example/feed'], 1_000_000.0)
 
 
+class TestLiveUpdates(TmpConfigCase):
+    URL = 'https://a.example/feed'
+
+    class Stub:
+        check_feeds = rt.FluxTray.check_feeds
+        on_new_items = rt.FluxTray.on_new_items
+
+        def __init__(self):
+            self.online = True
+            self.lock = rt.threading.Lock()
+            self.state = {'seen': {}, 'unread': [], 'last_checked': {}}
+            self.note_request_failure = mock.Mock()
+            self.update_icon = mock.Mock()
+            self.show_popup = mock.Mock()
+
+    def check(self, stub, entries, now):
+        self.conf(f'[feeds]\n{self.URL}\n')
+        parsed = mock.Mock(bozo=False, entries=entries)
+        with mock.patch.object(rt.feedparser, 'parse', return_value=parsed), \
+                mock.patch.object(rt.time_module, 'time', return_value=now), \
+                mock.patch.object(rt, 'entry_age_seconds', return_value=0), \
+                mock.patch.object(rt, 'save_state'), mock.patch.object(rt.GLib, 'idle_add') as idle:
+            stub.check_feeds(force=True)
+        return idle
+
+    def entry(self, updated, title='Story'):
+        return {'id': 'e1', 'title': title, 'link': 'https://a.example/1', 'updated_parsed': rt.time.gmtime(updated)}
+
+    def test_an_edited_entry_comes_back_as_a_live_item_with_the_double_sound(self):
+        stub = self.Stub()
+        self.check(stub, [self.entry(1000)], now=10_000.0)
+        stub.state['unread'] = []  # read
+        idle = self.check(stub, [self.entry(2000, 'Story (edited)')], now=10_000.0 + rt.UPDATE_REANNOUNCE_SECONDS + 1)
+        self.assertEqual([(i['title'], i['live']) for i in stub.state['unread']], [('Story (edited)', True)])
+        idle.assert_any_call(stub.on_new_items, True)
+
+    def test_an_ordinary_new_item_has_the_single_sound(self):
+        stub = self.Stub()
+        idle = self.check(stub, [self.entry(1000)], now=10_000.0)
+        idle.assert_any_call(stub.on_new_items)
+        self.assertNotIn('live', stub.state['unread'][0])
+
+    def test_the_second_sound_is_only_for_a_live_item_that_was_really_added(self):
+        stub = self.Stub()
+        with mock.patch.object(rt, 'play_notification_sound') as sound, mock.patch.object(rt.GLib, 'timeout_add') as later:
+            stub.on_new_items()
+            stub.on_new_items(True)
+        self.assertEqual(sound.call_count, 2)
+        later.assert_called_once_with(300, sound)
+
+    def test_an_update_within_the_hour_is_not_announced(self):
+        stub = self.Stub()
+        self.check(stub, [self.entry(1000)], now=10_000.0)
+        stub.state['unread'] = []
+        idle = self.check(stub, [self.entry(2000)], now=10_600.0)
+        self.assertEqual(stub.state['unread'], [])
+        idle.assert_not_called()
+
+
 class TestUnreadCap(TmpConfigCase):
     def test_oldest_unread_beyond_the_cap_are_dropped_but_stay_seen(self):
         self.conf('[feeds]\nhttps://a.example/feed\n')

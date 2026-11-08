@@ -75,12 +75,10 @@ def load_state():
         state['live_youtube_channels'] = []
     if not isinstance(state.get('last_checked'), dict):
         state['last_checked'] = {}
-    # plugin discovery dismissed items: {plugin_name: {item_id: timestamp}}
-    if not isinstance(state.get('plugin_discovery_seen'), dict):
-        state['plugin_discovery_seen'] = {}
-    # plugin discovery cached items: {plugin_name: {item_id: item_dict}}
-    if not isinstance(state.get('plugin_discovery_items'), dict):
-        state['plugin_discovery_items'] = {}
+    # the discovery items the person dismissed, as cache keys (see media_cache); anything else is dropped
+    seen_discovery = state.get('media_discovery_seen')
+    state['media_discovery_seen'] = ([k for k in seen_discovery if isinstance(k, str)]
+                                     if isinstance(seen_discovery, list) else [])
     # the running countdown's end as a wall-clock timestamp; anything else is dropped
     end = state.get('timer_end')
     if isinstance(end, bool) or not isinstance(end, (int, float)) or not math.isfinite(end):
@@ -171,9 +169,8 @@ def merge_feed_check(state, now, newly_seen_ids, last_checked, feed_links, new_i
     links, the items to read later and the new unread ones (at most MAX_UNREAD_ITEMS,
     the newest first). Items already stored are not added twice. Returns the new
     items and the read-later items that were really added, which may be fewer than
-    were given.
-    `seen` is now {eid: {'seen_at': timestamp, 'updated': updated_timestamp_or_None}}.
-    """
+    were given. `seen` records are {'seen_at', 'updated', and 'announced_at' once it has been
+    announced as updated} (see items_from_entries)."""
     merged_seen = dict(state.get('seen', {}))
     for eid in newly_seen_ids:
         # The seen dict is already updated in items_from_entries; just ensure new entries have the right structure
@@ -199,7 +196,10 @@ def merge_feed_check(state, now, newly_seen_ids, last_checked, feed_links, new_i
         state['read_later'] = later_items + state.get('read_later', [])
     if new_items:
         existing_ids = {e['id'] for e in state.get('unread', [])}
-        new_items = [e for e in new_items if e['id'] not in existing_ids]
+        # an item already stored is not added twice, unless it is an update of it: that one replaces it
+        replaced = {e['id'] for e in new_items if e['id'] in existing_ids and e.get('live')}
+        new_items = [e for e in new_items if e['id'] not in existing_ids or e['id'] in replaced]
         if new_items:
-            state['unread'] = (new_items + state.get('unread', []))[:MAX_UNREAD_ITEMS]
+            kept = [e for e in state.get('unread', []) if e['id'] not in replaced]
+            state['unread'] = (new_items + kept)[:MAX_UNREAD_ITEMS]
     return new_items, later_items

@@ -224,6 +224,31 @@ class TestWriteAtomic(unittest.TestCase):
         self.assertEqual(os.listdir(self.dir), ['f.dat'])
 
 
+class TestDiscoveryDismissalsInTheState(TmpConfigCase):
+    def test_a_missing_or_broken_list_is_an_empty_one(self):
+        self.assertEqual(rt.load_state()['media_discovery_seen'], [])
+        for bad in ('x', 5, {'a': 1}, None):
+            with open(rt.STATE_FILE, 'w') as f:
+                json.dump({'media_discovery_seen': bad}, f)
+            self.assertEqual(rt.load_state()['media_discovery_seen'], [], bad)
+
+    def test_only_the_keys_that_are_text_are_kept(self):
+        with open(rt.STATE_FILE, 'w') as f:
+            json.dump({'media_discovery_seen': ['tmdb:1', 5, None, ['x'], 'imdb:tt1']}, f)
+        self.assertEqual(rt.load_state()['media_discovery_seen'], ['tmdb:1', 'imdb:tt1'])
+
+    def test_the_list_survives_a_save_and_a_load(self):
+        state = rt.load_state()
+        state['media_discovery_seen'] = ['tmdb:1']
+        rt.save_state(state)
+        self.assertEqual(rt.load_state()['media_discovery_seen'], ['tmdb:1'])
+
+    def test_the_seen_records_of_the_old_format_become_the_new(self):
+        with open(rt.STATE_FILE, 'w') as f:
+            json.dump({'seen': {'a': 123.0, 'b': {'seen_at': 5, 'updated': 9}, 'c': 'junk'}}, f)
+        self.assertEqual(rt.load_state()['seen'], {'a': {'seen_at': 123.0, 'updated': None}, 'b': {'seen_at': 5, 'updated': 9}})
+
+
 class TestMediaState(TmpConfigCase):
     def setUp(self):
         super().setUp()
@@ -359,6 +384,19 @@ class TestMergeFeedCheck(unittest.TestCase):
         state = {'unread': [self.item('a')]}
         new, _later = self.merge(state, new_items=[self.item('a')])
         self.assertEqual(([e['id'] for e in state['unread']], new), (['a'], []))
+
+    def test_an_update_of_an_item_already_unread_replaces_it_at_the_front_and_is_reported(self):
+        state = {'unread': [self.item('x'), self.item('a'), self.item('y')]}
+        new, _later = self.merge(state, new_items=[dict(self.item('a'), title='A (edited)', live=True)])
+        self.assertEqual([e['id'] for e in state['unread']], ['a', 'x', 'y'])
+        self.assertEqual((state['unread'][0]['title'], state['unread'][0]['live']), ('A (edited)', True))
+        self.assertEqual([e['id'] for e in new], ['a'])
+
+    def test_an_item_that_is_not_an_update_still_is_not_added_twice_next_to_one_that_is(self):
+        state = {'unread': [self.item('a'), self.item('b')]}
+        new, _later = self.merge(state, new_items=[self.item('a'), dict(self.item('b'), live=True), self.item('c')])
+        self.assertEqual([e['id'] for e in state['unread']], ['b', 'c', 'a'])
+        self.assertEqual([e['id'] for e in new], ['b', 'c'])
 
     def test_the_unread_list_keeps_the_newest_items_up_to_the_cap(self):
         state = {'unread': [self.item(f'old{i}') for i in range(rt.MAX_UNREAD_ITEMS)]}
