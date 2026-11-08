@@ -2,6 +2,7 @@ import unittest
 from unittest import mock
 
 from facade import rt
+from helpers import TmpConfigCase
 
 
 class FakeStreamlinkProc:
@@ -816,3 +817,306 @@ class TestLoadingWhenTheStartIsRefused(unittest.TestCase):
                 mock.patch.object(rt, '_mpv_ipc', return_value=False) as ipc:
             self.assertFalse(rt._load_in_mpv('/v/a.mp4', 'T'))
         self.assertEqual(ipc.call_count, 2)
+
+
+class TestStrippingEmojis(unittest.TestCase):
+    def test_emoji_go_and_the_space_they_leave_is_not_doubled(self):
+        self.assertEqual(rt._strip_emojis('🔴 LIVE: Counter-Strike 🎮 !drops'), 'LIVE: Counter-Strike !drops')
+        self.assertEqual(rt._strip_emojis('Chill 🇷🇴 stream ⭐ with 👨‍👩‍👧 friends 1️⃣'), 'Chill stream with friends 1')
+
+    def test_text_in_every_script_stays(self):
+        for text in ('日本語の配信 | Hello', '한국어 방송 시작합니다', '中文直播 — 今晚打游戏', 'Română: Știri în direct',
+                     'Привет, стрим! Играем', 'مرحبا بالعالم', 'Ｆｕｌｌｗｉｄｔｈ ＴＩＴＬＥ', 'Ελληνικά & Ñandú — «ok» “q” (c) ™'):
+            self.assertEqual(rt._strip_emojis(text), text, text)
+
+    def test_nothing_and_only_emoji(self):
+        self.assertIsNone(rt._strip_emojis(None))
+        self.assertEqual(rt._strip_emojis(''), '')
+        self.assertEqual(rt._strip_emojis('🔥🔥'), '')
+
+
+class FakeMpvServer:
+    """A socket where a listener can connect as to mpv's: keeps what arrives, can send events."""
+
+    def __init__(self, directory):
+        import socket
+        import threading
+        self.path = directory + '/mpv.sock'
+        self.server = socket.socket(socket.AF_UNIX)
+        self.server.bind(self.path)
+        self.server.listen(1)
+        self.server.settimeout(5)
+        self.conn = None
+        self.received = b''
+        self.closed = threading.Event()
+        self.connected = threading.Event()
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        try:
+            self.conn, _ = self.server.accept()
+        except OSError:
+            return
+        self.connected.set()
+        self.conn.settimeout(0.1)
+        while not self.closed.is_set():
+            try:
+                chunk = self.conn.recv(4096)
+            except OSError as error:
+                if isinstance(error, __import__('socket').timeout):
+                    continue
+                break
+            if not chunk:
+                self.closed.set()
+                break
+            self.received += chunk
+
+    def commands(self):
+        import json
+        return [json.loads(line)['command'] for line in self.received.splitlines() if line]
+
+    def send_event(self, *args):
+        import json
+        self.conn.sendall(json.dumps({'event': 'client-message', 'args': list(args)}).encode() + b'\n')
+
+    def close(self):
+        self.closed.set()
+        self.server.close()
+        if self.conn:
+            self.conn.close()
+
+
+def wait_until(condition, seconds=3):
+    import time
+    end = time.time() + seconds
+    while time.time() < end:
+        if condition():
+            return True
+        time.sleep(0.02)
+    return condition()
+
+
+class TestLiveChannelKeys(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, self.dir, ignore_errors=True)
+        self.server = FakeMpvServer(self.dir)
+        self.addCleanup(self.server.close)
+        patcher = mock.patch.object(rt, 'MPV_IPC_SOCKET', self.server.path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(rt, '_cycle_live_channel')
+        self.cycle = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(rt._stop_mpv_event_listener)
+
+    def test_the_keys_are_an_input_section_of_their_own(self):
+        define, enable = rt._live_keys_commands('flux-tray-live-1')
+        self.assertEqual(define[:2], ['define-section', 'flux-tray-live-1'])
+        self.assertEqual(sorted(define[2].splitlines()),
+                         ['Left script-message flux-tray-prev-channel', 'Right script-message flux-tray-next-channel'])
+        self.assertEqual(define[3], 'force')
+        self.assertEqual(enable, ['enable-section', 'flux-tray-live-1'])
+
+    def test_the_listener_puts_the_keys_in_over_its_own_connection(self):
+        # mpv takes an input section away when the client that defined it disconnects, so it cannot be
+        # defined over a short connection that is closed at once
+        rt._ensure_mpv_event_listener()
+        self.assertTrue(self.server.connected.wait(3))
+        self.assertTrue(wait_until(lambda: len(self.server.commands()) == 2))
+        self.assertEqual([c[0] for c in self.server.commands()], ['define-section', 'enable-section'])
+        self.assertFalse(self.server.closed.is_set())  # and it stays connected
+
+    def test_left_and_right_cycle_the_channels(self):
+        rt._ensure_mpv_event_listener()
+        self.server.connected.wait(3)
+        self.server.send_event('flux-tray-next-channel')
+        self.server.send_event('flux-tray-prev-channel')
+        self.server.send_event('something-else')
+        self.assertTrue(wait_until(lambda: self.cycle.call_count == 2))
+        self.assertEqual([c.args for c in self.cycle.call_args_list], [(1,), (-1,)])
+
+    def test_stopping_it_takes_the_keys_out_and_closes_the_connection(self):
+        rt._ensure_mpv_event_listener()
+        self.server.connected.wait(3)
+        wait_until(lambda: len(self.server.commands()) == 2)
+        section = self.server.commands()[0][1]
+        rt._stop_mpv_event_listener()
+        self.assertTrue(self.server.closed.wait(3))
+        self.assertEqual(self.server.commands()[-1], ['disable-section', section])
+
+    def test_a_second_start_while_one_runs_changes_nothing_and_one_after_a_stop_has_its_own_section(self):
+        rt._ensure_mpv_event_listener()
+        first = rt._listener
+        rt._ensure_mpv_event_listener()
+        self.assertIs(rt._listener, first)
+        rt._stop_mpv_event_listener()
+        rt._ensure_mpv_event_listener()
+        self.assertIsNot(rt._listener, first)
+        self.assertNotEqual(first[0].name, rt._listener[0].name)
+        first[0].join(3)
+
+    def test_a_stream_replaced_by_a_file_stops_the_listener(self):
+        self.addCleanup(setattr, rt, '_playing', rt._playing)
+        with mock.patch.object(rt, '_stop_streamlink'), mock.patch.object(rt, '_stop_mpv_event_listener') as stop:
+            rt._retire_stream()
+        stop.assert_called_once_with()
+
+    def test_the_listener_waits_for_mpv_to_be_up(self):
+        self.server.server.close()  # nothing to connect to yet
+        rt._ensure_mpv_event_listener()
+        self.assertTrue(rt._listener[0].is_alive())
+        rt._stop_mpv_event_listener()
+        rt._listener[0].join(3)
+        self.assertFalse(rt._listener[0].is_alive())
+
+
+@unittest.skipUnless(__import__('shutil').which('mpv'), 'mpv is not installed')
+class TestLiveChannelKeysInARealMpv(unittest.TestCase):
+    """What matters is what mpv does, in the version that is installed: the stream's keys reach us
+    while the listener runs, and Left and Right are mpv's own again once it has stopped."""
+
+    def setUp(self):
+        import socket
+        import subprocess
+        import tempfile
+        import time
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, self.dir, ignore_errors=True)
+        self.sock = self.dir + '/mpv.sock'
+        self.proc = subprocess.Popen(['mpv', '--no-config', '--idle=yes', '--force-window=no', '--vo=null', '--ao=null',
+                                      f'--input-ipc-server={self.sock}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(self.proc.wait)
+        self.addCleanup(self.proc.terminate)
+        for _ in range(50):
+            self.conn = socket.socket(socket.AF_UNIX)
+            try:
+                self.conn.connect(self.sock)
+                break
+            except OSError:
+                self.conn.close()
+                time.sleep(0.1)
+        else:
+            self.skipTest('mpv did not start')
+        self.addCleanup(self.conn.close)
+        self.buffer = b''
+        self.next_id = 0
+        for patcher in (mock.patch.object(rt, 'MPV_IPC_SOCKET', self.sock), mock.patch.object(rt, '_cycle_live_channel')):
+            started = patcher.start()
+            self.addCleanup(patcher.stop)
+        self.cycle = started
+        self.addCleanup(rt._stop_mpv_event_listener)
+
+    def command(self, *args):
+        import json
+        import select
+        import time
+        self.next_id += 1
+        self.conn.sendall(json.dumps({'command': list(args), 'request_id': self.next_id}).encode() + b'\n')
+        end = time.time() + 3
+        while time.time() < end:
+            ready, _, _ = select.select([self.conn], [], [], 0.1)
+            if ready:
+                self.buffer += self.conn.recv(65536)
+            *lines, self.buffer = self.buffer.split(b'\n')
+            for line in lines:
+                reply = json.loads(line)
+                if reply.get('request_id') == self.next_id:
+                    return reply
+        self.fail(f'mpv did not answer {args}')
+
+    def right_bindings(self):
+        return sorted(b['cmd'] for b in self.command('get_property', 'input-bindings')['data'] if b['key'] == 'RIGHT')
+
+    def test_the_stream_keys_come_while_the_listener_runs_and_seeking_comes_back_after(self):
+        default = self.right_bindings()
+        self.assertEqual(len(default), 1)  # mpv's own: a seek
+        rt._ensure_mpv_event_listener()
+        self.assertTrue(wait_until(lambda: self.press_reaches_us()), 'Right did not reach us')
+        rt._stop_mpv_event_listener()
+        rt._listener[0].join(3)
+        self.cycle.reset_mock()
+        self.command('keypress', 'RIGHT')
+        self.assertTrue(wait_until(lambda: False, 0.5) or True)
+        self.assertEqual(self.cycle.call_count, 0)
+        self.assertEqual(self.right_bindings(), default)
+
+    def press_reaches_us(self):
+        self.cycle.reset_mock()
+        self.command('keypress', 'RIGHT')
+        return wait_until(lambda: self.cycle.call_count >= 1, 0.4)
+
+
+class TestCyclingLiveChannels(TmpConfigCase):
+    def setUp(self):
+        super().setUp()
+        self.opened = []
+        self.proc = FakeStreamlinkProc([])
+        for patcher in (
+                mock.patch.object(rt, 'open_twitch_stream', side_effect=lambda ch, **kw: self.opened.append(('Twitch', ch, kw))),
+                mock.patch.object(rt, 'open_youtube_stream', side_effect=lambda ch, **kw: self.opened.append(('YouTube', ch, kw))),
+                mock.patch.object(rt, 'load_twitch_qualities', return_value={'b': '720p'}),
+                mock.patch.object(rt, 'load_twitch_names', return_value={'b': 'Bee'}),
+                mock.patch.object(rt, 'load_twitch_default_quality', return_value='best'),
+                mock.patch.object(rt, 'load_youtube_qualities', return_value={}),
+                mock.patch.object(rt, 'load_youtube_names', return_value={}),
+                mock.patch.object(rt, 'load_youtube_default_quality', return_value='480p')):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def live(self, twitch=(), youtube=()):
+        import json
+        self.state_text(json.dumps({'live_channels': [{'channel': c} for c in twitch],
+                                    'live_youtube_channels': [{'channel': c} for c in youtube]}))
+
+    def playing(self, site, channel):
+        patcher = mock.patch.object(rt, '_playing', (self.proc, site, channel))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_next_is_the_channel_after_the_one_playing_with_its_quality_and_name(self):
+        self.live(twitch=['a', 'b', 'c'])
+        self.playing('Twitch', 'a')
+        self.assertTrue(rt._cycle_live_channel(1))
+        self.assertEqual(self.opened, [('Twitch', 'b', {'quality': '720p', 'title': None, 'name': 'Bee'})])
+
+    def test_the_position_is_that_of_the_one_playing_in_the_live_list_not_in_the_configured_one(self):
+        # ten channels may be configured and three live: the third live one, whatever its place in the config
+        self.live(twitch=['x', 'y'], youtube=['z'])
+        self.playing('Twitch', 'y')
+        rt._cycle_live_channel(1)
+        self.assertEqual(self.opened[0][:2], ('YouTube', 'z'))
+        self.assertEqual(self.opened[0][2]['quality'], '480p')
+
+    def test_it_wraps_both_ways(self):
+        self.live(twitch=['a', 'b'])
+        self.playing('Twitch', 'b')
+        rt._cycle_live_channel(1)
+        self.playing('Twitch', 'a')
+        rt._cycle_live_channel(-1)
+        self.assertEqual([o[1] for o in self.opened], ['a', 'b'])
+
+    def test_when_the_one_playing_is_not_live_any_more_it_starts_from_the_first_or_the_last(self):
+        self.live(twitch=['a', 'b', 'c'])
+        self.playing('Twitch', 'gone')
+        rt._cycle_live_channel(1)
+        rt._cycle_live_channel(-1)
+        self.assertEqual([o[1] for o in self.opened], ['a', 'c'])
+
+    def test_with_no_other_live_channel_nothing_is_restarted(self):
+        self.live(twitch=['a'])
+        self.playing('Twitch', 'a')
+        self.assertFalse(rt._cycle_live_channel(1))
+        self.assertFalse(rt._cycle_live_channel(-1))
+        self.assertEqual(self.opened, [])
+
+    def test_with_nothing_live_or_no_readable_state_nothing_happens(self):
+        self.assertFalse(rt._cycle_live_channel(1))  # no state file
+        self.state_text('{"half": ')
+        self.assertFalse(rt._cycle_live_channel(1))
+        self.state_text('[1]')
+        self.assertFalse(rt._cycle_live_channel(1))
+        self.live()
+        self.assertFalse(rt._cycle_live_channel(1))
+        self.assertEqual(self.opened, [])

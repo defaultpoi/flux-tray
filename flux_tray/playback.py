@@ -15,39 +15,21 @@ from .constants import YOUTUBE_CHECK_TIMEOUT_SECONDS
 from .state import STATE_FILE
 from .desktop import x_idle_seconds
 from .log import _log
-from .config import (load_twitch_channels, load_youtube_channels, load_twitch_qualities,
-                     load_youtube_qualities, load_twitch_names, load_youtube_names,
-                     load_twitch_schedules, load_youtube_schedules,
+from .config import (load_twitch_qualities, load_youtube_qualities, load_twitch_names, load_youtube_names,
                      load_twitch_default_quality, load_youtube_default_quality)
-from .windows import channels_due
-from datetime import datetime
+
+
+# Emoji, the joiners, selectors and keycap marks that bind them, and nothing that is text in
+# any script (the blocks below hold no letters: CJK, Hangul, Arabic, Cyrillic stay)
+_EMOJI = re.compile('[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u231A\u231B\u23E9-\u23F3\u23F8-\u23FA'
+                    '\u24C2\u25AA\u25AB\u25B6\u25C0\u25FB-\u25FE\u2934\u2935\u200D\u20E3\uFE0E\uFE0F]')
 
 
 def _strip_emojis(text):
-    """Removes emoji characters from text, leaving other characters intact."""
+    """The text without its emoji (and the space they leave doubled)."""
     if not text:
         return text
-    # Emoji Unicode ranges (inclusive start, inclusive end)
-    emoji_ranges = [
-        (0x1F600, 0x1F64F),   # emoticons
-        (0x1F300, 0x1F5FF),   # symbols & pictographs
-        (0x1F680, 0x1F6FF),   # transport & map symbols
-        (0x1F1E0, 0x1F1FF),   # flags (iOS)
-        (0x2702, 0x27B0),     # dingbats
-        (0x24C2, 0xD7FF),     # enclosed characters (BMP part)
-        (0xE000, 0x1F251),    # enclosed characters (supplementary part, skipping surrogates)
-        (0x1F900, 0x1F9FF),   # supplemental symbols and pictographs
-        (0x1FA70, 0x1FAFF),   # symbols and pictographs extended-A
-        (0x1F780, 0x1F7FF),   # geometric shapes extended (includes 🟢🟡🟠🟣🟤)
-        (0x2B00, 0x2BFF),     # miscellaneous symbols and arrows (includes ⬆⬇⬅➡)
-        (0x1F000, 0x1F02F),   # mahjong tiles
-        (0x1F030, 0x1F09F),   # domino tiles
-        (0x1F0A0, 0x1F0FF),   # playing cards
-    ]
-    def is_emoji(ch):
-        cp = ord(ch)
-        return any(start <= cp <= end for start, end in emoji_ranges)
-    return ''.join(ch for ch in text if not is_emoji(ch)).strip()
+    return re.sub(r'\s{2,}', ' ', _EMOJI.sub('', text)).strip()
 
 
 # --- Live-stream playback -------------------------------------------------
@@ -59,32 +41,22 @@ def _strip_emojis(text):
 MPV_IPC_SOCKET = os.path.join(
     os.environ.get('XDG_RUNTIME_DIR') or '/tmp', f'flux-tray-mpv-{os.getuid()}.sock')
 
-# Live channel cycling: ordered list of all configured channels (twitch + youtube)
-# and key bindings for next/previous in mpv
-_live_channels_list = []  # [(site, channel, quality, display_name)]
-_live_channels_lock = threading.RLock()
-_current_live_index = -1  # index into _live_channels_list of currently playing channel
-
-
 STREAMLINK_READY_TIMEOUT_SECONDS = 30
-
 
 MPV_START_TIMEOUT_SECONDS = 10
 
-
 _player_lock = threading.Lock()  # guards _streamlink_proc
-
 
 _mpv_lock = threading.Lock()     # serialises "is mpv up? if not, start it"
 
-
 _streamlink_proc = None
-
 
 _mpv_proc = None
 
-
 _playing = None  # (streamlink_proc, site, channel) of the stream mpv is showing
+
+# Live channel cycling: the keys that mpv sends to us while a stream is in its window
+LIVE_KEYS_SECTION = 'flux-tray-live'
 
 # For local media (series/movies): (source_url, episode_id) currently playing
 _media_playing = None
@@ -96,12 +68,6 @@ def set_media_playing(source_url, episode_id):
     global _media_playing
     with _media_playing_lock:
         _media_playing = (source_url, episode_id)
-
-
-def get_media_playing():
-    """Returns (source_url, episode_id) of currently playing media, or None."""
-    with _media_playing_lock:
-        return _media_playing
 
 
 def clear_media_playing():
@@ -125,158 +91,67 @@ def is_stream_playing(site, channel):
     return bool(playing and playing[1:] == (site, channel) and playing[0].poll() is None)
 
 
-def _get_live_channels_list():
-    """Build the ordered list of all configured live channels (Twitch + YouTube).
-    Returns [(site, channel, quality, display_name)]."""
-    channels = []
-
-    # Get Twitch channels
-    twitch_channels = load_twitch_channels()
-    twitch_qualities = load_twitch_qualities()
-    twitch_names = load_twitch_names()
-    twitch_schedules = load_twitch_schedules()
-    twitch_default_quality = load_twitch_default_quality()
-
-    # Only include channels that are "due" (not restricted by schedule)
-    due_twitch = channels_due(twitch_channels, twitch_schedules, set(), datetime.now())
-    for ch in due_twitch:
-        quality = twitch_qualities.get(ch, twitch_default_quality)
-        name = twitch_names.get(ch)
-        channels.append(('Twitch', ch, quality, name))
-
-    # Get YouTube channels
-    youtube_channels = load_youtube_channels()
-    youtube_qualities = load_youtube_qualities()
-    youtube_names = load_youtube_names()
-    youtube_schedules = load_youtube_schedules()
-    youtube_default_quality = load_youtube_default_quality()
-
-    due_youtube = channels_due(youtube_channels, youtube_schedules, set(), datetime.now())
-    for ch in due_youtube:
-        quality = youtube_qualities.get(ch, youtube_default_quality)
-        name = youtube_names.get(ch)
-        channels.append(('YouTube', ch, quality, name))
-
-    return channels
-
-
 def _get_currently_live_channels():
-    """Get list of currently live channels from state file.
-    Returns [(site, channel, quality, display_name)] for channels that are currently live."""
-    import json
-    channels = []
-
+    """[(site, channel, quality, display_name)] of the channels the last live check found live
+    (read from the state file, which the checks keep), Twitch first."""
     try:
-        with open(STATE_FILE, 'r') as f:
+        with open(STATE_FILE, encoding='utf-8') as f:
             state = json.load(f)
-    except Exception:
-        return channels
-
-    # Get Twitch live channels
-    for entry in state.get('live_channels', []):
-        ch = entry.get('channel')
-        if ch:
-            # Get quality and name from config
-            qualities = load_twitch_qualities()
-            names = load_twitch_names()
-            default_q = load_twitch_default_quality()
-            quality = qualities.get(ch, default_q)
-            name = names.get(ch)
-            channels.append(('Twitch', ch, quality, name))
-
-    # Get YouTube live channels
-    for entry in state.get('live_youtube_channels', []):
-        ch = entry.get('channel')
-        if ch:
-            qualities = load_youtube_qualities()
-            names = load_youtube_names()
-            default_q = load_youtube_default_quality()
-            quality = qualities.get(ch, default_q)
-            name = names.get(ch)
-            channels.append(('YouTube', ch, quality, name))
-
+    except (OSError, ValueError):
+        return []
+    if not isinstance(state, dict):
+        return []
+    channels = []
+    for site, key, qualities, names, default in (
+            ('Twitch', 'live_channels', load_twitch_qualities, load_twitch_names, load_twitch_default_quality),
+            ('YouTube', 'live_youtube_channels', load_youtube_qualities, load_youtube_names, load_youtube_default_quality)):
+        entries = [e for e in state.get(key) or [] if isinstance(e, dict) and e.get('channel')]
+        if entries:
+            quality_of, name_of, default_quality = qualities(), names(), default()
+            channels += [(site, e['channel'], quality_of.get(e['channel'], default_quality), name_of.get(e['channel']))
+                         for e in entries]
     return channels
 
 
-def _update_live_channels_list():
-    """Refresh the global live channels list."""
-    global _live_channels_list
-    with _live_channels_lock:
-        _live_channels_list = _get_live_channels_list()
-
-
-def _find_live_channel_index(site, channel):
-    """Find the index of a channel in the live channels list."""
-    with _live_channels_lock:
-        for i, (s, c, _q, _n) in enumerate(_live_channels_list):
-            if s == site and c == channel:
-                return i
-    return -1
-
-
-def _register_live_channel_keybindings():
-    """Register mpv key bindings for cycling through live channels.
-    Returns True if key bindings were successfully registered."""
-    # Define the key bindings in mpv using keybind command
-    keybinds = [
-        ['keybind', 'Right', 'script-message flux-tray-next-channel'],
-        ['keybind', 'Left', 'script-message flux-tray-prev-channel'],
-    ]
-    return _mpv_ipc(keybinds)
-
-
-def _unregister_live_channel_keybindings():
-    """Remove mpv key bindings for live channel cycling."""
-    keybinds = [
-        ['keybind', 'Right', ''],  # empty command removes binding
-        ['keybind', 'Left', ''],
-    ]
-    _mpv_ipc(keybinds)
+def _live_keys_commands(section):
+    """The mpv commands that make Left and Right ask us for the previous or next live channel
+    while the stream is in its window: an input section of its own, enabled over the
+    listener's connection. mpv ties a section to the client that defined it, so the keys go
+    back to mpv (seeking again) when that connection closes, also if the app dies; a binding
+    made with `keybind` and then set to an empty command would leave them dead for every file
+    played afterwards."""
+    contents = ('Right script-message flux-tray-next-channel\n'
+                'Left script-message flux-tray-prev-channel\n')
+    return [['define-section', section, contents, 'force'], ['enable-section', section]]
 
 
 def _cycle_live_channel(direction):
-    """Cycle to the next/previous live channel. direction: 1 for next, -1 for previous.
-    Only cycles through channels that are currently live."""
-    global _current_live_index, _playing
-
-    # Get currently live channels from state
+    """Plays the next (direction 1) or previous (-1) live channel after the one playing, in
+    the order of the list; the first or the last when the one playing is not in it. False
+    when there is no other live channel."""
     live_channels = _get_currently_live_channels()
-
-    if not live_channels:
+    with _player_lock:
+        playing = _playing
+    here = next((i for i, (site, channel, _q, _n) in enumerate(live_channels)
+                 if playing and site == playing[1] and channel == playing[2]), None)
+    if here is None:
+        index = 0 if direction > 0 else len(live_channels) - 1
+    else:
+        index = (here + direction) % len(live_channels)
+    if not live_channels or index == here:
         return False
-
-    # Find current index in the live channels list
-    if _current_live_index < 0:
-        with _player_lock:
-            playing = _playing
-        if playing:
-            for i, (s, c, _q, _n) in enumerate(live_channels):
-                if s == playing[1] and c == playing[2]:
-                    _current_live_index = i
-                    break
-
-    if _current_live_index < 0 or _current_live_index >= len(live_channels):
-        _current_live_index = 0
-
-    # Calculate new index
-    new_index = (_current_live_index + direction) % len(live_channels)
-    _current_live_index = new_index
-
-    site, channel, quality, name = live_channels[new_index]
-
-    # Play the new channel with correct function signatures
+    site, channel, quality, name = live_channels[index]
     if site == 'Twitch':
         open_twitch_stream(channel, quality=quality, title=None, name=name)
     else:
         open_youtube_stream(channel, quality=quality, title=None, name=name)
-
     return True
 
 
 def live_marker_markup(color, playing):
     """The colored bullet in front of a live row; a play triangle (forced to
     its text form, not the emoji one) while that stream is playing."""
-    symbol = '▶︎' if playing else '●'
+    symbol = '\u25b6\ufe0e' if playing else '\u25cf'
     return f'<span foreground="{color}"><b>{symbol}</b></span>'
 
 
@@ -588,11 +463,9 @@ def play_media_file(path, title, on_finished=None, total_seconds=None, start=Non
 def _retire_stream():
     """Called once a file has replaced a stream in the shared mpv: the stream's streamlink
     is stopped (as when the next stream replaces it) and no row shows it as playing."""
-    global _playing, _current_live_index
+    global _playing
     with _player_lock:
         _playing = None
-    _current_live_index = -1
-    _unregister_live_channel_keybindings()
     _stop_mpv_event_listener()
     _stop_streamlink()
 
@@ -609,70 +482,82 @@ def _stop_streamlink():
 
 
 # --- MPV event listener for live channel cycling ---
-_mpv_event_thread = None
-_mpv_event_stop = threading.Event()
+_listener = None  # (thread, stop event) of the running listener
+_listener_lock = threading.Lock()
+_listener_count = 0
 
 
-def _mpv_event_listener():
-    """Background thread that listens for mpv events via IPC socket,
-    specifically client-message events (from script-message) for channel cycling."""
-    sock = None
-    while not _mpv_event_stop.is_set():
+def _send_mpv_commands(sock, commands):
+    for command in commands:
+        sock.sendall(json.dumps({'command': command}).encode() + b'\n')
+
+
+def _mpv_event_listener(stop, section):
+    """A thread that holds its own connection to mpv while a stream is in its window: it puts
+    the live-channel keys in (see _live_keys_commands), then waits for the client-message
+    events that Left and Right send and cycles the channel. Ends when `stop` is set (the
+    keys are taken out first), and keeps trying to connect while mpv is not up."""
+    while not stop.is_set():
+        sock = None
         try:
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.settimeout(1.0)
+            sock.settimeout(0.25)
             sock.connect(MPV_IPC_SOCKET)
-
+            _send_mpv_commands(sock, _live_keys_commands(section))
             buf = b''
-            while not _mpv_event_stop.is_set():
+            while not stop.is_set():
                 try:
                     chunk = sock.recv(4096)
-                    if not chunk:
-                        break
-                    buf += chunk
-                    *lines, buf = buf.split(b'\n')
-                    for line in lines:
-                        if not line:
-                            continue
-                        try:
-                            event = json.loads(line)
-                        except ValueError:
-                            continue
-                        # Handle client-message events (from script-message)
-                        if event.get('event') == 'client-message':
-                            args = event.get('args', [])
-                            if args and args[0] == 'flux-tray-next-channel':
-                                _cycle_live_channel(1)
-                            elif args and args[0] == 'flux-tray-prev-channel':
-                                _cycle_live_channel(-1)
                 except socket.timeout:
                     continue
-                except OSError:
+                if not chunk:
                     break
+                buf += chunk
+                *lines, buf = buf.split(b'\n')
+                for line in lines:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    if event.get('event') == 'client-message':
+                        args = event.get('args') or []
+                        if args[:1] == ['flux-tray-next-channel']:
+                            _cycle_live_channel(1)
+                        elif args[:1] == ['flux-tray-prev-channel']:
+                            _cycle_live_channel(-1)
+            if stop.is_set():
+                _send_mpv_commands(sock, [['disable-section', section]])
         except OSError:
-            pass  # mpv not running, will retry
+            pass  # mpv is not running (yet), or went away
         finally:
             if sock:
                 try:
                     sock.close()
                 except OSError:
                     pass
-            sock = None
-        time_module.sleep(2)  # wait before retrying
+        stop.wait(0.5)
 
 
 def _ensure_mpv_event_listener():
-    """Start the mpv event listener thread if not already running."""
-    global _mpv_event_thread
-    if _mpv_event_thread is None or not _mpv_event_thread.is_alive():
-        _mpv_event_stop.clear()
-        _mpv_event_thread = threading.Thread(target=_mpv_event_listener, daemon=True)
-        _mpv_event_thread.start()
+    """Starts the listener unless one is running. Every listener has its own stop flag and
+    its own section name, so one that is still ending cannot take the keys from the next."""
+    global _listener, _listener_count
+    with _listener_lock:
+        if _listener and _listener[0].is_alive() and not _listener[1].is_set():
+            return
+        _listener_count += 1
+        stop = threading.Event()
+        thread = threading.Thread(target=_mpv_event_listener, args=(stop, f'{LIVE_KEYS_SECTION}-{_listener_count}'),
+                                  daemon=True)
+        _listener = (thread, stop)
+        thread.start()
 
 
 def _stop_mpv_event_listener():
-    """Stop the mpv event listener thread."""
-    _mpv_event_stop.set()
+    """Ends the listener: the keys go back to mpv."""
+    with _listener_lock:
+        if _listener:
+            _listener[1].set()
 
 
 def _stop_streamlink_on_exit():
@@ -800,7 +685,7 @@ def _play_in_shared_mpv(url, quality, site, channel, fallback_url, title=None, n
         if not superseded:
             webbrowser.open(fallback_url)
         return
-    global _playing, _current_live_index
+    global _playing
     with _player_lock:
         _playing = (proc, site, channel)
     if previous is not None and previous.poll() is None:
@@ -809,12 +694,7 @@ def _play_in_shared_mpv(url, quality, site, channel, fallback_url, title=None, n
         except OSError:
             pass
 
-    # Update live channels list and register key bindings for channel cycling
-    _update_live_channels_list()
-    with _live_channels_lock:
-        _current_live_index = _find_live_channel_index(site, channel)
-    if _register_live_channel_keybindings():
-        _ensure_mpv_event_listener()
+    _ensure_mpv_event_listener()  # Left and Right now cycle the live channels
 
     threading.Thread(target=_apply_stream_title, args=(proc, url, site, channel, name), daemon=True).start()
     threading.Thread(target=_stop_streamlink_when_mpv_exits, args=(proc,), daemon=True).start()
