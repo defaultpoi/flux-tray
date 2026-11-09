@@ -7,6 +7,7 @@ import os
 from .constants import CONFIG_DIR
 from .fileutil import write_atomic
 from .log import _log
+from .watch import clean_watch
 
 
 STATE_FILE = os.path.join(CONFIG_DIR, 'state.json')
@@ -125,6 +126,8 @@ def _clean_media_entry(entry):
         # when a watched movie is due to be removed (a time.time() value), None while it is not
         'remove_at': float(entry['remove_at']) if seconds(entry.get('remove_at')) else None,
         'baselined': entry.get('baselined') is True,
+        # a source the person added by a click that is a film (the config marks its own with `movie`)
+        'movie': entry.get('movie') is True,
     }
 
 
@@ -136,7 +139,7 @@ def load_media():
     """media.json as {'sources': {url: entry}}; a missing or unreadable file
     starts empty, and a file that is not JSON or not the expected shape is set
     aside as media.json.corrupt first (see _set_aside)."""
-    media = {'sources': {}}
+    media = {'sources': {}, 'watch': {}}
     try:
         with open(MEDIA_FILE) as f:
             loaded = json.load(f)
@@ -151,6 +154,7 @@ def load_media():
     for url, entry in loaded.get('sources', {}).items():
         if isinstance(url, str) and isinstance(entry, dict):
             media['sources'][url] = _clean_media_entry(entry)
+    media['watch'] = clean_watch(loaded.get('watch'))
     return media
 
 

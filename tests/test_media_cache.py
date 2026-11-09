@@ -135,6 +135,19 @@ class TestEntries(unittest.TestCase):
         self.assertTrue(rt.is_seen(seen, a))
         self.assertFalse(rt.is_seen(seen, b))
 
+    def test_an_item_already_in_the_cache_is_not_new_again_at_every_check(self):
+        cache, seen = {}, set()
+        a = item('A (2020)', url='ua', _plugin='p')
+        self.assertEqual(rt.get_new_items(cache, [a], seen), [a])
+        self.assertEqual(rt.get_new_items(cache, [a], seen), [])
+        self.assertEqual(rt.get_new_items(cache, [a, item('B (2021)', url='ub', _plugin='p')], seen)[0]['title'], 'B (2021)')
+
+    def test_one_title_twice_in_a_fetch_is_new_once(self):
+        cache = {}
+        new = rt.get_new_items(cache, [item('A (2020)', url='ua', _plugin='p'), item('A (2020)', url='ub', _plugin='q')], set())
+        self.assertEqual(len(new), 1)
+        self.assertEqual(next(iter(cache.values()))['urls'], {'p': 'ua', 'q': 'ub'})
+
     def test_the_list_is_newest_first_and_survives_a_thin_entry(self):
         cache = {'x': {'key': 'x', 'title': 'Old', 'urls': {'p': 'u1'}, 'date': '2026-01-01', 'first_seen': ''},
                  'y': {'key': 'y', 'title': 'New', 'urls': {}, 'date': '2026-11-01', 'first_seen': ''}}
@@ -143,6 +156,82 @@ class TestEntries(unittest.TestCase):
         self.assertEqual(items[0]['id'], 'y')  # no url: the key stands in
         self.assertEqual(items[1]['id'], 'u1')
         self.assertEqual(items[1]['_cache_key'], 'x')
+
+
+class TestCharts(unittest.TestCase):
+    def chart(self, *titles, plugin='imdb-charts'):
+        return [item(t, imdb_id=f'tt-{t}', rank=i, _plugin=plugin, url=f'https://www.imdb.com/title/tt-{t}/')
+                for i, t in enumerate(titles, start=1)]
+
+    def filed(self, cache, items, plugins=('imdb-charts',)):
+        for i in items:
+            rt.get_or_create_entry(cache, i)
+        rt.mark_listing(cache, items, {(plugin, kind) for plugin in plugins for kind in ('movie', 'series')})
+
+    def titles(self, cache, **kw):
+        return [i['title'] for i in rt.get_all_cached_items(cache, **kw)]
+
+    def test_items_come_in_the_order_of_the_chart(self):
+        cache = {}
+        self.filed(cache, self.chart('First', 'Second', 'Third'))
+        self.assertEqual(self.titles(cache), ['First', 'Second', 'Third'])
+
+    def test_a_new_sighting_changes_the_rank(self):
+        cache = {}
+        self.filed(cache, self.chart('A', 'B'))
+        again = [item('B', imdb_id='tt-B', rank=1, _plugin='imdb-charts', url='u'), item('A', imdb_id='tt-A', rank=2, _plugin='imdb-charts', url='u')]
+        self.filed(cache, again)
+        self.assertEqual(self.titles(cache), ['B', 'A'])
+
+    def test_items_with_no_rank_come_after_the_ranked_ones_the_newest_first(self):
+        cache = {}
+        rt.get_or_create_entry(cache, item('Unranked old', date='2026-01-01', _plugin='site', url='u1'))
+        rt.get_or_create_entry(cache, item('Unranked new', date='2026-11-01', _plugin='site', url='u2'))
+        self.filed(cache, self.chart('Ranked'))
+        self.assertEqual(self.titles(cache), ['Ranked', 'Unranked new', 'Unranked old'])
+
+    def test_what_dropped_off_the_chart_is_not_listed_and_comes_back_when_it_does(self):
+        cache = {}
+        self.filed(cache, self.chart('A', 'B', 'C'))
+        self.filed(cache, self.chart('A', 'C'))
+        self.assertEqual(self.titles(cache), ['A', 'C'])
+        self.assertEqual(sorted(self.titles(cache, only_listed=False)), ['A', 'B', 'C'])  # still cached
+        self.filed(cache, self.chart('A', 'C', 'B'))
+        self.assertEqual(self.titles(cache), ['A', 'C', 'B'])
+
+    def test_a_fetch_that_found_nothing_changes_nothing(self):
+        cache = {}
+        self.filed(cache, self.chart('A', 'B'))
+        rt.mark_listing(cache, [], set())  # the fetch gave nothing, so it is no scope
+        self.assertEqual(self.titles(cache), ['A', 'B'])
+
+    def test_only_the_plugins_that_were_fetched_are_affected(self):
+        cache = {}
+        self.filed(cache, self.chart('Chart film'))
+        rt.get_or_create_entry(cache, item('Site film (2024)', _plugin='fsonline', url='u'))
+        self.filed(cache, self.chart('Another'), plugins=('imdb-charts',))
+        self.assertEqual(sorted(self.titles(cache)), ['Another', 'Site film (2024)'])
+
+    def test_a_chart_that_could_not_be_read_does_not_hide_the_other_charts_titles(self):
+        cache = {}
+        movies = [item('M1', imdb_id='ttm1', rank=1, _plugin='imdb-charts', url='u')]
+        series = [item('S1', imdb_id='tts1', rank=1, type='series', _plugin='imdb-charts', url='u')]
+        for i in movies + series:
+            rt.get_or_create_entry(cache, i)
+        rt.mark_listing(cache, movies, {('imdb-charts', 'movie')})  # the series chart gave nothing this time
+        self.assertEqual(sorted(self.titles(cache)), ['M1', 'S1'])
+        rt.mark_listing(cache, [], {('imdb-charts', 'movie')})  # (an item-less scope cannot happen, but then every movie goes)
+        self.assertEqual(self.titles(cache), ['S1'])
+
+    def test_the_two_movie_and_series_charts_interleave_by_rank(self):
+        cache = {}
+        movies = [item('M1', imdb_id='ttm1', rank=1, _plugin='imdb-charts', url='u'), item('M2', imdb_id='ttm2', rank=2, _plugin='imdb-charts', url='u')]
+        series = [item('S1', imdb_id='tts1', rank=1, type='series', _plugin='imdb-charts', url='u')]
+        self.filed(cache, movies + series)
+        self.assertEqual(self.titles(cache)[2], 'M2')
+
+    def test_an_entry_that_is_from_before_listing_existed_counts_as_listed(self):
+        self.assertEqual(rt.get_all_cached_items({'k': {'title': 'Old', 'urls': {'p': 'u'}}})[0]['listed'], True)
 
 
 class TestGivingEntriesTheirIds(unittest.TestCase):

@@ -249,6 +249,37 @@ class TestDiscoveryDismissalsInTheState(TmpConfigCase):
         self.assertEqual(rt.load_state()['seen'], {'a': {'seen_at': 123.0, 'updated': None}, 'b': {'seen_at': 5, 'updated': 9}})
 
 
+class TestTheWatchList(TmpConfigCase):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(rt, 'MEDIA_FILE', os.path.join(self.dir, 'media.json'))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_media_file_without_one_has_an_empty_list(self):
+        self.assertEqual(rt.load_media()['watch'], {})
+
+    def test_the_list_survives_a_save_and_a_load(self):
+        media = rt.load_media()
+        media['watch']['imdb:tt1'] = rt.new_watch_entry({'title': 'X', 'type': 'series', 'imdb_id': 'tt1'}, 1000, year='2020')
+        rt.save_media(media)
+        self.assertEqual(rt.load_media()['watch'], {'imdb:tt1': dict(media['watch']['imdb:tt1'])})
+
+    def test_a_broken_list_is_dropped_but_the_sources_are_kept(self):
+        with open(rt.MEDIA_FILE, 'w') as f:
+            json.dump({'sources': {'s': {'title': 'T'}}, 'watch': {'a': 'junk', 'b': {'title': 'B'}}}, f)
+        media = rt.load_media()
+        self.assertEqual(sorted(media['watch']), ['b'])
+        self.assertEqual(media['sources']['s']['title'], 'T')
+
+    def test_the_movie_flag_of_a_source_is_kept_only_when_it_is_true(self):
+        with open(rt.MEDIA_FILE, 'w') as f:
+            json.dump({'sources': {'a': {'movie': True}, 'b': {'movie': 'yes'}, 'c': {}}}, f)
+        media = rt.load_media()
+        self.assertEqual([media['sources'][k]['movie'] for k in 'abc'], [True, False, False])
+        self.assertIs(rt.new_media_entry()['movie'], False)
+
+
 class TestMediaState(TmpConfigCase):
     def setUp(self):
         super().setUp()
@@ -261,12 +292,12 @@ class TestMediaState(TmpConfigCase):
             f.write(data if isinstance(data, str) else json.dumps(data))
 
     def test_a_missing_file_starts_empty(self):
-        self.assertEqual(rt.load_media(), {'sources': {}})
+        self.assertEqual(rt.load_media(), {'sources': {}, 'watch': {}})
 
     def test_garbage_starts_empty(self):
         for text in ('', '{not json', '[1, 2]', 'null', '{"sources": []}'):
             self.write(text)
-            self.assertEqual(rt.load_media(), {'sources': {}}, text)
+            self.assertEqual(rt.load_media(), {'sources': {}, 'watch': {}}, text)
 
     def test_garbage_is_set_aside_not_overwritten_by_the_next_save(self):
         for text in ('{"sources": {"https://x.example/f": {"title": "T", "episodes": [', '[1, 2]', '{"sources": []}'):
@@ -275,12 +306,12 @@ class TestMediaState(TmpConfigCase):
             rt.save_media(media)  # the next save, which used to destroy it
             with open(rt.MEDIA_FILE + '.corrupt') as f:
                 self.assertEqual(f.read(), text)
-            self.assertEqual(rt.load_media(), {'sources': {}})
+            self.assertEqual(rt.load_media(), {'sources': {}, 'watch': {}})
 
     def test_a_file_that_is_not_text_is_set_aside_too(self):
         with open(rt.MEDIA_FILE, 'wb') as f:
             f.write(b'\xff\xfe\x00{')
-        self.assertEqual(rt.load_media(), {'sources': {}})
+        self.assertEqual(rt.load_media(), {'sources': {}, 'watch': {}})
         self.assertTrue(os.path.exists(rt.MEDIA_FILE + '.corrupt'))
 
     def test_a_missing_empty_or_good_file_is_not_set_aside(self):
@@ -294,7 +325,7 @@ class TestMediaState(TmpConfigCase):
 
     def test_a_file_that_cannot_be_read_is_left_alone(self):
         os.mkdir(rt.MEDIA_FILE)
-        self.assertEqual(rt.load_media(), {'sources': {}})
+        self.assertEqual(rt.load_media(), {'sources': {}, 'watch': {}})
         self.assertTrue(os.path.isdir(rt.MEDIA_FILE))
         self.assertFalse(os.path.exists(rt.MEDIA_FILE + '.corrupt'))
 
@@ -305,13 +336,13 @@ class TestMediaState(TmpConfigCase):
                      files={'a': {'video': '/v/a.mp4', 'subs': ['/v/a.en.srt']}},
                      last_watched={'id': 'a', 'title': 'A', 'at': 1.5})
         rt.save_media({'sources': {'https://x.example/feed': entry}})
-        self.assertEqual(rt.load_media(), {'sources': {'https://x.example/feed': entry}})
+        self.assertEqual(rt.load_media(), {'sources': {'https://x.example/feed': entry}, 'watch': {}})
         self.assertFalse(os.path.exists(rt.MEDIA_FILE + '.tmp'))
 
     def test_a_new_entry_has_every_field_the_code_reads(self):
         self.assertEqual(rt.new_media_entry(), {'title': '', 'episodes': [], 'known': [], 'new': [], 'watched': [],
                                                 'files': {}, 'last_watched': None, 'resume': {}, 'remove_at': None,
-                                                'baselined': False})
+                                                'baselined': False, 'movie': False})
 
     def test_fields_of_the_wrong_type_are_repaired(self):
         self.write({'sources': {'https://x.example/f': {

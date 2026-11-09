@@ -3,6 +3,7 @@ downloaded, playing them in mpv and remembering what was watched."""
 
 import html
 import os
+import re
 import threading
 import time as time_module
 
@@ -31,13 +32,27 @@ from ..screen import media_target_size, remember_screen_size
 from ..state import new_media_entry, save_media, save_state
 from ..metadata import format_metadata_for_tooltip, get_cached_metadata, refresh_metadata_cache
 from ..media_cache import (
-    load_media_cache, update_media_cache, get_new_items, mark_seen, is_seen,
+    load_media_cache, update_media_cache, get_new_items, mark_listing, mark_seen, is_seen,
     get_all_cached_items, sync_metadata_ids, title_with_year,
 )
+from ..watch import find_source, is_searching, new_watch_entry, search_due, source_line
 from ..log import _log
 
 
 _discovery_running = threading.Lock()  # held by the discovery check that is running
+_watch_searching = threading.Lock()  # held while the watched titles are being looked for
+_DISCOVERY_TYPE_NAMES = {'movie': 'movies', 'series': 'series'}  # a kind, by the name discovery_types= uses
+
+
+def _chart_item(episode, kind, rank, plugin):
+    """A discovery item from an episode of a discovery source (a chart): its id is an IMDb id when
+    it looks like one, and `rank` is its place in the chart."""
+    ident = str(episode.get('id') or '')
+    imdb_id = ident if re.fullmatch(r'tt\d+', ident) else (episode.get('imdb_id') or None)
+    year = str(episode.get('year') or '')
+    url = episode.get('url') or ident
+    return {'id': url, 'title': episode.get('title') or ident, 'type': kind, 'url': url, 'imdb_id': imdb_id,
+            'year': year if re.fullmatch(r'(?:19|20)\d{2}', year) else '', 'date': '', 'rank': rank, '_plugin': plugin}
 
 
 def _give_known_ids(item):
@@ -408,12 +423,35 @@ class MediaMixin:
             save_state(self.state)
 
     def _fetch_discovery_bg(self):
-        """A discovery check, all of it but the window, in a thread: asks the plugins,
-        files what they found in the discovery cache (an item gets the ids that the
-        metadata cache already has for it), looks up the titles that have none, and
-        re-keys the entries that those ids reach. The popup is touched on the main loop
-        only, so no disk is read or written there on account of a check."""
+        """A discovery check, all of it but the window, in a thread: reads what `discovery=` names
+        (charts, say) or else asks the plugins that have a fetch_discovery, files what was found
+        in the discovery cache (an item gets the ids that the metadata cache already has for it),
+        looks the titles up for their posters, ratings and ids, and re-keys the entries those ids
+        reach. The popup is touched on the main loop only, so no disk is read or written there on
+        account of a check."""
         self.media_registry.refresh()
+        settings = load_media_settings()
+        types = settings['discovery_types']
+        if settings['discovery']:
+            found, scopes = self._read_discovery_sources(settings['discovery'], types)
+        else:
+            found, scopes = self._read_discovery_plugins(types), set()
+        seen = self._discovery_seen()
+
+        def file_items(cache):
+            fresh = get_new_items(cache, found, seen)
+            mark_listing(cache, found, scopes)
+            return fresh
+        fresh = update_media_cache(file_items)
+        if fresh:
+            _log(f'discovery: {len(fresh)} new items')
+            GLib.idle_add(self._discovery_news)
+        else:
+            _log('discovery: no new items')
+        self._enrich_discovery()
+
+    def _read_discovery_plugins(self, types):
+        """What the plugins' fetch_discovery functions find (the default source of discovery)."""
         existing_media_urls = set()
         with self._media_data_lock:
             for url, entry in self.media['sources'].items():
@@ -421,7 +459,6 @@ class MediaMixin:
                     continue
                 for ep in entry.get('episodes') or []:
                     existing_media_urls.add(ep.get('ref') or ep.get('url') or ep.get('id'))
-        types = load_media_settings()['discovery_types']
         found = []
         for plugin in self.media_registry.discovery_plugins():
             try:
@@ -433,18 +470,44 @@ class MediaMixin:
                 item['_plugin'] = plugin.name
                 _give_known_ids(item)
             found.extend(items)
-        seen = self._discovery_seen()
-        fresh = update_media_cache(lambda cache: get_new_items(cache, found, seen))
-        if fresh:
-            _log(f'discovery: {len(fresh)} new items')
-            GLib.idle_add(self._discovery_news)
-        else:
-            _log('discovery: no new items')
-        # the titles that have no id yet are looked up now (a few per check), and the entries re-keyed
-        lacking = [e for e in get_all_cached_items(load_media_cache()) if not e.get('tmdb_id') and not e.get('imdb_id')]
-        if lacking:
-            refresh_metadata_cache([title_with_year(e) for e in lacking], [e.get('type') or 'movie' for e in lacking])
+        return found
+
+    def _read_discovery_sources(self, sources, types):
+        """What the sources named by `discovery=` list (a chart's titles, in its order): (items,
+        the (plugin, kind) pairs that gave any, which are the ones whose listing is brought up to
+        date). A source that cannot be read is left as it was."""
+        found, scopes = [], set()
+        for source, kind in sources:
+            if _DISCOVERY_TYPE_NAMES[kind] not in types:
+                continue
+            try:
+                driver, target = self.media_registry.driver_for(source)
+                _title, episodes = driver.list_episodes(target)
+            except Exception as e:
+                _log(f'discovery source {source}: {describe_media_error(e)}')
+                continue
+            for rank, episode in enumerate(episodes, start=1):
+                item = _chart_item(episode, kind, rank, driver.name)
+                _give_known_ids(item)
+                found.append(item)
+            if episodes:
+                scopes.add((driver.name, kind))
+        return found, scopes
+
+    def _enrich_discovery(self):
+        """Looks up what the services know of the listed items and of the titles being watched
+        (a few per check; OMDb by IMDb id when the item has one), then gives the entries the ids
+        that came with it and shows the posters."""
+        wanted = [(title_with_year(e), e.get('type') or 'movie', e.get('imdb_id'))
+                  for e in get_all_cached_items(load_media_cache())]
+        with self._media_data_lock:
+            wanted += [(f"{w['title']} ({w['year']})" if w['year'] else w['title'], w['type'], w['imdb_id'])
+                       for w in self.media.get('watch', {}).values()]
+        if wanted:
+            refresh_metadata_cache([t for t, _k, _i in wanted], [k for _t, k, _i in wanted],
+                                   imdb_ids=[i for _t, _k, i in wanted])
             self._sync_discovery_ids()
+        GLib.idle_add(self._discovery_refresh)
 
     def _sync_discovery_ids(self):
         """Gives the cached discovery entries the ids the metadata cache now has for them;
@@ -472,25 +535,112 @@ class MediaMixin:
         return False
 
     def _on_discovery_dismiss(self, _btn, item):
+        """Right-click: a title nobody wants is dismissed for good; one that is being watched is
+        no longer watched (and so is never shown again either)."""
+        if item.get('watching'):
+            self._stop_watching(item['_cache_key'])
         self._dismiss_discovery([item])
         GLib.idle_add(self.refresh_list, True)  # on the main loop, once the state is saved
 
     def _on_discovery_row_activated(self, item):
+        """Left-click: a chart title is put on the watch list (see watch.py); a title that is already
+        the page of a site is added as a source at once. Either way it leaves the discovery list."""
+        if item.get('watching'):
+            return  # looked for already
+        if item.get('imdb_id') and self.media_registry.finders():
+            self._watch_title(item)
+        else:
+            self._add_discovered_source(item)
+        self._dismiss_discovery([item])
+        GLib.idle_add(self.refresh_list, True)
+
+    def _add_discovered_source(self, item):
         plugin_name = item.get('_plugin', 'unknown')
-        # Item has 'id' (first URL) and 'urls' (dict of all source URLs)
         source_url = item.get('id') or (list(item['urls'].values())[0] if item.get('urls') else None)
         if not source_url:
             _log(f'discovery row activated but no URL: {item}')
             return
-        source_url = f"{plugin_name}:{source_url}"
-        display_name = item['title']
-
+        source = source_line(plugin_name, source_url)
         with self._media_data_lock:
-            if source_url not in self.media['sources']:
-                self.media['sources'][source_url] = new_media_entry()
-            self.media['sources'][source_url]['title'] = display_name
-        self.start_media_check(only=[source_url])
-        self._on_discovery_dismiss(None, item)
+            entry = self.media['sources'].setdefault(source, new_media_entry())
+            entry['title'] = item['title']
+            entry['movie'] = item.get('type') == 'movie'
+            save_media(self.media)
+        self.start_media_check(only=[source])
+
+    # ---- titles to be downloaded: found on a site, then downloaded as any source is ----
+
+    def _watch_title(self, item):
+        """Puts a discovery item on the watch list and looks for it at once, in a thread. Every media
+        check looks again, for as long as no site has it."""
+        meta = get_cached_metadata(title_with_year(item), item.get('type') or 'movie', imdb_id=item.get('imdb_id'))
+        year = item.get('year') or ((meta or {}).get('year') or '')[:4]
+        with self._media_data_lock:
+            self.media.setdefault('watch', {}).setdefault(
+                item['_cache_key'], new_watch_entry(item, time_module.time(), year if year.isdigit() else ''))
+            save_media(self.media)
+        threading.Thread(target=self._search_watched, daemon=True).start()
+
+    def _stop_watching(self, key):
+        with self._media_data_lock:
+            self.media.setdefault('watch', {}).pop(key, None)
+            save_media(self.media)
+
+    def _forget_watch_of(self, sources):
+        """Takes the watch records whose title was found at one of `sources` off the list (the
+        source is being removed, so the record has served). Call with the media lock held."""
+        watch = self.media.setdefault('watch', {})
+        for key in [k for k, w in watch.items() if w.get('source') in sources]:
+            del watch[key]
+
+    def _search_watched(self):
+        """Asks the plugins that can find a title whether they have each title being watched, those not
+        asked for a media check ago. A title that is found becomes a source (a film, if it is one) and
+        is read and downloaded by the rules of [media]. One search at a time."""
+        if not _watch_searching.acquire(blocking=False):
+            return
+        try:
+            now = time_module.time()
+            wait = load_media_settings()['interval']
+            finders = self.media_registry.finders()
+            with self._media_data_lock:
+                due = [(key, dict(w)) for key, w in self.media.get('watch', {}).items() if search_due(w, now, wait)]
+            found_sources = []
+            for key, entry in due:
+                found = find_source(finders, entry) if finders else None
+                with self._media_data_lock:
+                    record = self.media.get('watch', {}).get(key)
+                    if record is None:
+                        continue  # no longer wanted
+                    record['checked'] = now
+                    if found:
+                        source = source_line(*found)
+                        record['source'] = source
+                        source_entry = self.media['sources'].setdefault(source, new_media_entry())
+                        source_entry['title'] = entry['title']
+                        source_entry['movie'] = entry['type'] == 'movie'
+                        found_sources.append(source)
+                        _log(f"watch: {entry['title']} found at {source}")
+                    save_media(self.media)
+            if found_sources:
+                self.start_media_check(only=found_sources)
+            if due:
+                GLib.idle_add(self._discovery_refresh)
+        except Exception as e:
+            _log(f'watch search error: {e}')
+        finally:
+            _watch_searching.release()
+
+    def _is_movie(self, url):
+        """A film: a source of [media] marked `movie`, or one that was added from the watch list
+        or the discovery list as a film."""
+        entry = self.media['sources'].get(url)
+        return url in load_media_movies() or bool(entry and entry.get('movie'))
+
+    def _movie_sources(self):
+        """Every source that is a film (a set). Takes the media lock: call it without."""
+        with self._media_data_lock:
+            return load_media_movies() | {url for url, entry in self.media['sources'].items() if entry.get('movie')}
 
     def start_media_check(self, only=None):
         """Checks every source, or just those in `only` (sources that were added to
@@ -525,12 +675,19 @@ class MediaMixin:
                 raise
 
     def _check_media(self, only=None):
-        """Reads every configured source (or those in `only`), remembers what is
-        new, then queues the downloads. A source that cannot be read keeps what is
-        known of it."""
+        """Reads every configured source and every source added by a click (or those in `only`),
+        remembers what is new, then queues the downloads. A source that cannot be read keeps what is
+        known of it. A full check also looks for the titles on the watch list."""
         new_total = 0
         self.media_registry.refresh()  # picks up plugins that were added or edited
-        for url, _name, configured in load_media_sources():
+        sources = [(url, configured) for url, _name, configured in load_media_sources()]
+        configured_urls = {url for url, _configured in sources}
+        with self._media_data_lock:
+            sources += [(url, None) for url in self.media['sources']
+                        if url not in configured_urls and not url.startswith('discovery:')]
+        if only is None:
+            self._search_watched()  # a title found now is read below, with the rest
+        for url, configured in sources:
             if only is not None and url not in only:
                 continue
             try:
@@ -546,27 +703,6 @@ class MediaMixin:
                 entry = self.media['sources'].setdefault(url, new_media_entry())
                 new_total += len(merge_episodes(entry, title, episodes, configured or driver.order))
                 save_media(self.media)
-
-        # Also check dynamically added sources (not in config) that are in `only`
-        if only is not None:
-            with self._media_data_lock:
-                for url in only:
-                    if url in self.media['sources'] and url not in self.media_errors:
-                        # Check if this is a config source
-                        config_sources = {u for u, _n, _o in load_media_sources()}
-                        if url not in config_sources:
-                            try:
-                                driver, target = self.media_registry.driver_for(url)
-                                title, episodes = driver.list_episodes(target)
-                            except Exception as error:
-                                self.media_errors[url] = describe_media_error(error)
-                                if not isinstance(error, (NoDriver, ValueError)):
-                                    self.note_request_failure()
-                                continue
-                            self.media_errors.pop(url, None)
-                            entry = self.media['sources'].setdefault(url, new_media_entry())
-                            new_total += len(merge_episodes(entry, title, episodes, driver.order))
-                            save_media(self.media)
 
         GLib.idle_add(self._on_media_new if new_total else self._refresh_media_rows)
         self._plan_media_downloads()
@@ -845,7 +981,7 @@ class MediaMixin:
             ready = self._media_file_ready(entry, episode['id'])
             path = entry['files'][episode['id']]['video'] if ready else None
             name = self._media_display_name(url, entry)
-            is_movie = url in load_media_movies()
+            is_movie = self._is_movie(url)
             # Build playlist for series: all downloaded unwatched episodes in watch order
             playlist = []
             playlist_episode_ids = []  # track episode_ids in playlist order
@@ -913,7 +1049,7 @@ class MediaMixin:
         fraction = (played + (start or 0.0)) / duration if isinstance(played, (int, float)) and duration else None
         if counts_as_watched(percent, remaining, fraction):
             self.mark_media_watched(url, episode_id)
-            if url in load_media_movies():
+            if self._is_movie(url):
                 self._schedule_movie_removal(url)
         elif info.get('position') is not None:  # nothing seen means nothing to change
             self._set_media_resume(url, episode_id, resume_point(info['position'], watched=False))
@@ -1005,7 +1141,7 @@ class MediaMixin:
         source keep their files: the files of older watched ones go to the Trash. They stay
         watched, so they are not downloaded again. Movies are removed another way."""
         behind = load_media_settings()['behind']
-        if behind is None or url in load_media_movies():
+        if behind is None or self._is_movie(url):
             return
         with self._media_data_lock:
             entry = self.media['sources'].get(url)
@@ -1058,7 +1194,7 @@ class MediaMixin:
         of [media], what is known of it forgotten. A movie that is not watched through any
         more, or whose file cannot go to the Trash, is left (and tried again in an hour)."""
         now = time_module.time()
-        movies = load_media_movies()
+        movies = self._movie_sources()
         with self._media_data_lock:
             due = [url for url in movies if (entry := self.media['sources'].get(url)) and entry.get('remove_at') is not None
                    and entry['remove_at'] <= now and entry.get('episodes') and unwatched_count(entry) == 0]
@@ -1095,7 +1231,7 @@ class MediaMixin:
         cannot go to the Trash, the source and what is known of it stay: nothing is half
         done. Returns the sources taken off."""
         consumed = {url for url, _name in self._consumed_media_sources()}
-        movies = load_media_movies()
+        movies = self._movie_sources()
         wanted = [url for url in urls if url in consumed and (url not in movies or self._trash_source_files(url))]
         gone = self._drop_media_sources(wanted)
         if gone:
@@ -1115,6 +1251,7 @@ class MediaMixin:
         with self._media_data_lock:
             for url in gone:
                 self.media['sources'].pop(url, None)
+            self._forget_watch_of(set(gone))
             save_media(self.media)
         with self._media_queue_lock:
             self._media_queue = [key for key in self._media_queue if key[0] not in gone]
@@ -1201,6 +1338,7 @@ class MediaMixin:
         # Remove from media sources
         with self._media_data_lock:
             self.media['sources'].pop(url, None)
+            self._forget_watch_of({url})
             save_media(self.media)
         # Remove any pending downloads for this source
         with self._media_queue_lock:
@@ -1223,7 +1361,7 @@ class MediaMixin:
         For dynamically added sources (from discovery clicks), also offers to remove
         from list, mark as seen in discovery, and delete files."""
         consumed = self._consumed_media_sources()
-        movies = load_media_movies()
+        movies = self._movie_sources()
         config_sources = {u for u, _n, _o in load_media_sources()}
         is_dynamic = url not in config_sources and not url.startswith('discovery:')
         with self._media_data_lock:
@@ -1362,26 +1500,45 @@ class MediaMixin:
                     )
                     if has_active_download:
                         dynamic_sources.append(url)
-            # Prepend dynamic sources (newest first) so clicked items appear at top
+            # Added ones go before the configured ones, the newest first, and those with something that
+            # can be watched now before those still being downloaded
+            dynamic_sources.reverse()
+            dynamic_sources.sort(key=lambda url: not self._has_something_to_watch(sources[url]))
             urls = dynamic_sources + urls
             return urls
 
+    def _has_something_to_watch(self, entry):
+        """True when an episode that was not watched is downloaded."""
+        return any(self._media_file_ready(entry, e['id']) for e in entry['episodes'] if e['id'] not in entry['watched'])
+
+    def _watching_items(self):
+        """The titles on the watch list that no site has been found to have yet, the newest first, in
+        the shape of discovery items (so they are rows of the same kind, marked `watching`)."""
+        with self._media_data_lock:
+            watching = sorted(((key, dict(w)) for key, w in self.media.get('watch', {}).items() if is_searching(w)),
+                              key=lambda kw: kw[1]['added'], reverse=True)
+        return [{'id': key, '_cache_key': key, '_plugin': 'unknown', 'title': w['title'], 'year': w['year'],
+                 'type': w['type'], 'imdb_id': w['imdb_id'], 'tmdb_id': None, 'urls': {}, 'genre': [],
+                 'quality': None, 'rank': None, 'watching': True} for key, w in watching]
+
     def discovery_source_urls(self):
         """Return only discovery item URLs (unseen items from unified cache).
-        These are the items shown in the discovery section of the media list."""
+        These are the items shown in the discovery section of the media list: the titles being
+        looked for first, then what is listed."""
         cache = load_media_cache()
         seen = set(self.state.get('media_discovery_seen', []))
-        urls = []
+        urls = [f'discovery:{item["_cache_key"]}' for item in self._watching_items()]
         for item in get_all_cached_items(cache):
             if not is_seen(seen, item):
                 urls.append(f'discovery:{item["_cache_key"]}')
         return urls
 
     def get_discovery_items(self):
-        """Get current discovery items from unified cache, filtered by dismissal state."""
+        """Get current discovery items from unified cache, filtered by dismissal state, after the
+        titles being looked for."""
         cache = load_media_cache()
         seen = set(self.state.get('media_discovery_seen', []))
-        items = []
+        items = self._watching_items()
         for item in get_all_cached_items(cache):
             if not is_seen(seen, item):
                 # Add _plugin for backward compatibility (use first URL's plugin)
@@ -1473,14 +1630,15 @@ class MediaMixin:
         api_genre = meta.get('genre') if meta else None
         # Fall back to site genre if API genre not available
         site_genre = ', '.join(item['genre']) if item.get('genre') else None
-        genre = api_genre or site_genre
+        rating = meta.get('imdb_rating') if meta else None
+        genre = ' '.join(part for part in (f'⭐ {rating}' if rating else '', f'🎭 {api_genre or site_genre}' if (api_genre or site_genre) else '') if part)
 
         # Show genre and source on the same row
         genre_source_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         genre_source_box.set_hexpand(True)
         genre_source_box.set_halign(Gtk.Align.FILL)
         if genre:
-            genre_label = Gtk.Label(label=f'🎭 {genre}')
+            genre_label = Gtk.Label(label=genre)
             genre_label.set_xalign(0)
             genre_label.get_style_context().add_class('menu-text')
             genre_label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -1510,6 +1668,14 @@ class MediaMixin:
             text_box.pack_start(genre_source_box, True, True, 0)  # expand to fill width
 
         box.pack_start(text_box, True, True, 0)
+
+        if item.get('watching'):
+            looking = Gtk.Label()
+            looking.set_markup('<span size="small"><i>looking for it…</i></span>')
+            looking.set_margin_start(6)
+            looking.set_margin_end(6)
+            looking.get_style_context().add_class('menu-text')
+            box.pack_start(looking, False, False, 0)
 
         # Show quality badge for movies (from fsonline plugin)
         if item.get('type') == 'movie' and item.get('quality'):

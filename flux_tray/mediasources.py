@@ -230,7 +230,7 @@ class MediaSources:
             spec.loader.exec_module(module)
             if not callable(getattr(module, 'list_episodes', None)):
                 raise ValueError('it has no list_episodes(source) function')
-            for optional in ('matches', 'resolve', 'download'):
+            for optional in ('matches', 'resolve', 'download', 'find'):
                 if hasattr(module, optional) and not callable(getattr(module, optional)):
                     raise ValueError(f'{optional} is not a function')
             declared = getattr(module, 'NAME', None)
@@ -257,6 +257,11 @@ class MediaSources:
     def discovery_plugins(self):
         """Plugins that implement fetch_discovery() for the discovery feed."""
         return [driver for driver in self.drivers() if hasattr(driver.module, 'fetch_discovery')]
+
+    def finders(self):
+        """Plugins that implement find(title, year, imdb_id, kind): the address of a title on
+        their site, or None (see watch.py)."""
+        return [driver for driver in self.drivers() if callable(getattr(driver.module, 'find', None))]
 
     def problems(self):
         """Why plugins failed to load, for an error message; '' when all loaded."""

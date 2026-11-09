@@ -40,6 +40,7 @@ class FakeRegistry:
         self.by_episode_name = {}
         self.refreshed = 0
         self.discovery = []
+        self.finding = []
 
     def refresh(self):
         self.refreshed += 1
@@ -65,6 +66,9 @@ class FakeRegistry:
 
     def discovery_plugins(self):
         return self.discovery
+
+    def finders(self):
+        return self.finding
 
 
 class Stub:
@@ -114,11 +118,26 @@ class Stub:
     _discovery_news = rt.FluxTray._discovery_news
     _discovery_refresh = rt.FluxTray._discovery_refresh
     _on_discovery_dismiss = rt.FluxTray._on_discovery_dismiss
+    _on_discovery_row_activated = rt.FluxTray._on_discovery_row_activated
+    _media_menu_remove_dynamic = rt.FluxTray._media_menu_remove_dynamic
+    _add_discovered_source = rt.FluxTray._add_discovered_source
+    _read_discovery_plugins = rt.FluxTray._read_discovery_plugins
+    _read_discovery_sources = rt.FluxTray._read_discovery_sources
+    _enrich_discovery = rt.FluxTray._enrich_discovery
+    _watch_title = rt.FluxTray._watch_title
+    _stop_watching = rt.FluxTray._stop_watching
+    _forget_watch_of = rt.FluxTray._forget_watch_of
+    _search_watched = rt.FluxTray._search_watched
+    _watching_items = rt.FluxTray._watching_items
+    discovery_source_urls = rt.FluxTray.discovery_source_urls
+    _is_movie = rt.FluxTray._is_movie
+    _movie_sources = rt.FluxTray._movie_sources
+    _has_something_to_watch = rt.FluxTray._has_something_to_watch
     _on_media_row_enter = rt.FluxTray._on_media_row_enter
     _on_media_row_leave = rt.FluxTray._on_media_row_leave
 
     def __init__(self):
-        self.media = {'sources': {}}
+        self.media = {'sources': {}, 'watch': {}}
         self.media_status = {}
         self.media_errors = {}
         self.media_registry = FakeRegistry()
@@ -342,6 +361,72 @@ class TestChecking(MediaCase):
         stub._check_media()
         self.assertEqual(len(self.queued(stub, '_on_media_new')), 1)
         self.assertEqual(stub.media['sources'][URL]['new'], ['b'])
+
+    ADDED = 'fsonline_one:https://fsonline.one/film/show-2024'
+
+    def with_added_source(self):
+        """A stub with one source of the config and one that a click added, each with its own driver."""
+        stub = Stub()
+        stub._plan_media_downloads = mock.Mock()
+        stub._search_watched = mock.Mock()
+        stub.media['sources'][URL] = entry_with(ep('a', 1))
+        stub.media['sources'][self.ADDED] = entry_with(ep('x', 1), title='Added')
+        stub.media_registry.by_source[self.ADDED] = FakeDriver('fsonline_one', 'newest')
+        return stub
+
+    def test_a_source_added_by_a_click_is_read_again_at_every_full_check(self):
+        # it is monitored: a new episode of a series that was clicked is found, not only the first at the click
+        stub = self.with_added_source()
+        stub.media_registry.listing(URL, ('Show', [ep('a', 1)]))
+        stub.media_registry.listing(self.ADDED, ('Added', [ep('x', 1), ep('y', 2)]))
+        stub._check_media()
+        self.assertEqual(stub.media['sources'][self.ADDED]['new'], ['y'])
+        self.assertEqual(len(self.queued(stub, '_on_media_new')), 1)
+
+    def test_a_source_added_by_a_click_goes_by_the_drivers_order_not_a_configured_one(self):
+        stub = self.with_added_source()
+        stub.media_registry.listing(URL, ('Show', [ep('a', 1)]))
+        stub.media_registry.listing(self.ADDED, ('Added', [ep('x', 1)]))
+        with mock.patch.object(rt, 'merge_episodes', wraps=rt.merge_episodes) as merge:
+            stub._check_media()
+        orders = {call.args[0] is stub.media['sources'][self.ADDED]: call.args[3] for call in merge.call_args_list}
+        self.assertEqual(orders[True], 'newest')
+
+    def test_a_check_of_particular_sources_reads_those_only(self):
+        stub = self.with_added_source()
+        stub.media_registry.listing(URL, ('Show', [ep('a', 1)]))
+        stub.media_registry.listing(self.ADDED, ('Added', [ep('x', 1)]))
+        stub._check_media(only=[self.ADDED])
+        stub.media_registry.by_source[self.ADDED].list_episodes.assert_called_once()
+        stub.media_registry.by_source[URL].list_episodes.assert_not_called()
+
+    def test_a_source_is_read_outside_the_media_lock(self):
+        # the network under the lock would hold up everything that shows the list
+        stub = self.with_added_source()
+        held = []
+        for source in (URL, self.ADDED):
+            stub.media_registry.listing(source, ('T', [ep('a', 1)]))
+            original = stub.media_registry.by_source[source].list_episodes
+            stub.media_registry.by_source[source].list_episodes = mock.Mock(
+                side_effect=lambda target, original=original: (held.append(stub._media_data_lock.locked()), original(target))[1])
+        stub._check_media()
+        self.assertEqual(held, [False, False])
+
+    def test_an_added_source_whose_plugin_is_gone_says_so_and_the_others_go_on(self):
+        stub = self.with_added_source()
+        del stub.media_registry.by_source[self.ADDED]
+        stub.media_registry.listing(URL, ('Show', [ep('a', 1)]))
+        stub._check_media()
+        self.assertIn(self.ADDED, stub.media_errors)
+        self.assertNotIn(URL, stub.media_errors)
+
+    def test_discovery_rows_are_never_read_as_sources(self):
+        stub = self.with_added_source()
+        stub.media['sources']['discovery:imdb:tt1'] = rt.new_media_entry()
+        stub.media_registry.listing(URL, ('Show', [ep('a', 1)]))
+        stub.media_registry.listing(self.ADDED, ('Added', [ep('x', 1)]))
+        stub._check_media()
+        self.assertNotIn('discovery:imdb:tt1', stub.media_errors)
 
     def test_a_source_that_cannot_be_read_keeps_what_is_known_and_the_others_go_on(self):
         self.sources = [(URL, None, None), (POD, None, None)]
@@ -1899,6 +1984,24 @@ class TestARemovedMovie(MediaCase):
         self.assertIn(self.FILM, [s[0] for s in self.sources])
         self.assertEqual(entry['files'].keys(), {'f'})  # still listed: the video is still there
 
+    def watched_title(self, source):
+        self.stub.media['watch'] = {
+            'imdb:tt1': dict(rt.new_watch_entry({'title': 'Film', 'imdb_id': 'tt1'}, 1), source=source),
+            'imdb:tt2': rt.new_watch_entry({'title': 'Other', 'imdb_id': 'tt2'}, 2)}
+
+    def test_a_film_removed_when_its_time_has_come_takes_its_watch_record_with_it(self):
+        self.watched_title(self.FILM)
+        self.due()
+        self.assertEqual(self.stub.remove_due_movies(), [self.FILM])
+        self.assertEqual(list(self.stub.media['watch']), ['imdb:tt2'])  # the title still looked for stays
+
+    def test_removing_a_source_added_by_a_click_from_the_menu_takes_its_watch_record_with_it(self):
+        self.watched_title(self.FILM)
+        self.stub._dismiss_discovery = mock.Mock()
+        self.stub._media_menu_remove_dynamic(None, mock.Mock(), self.FILM)
+        self.assertNotIn(self.FILM, self.stub.media['sources'])
+        self.assertEqual(list(self.stub.media['watch']), ['imdb:tt2'])
+
     def test_removing_by_hand_from_the_menu_takes_the_file_too(self):
         gone = self.stub.remove_consumed_media([self.FILM])
         self.assertEqual(gone, [self.FILM])
@@ -1995,7 +2098,7 @@ class TestDiscoveryCheck(unittest.TestCase):
         # the state is saved under the lock, as everywhere else
         self.lock_held_when_saved = []
         for name, value in (
-                ('load_media_settings', mock.Mock(return_value={'discovery_types': ('movies', 'series'), 'interval': 3600})),
+                ('load_media_settings', mock.Mock(return_value={'discovery_types': ('movies', 'series'), 'discovery': [], 'interval': 3600})),
                 ('save_state', mock.Mock(side_effect=self.save)),
                 ('refresh_metadata_cache', mock.Mock(return_value=0)),
                 ('get_cached_metadata', mock.Mock(return_value=None))):
@@ -2062,15 +2165,17 @@ class TestDiscoveryCheck(unittest.TestCase):
         self.check(FakePlugin('fsonline', [self.FILM]))
         titles, types = self.refresh_metadata_cache.call_args.args
         self.assertEqual((titles, types), (['Dune Part Two (2024)'], ['movie']))
+        self.assertEqual(self.refresh_metadata_cache.call_args.kwargs, {'imdb_ids': [None]})
         self.assertEqual(self.keys(), ['tmdb:693134'])
         self.assertEqual(self.stub.state['media_discovery_seen'], ['tmdb:693134'])  # still dismissed
         self.assertEqual(self.lock_held_when_saved, [True])
         self.assertIn(self.stub._discovery_refresh, [f for f, _ in self.idle])
 
-    def test_nothing_is_looked_up_when_every_entry_has_its_ids(self):
+    def test_every_listed_title_is_given_to_the_lookup_with_its_imdb_id_which_skips_what_it_has(self):
         self.get_cached_metadata.return_value = {'tmdb_id': '1'}
-        self.check(FakePlugin('fsonline', [self.FILM]))
-        self.refresh_metadata_cache.assert_not_called()
+        self.check(FakePlugin('fsonline', [dict(self.FILM, imdb_id='tt15239678')]))
+        titles, types = self.refresh_metadata_cache.call_args.args
+        self.assertEqual((titles, types, self.refresh_metadata_cache.call_args.kwargs), (['Dune Part Two (2024)'], ['movie'], {'imdb_ids': ['tt15239678']}))
 
     def test_the_main_loop_part_reads_and_writes_no_file(self):
         with mock.patch.object(rt, 'load_media_cache', side_effect=AssertionError('disk on the main loop')), \
@@ -2107,3 +2212,499 @@ class TestDiscoveryCheck(unittest.TestCase):
             self.stub._fetch_discovery_guarded()  # does not raise
         self.assertTrue(rt._discovery_running.acquire(blocking=False))
         rt._discovery_running.release()
+
+
+class FakeChartDriver:
+    """A plugin that lists a chart: `chart` is {source: [episodes]} or an Exception to raise."""
+    name = 'imdb-charts'
+    order = 'newest'
+
+    def __init__(self, charts):
+        self.charts = charts
+
+    def list_episodes(self, target):
+        result = self.charts[target]
+        if isinstance(result, Exception):
+            raise result
+        return 'Chart', [dict(e) for e in result]
+
+
+MOVIES = 'https://www.imdb.com/chart/moviemeter/'
+SERIES = 'https://www.imdb.com/chart/tvmeter/'
+
+
+def chart_episode(imdb_id, title, **extra):
+    return {'id': imdb_id, 'title': title, 'date': '', 'url': f'https://www.imdb.com/title/{imdb_id}/', 'ref': 'chart', **extra}
+
+
+class TestDiscoveryFromCharts(unittest.TestCase):
+    """`discovery=` names the sources of the discovery list: charts, whose titles come in their order and
+    already have IMDb ids."""
+
+    def setUp(self):
+        isolate_media_caches(self)
+        self.idle = []
+        self.stub = Stub()
+        self.stub.popup.get_visible.return_value = True
+        self.charts = {MOVIES: [chart_episode('tt1', 'First Film'), chart_episode('tt2', 'Second Film')],
+                       SERIES: [chart_episode('tt3', 'First Show')]}
+        self.driver = FakeChartDriver(self.charts)
+        self.stub.media_registry.driver_for = lambda source: (self.driver, source)
+        self.settings = {'discovery_types': ('movies', 'series'), 'interval': 3600,
+                         'discovery': [(MOVIES, 'movie'), (SERIES, 'series')]}
+        for name, value in (('load_media_settings', mock.Mock(side_effect=lambda: dict(self.settings))),
+                            ('save_state', mock.Mock()), ('refresh_metadata_cache', mock.Mock(return_value=0)),
+                            ('get_cached_metadata', mock.Mock(return_value=None))):
+            patcher = mock.patch.object(rt, name, value)
+            setattr(self, name, patcher.start())
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(rt.GLib, 'idle_add', side_effect=lambda f, *a: self.idle.append((f, a)))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.plugin = FakePlugin('fsonline', [{'title': 'Site Film (2024)', 'type': 'movie', 'url': 'https://f/x'}])
+        self.stub.media_registry.discovery = [self.plugin]
+
+    def titles(self):
+        return [i['title'] for i in rt.get_all_cached_items(rt.load_media_cache())]
+
+    def test_the_titles_of_the_charts_are_the_list_in_the_order_of_the_charts(self):
+        self.stub._fetch_discovery_bg()
+        self.assertEqual(self.titles(), ['First Film', 'First Show', 'Second Film'])  # rank 1, rank 1, rank 2
+        first = rt.load_media_cache()['imdb:tt1']
+        self.assertEqual((first['type'], first['imdb_id'], first['rank'], first['urls']),
+                         ('movie', 'tt1', 1, {'imdb-charts': 'https://www.imdb.com/title/tt1/'}))
+        self.assertEqual(rt.load_media_cache()['imdb:tt3']['type'], 'series')
+
+    def test_the_plugins_own_discovery_is_not_used_when_charts_are_named(self):
+        self.stub._fetch_discovery_bg()
+        self.plugin.module.fetch_discovery.assert_not_called()
+        self.assertNotIn('Site Film (2024)', self.titles())
+
+    def test_without_charts_named_the_plugins_are_asked_as_before(self):
+        self.settings['discovery'] = []
+        self.stub._fetch_discovery_bg()
+        self.plugin.module.fetch_discovery.assert_called_once()
+        self.assertEqual(self.titles(), ['Site Film (2024)'])
+
+    def test_new_titles_are_announced_once(self):
+        self.stub._fetch_discovery_bg()
+        self.assertEqual([f for f, _ in self.idle if f == self.stub._discovery_news], [self.stub._discovery_news])
+        self.idle.clear()
+        self.stub._fetch_discovery_bg()
+        self.assertNotIn(self.stub._discovery_news, [f for f, _ in self.idle])
+
+    def test_a_kind_that_is_not_in_discovery_types_is_not_read(self):
+        self.settings['discovery_types'] = ('movies',)
+        self.stub._fetch_discovery_bg()
+        self.assertEqual(self.titles(), ['First Film', 'Second Film'])
+
+    def test_a_title_that_leaves_the_chart_goes_from_the_list_and_returns_with_it(self):
+        self.stub._fetch_discovery_bg()
+        self.charts[MOVIES] = [chart_episode('tt2', 'Second Film')]
+        self.stub._fetch_discovery_bg()
+        self.assertEqual(self.titles(), ['Second Film', 'First Show'])  # rank 1 of the movies, rank 1 of the series
+        self.charts[MOVIES] = [chart_episode('tt1', 'First Film'), chart_episode('tt2', 'Second Film')]
+        self.stub._fetch_discovery_bg()
+        self.assertIn('First Film', self.titles())
+
+    def test_a_chart_that_cannot_be_read_leaves_its_titles_and_does_not_stop_the_other(self):
+        self.stub._fetch_discovery_bg()
+        self.charts[SERIES] = OSError('imdb is down')
+        self.charts[MOVIES] = [chart_episode('tt9', 'Brand New Film')]
+        self.stub._fetch_discovery_bg()
+        self.assertIn('First Show', self.titles())          # not hidden by a failure
+        self.assertIn('Brand New Film', self.titles())      # the movie chart was read
+        self.assertNotIn('First Film', self.titles())       # and has moved on
+
+    def test_a_chart_that_came_back_empty_hides_nothing(self):
+        self.stub._fetch_discovery_bg()
+        self.charts[MOVIES] = []
+        self.stub._fetch_discovery_bg()
+        self.assertEqual(sorted(self.titles()), ['First Film', 'First Show', 'Second Film'])
+
+    def test_a_dismissed_title_is_not_announced_again_whatever_its_rank(self):
+        seen = set()
+        rt.mark_seen(seen, {'imdb_id': 'tt1', 'title': 'First Film'})
+        self.stub.state['media_discovery_seen'] = sorted(seen)
+        self.stub._fetch_discovery_bg()
+        self.assertEqual([i['title'] for i in self.stub.get_discovery_items()], ['First Show', 'Second Film'])
+
+    def test_every_listed_title_is_looked_up_by_its_imdb_id(self):
+        self.stub._fetch_discovery_bg()
+        titles, types = self.refresh_metadata_cache.call_args.args
+        self.assertEqual(sorted(zip(titles, types, self.refresh_metadata_cache.call_args.kwargs['imdb_ids'])),
+                         [('First Film', 'movie', 'tt1'), ('First Show', 'series', 'tt3'), ('Second Film', 'movie', 'tt2')])
+
+    def test_the_titles_on_the_watch_list_are_looked_up_too(self):
+        self.stub.media['watch']['imdb:tt7'] = rt.new_watch_entry({'title': 'Watched', 'type': 'movie', 'imdb_id': 'tt7'}, 1, year='2020')
+        self.stub._fetch_discovery_bg()
+        titles = self.refresh_metadata_cache.call_args.args[0]
+        self.assertIn('Watched (2020)', titles)
+        self.assertIn('tt7', self.refresh_metadata_cache.call_args.kwargs['imdb_ids'])
+
+    def test_a_chart_item_takes_what_the_plugin_gives_of_its_year_but_not_the_date_it_was_read(self):
+        self.charts[MOVIES] = [chart_episode('tt1', 'Dune', year='2021')]
+        self.charts[SERIES] = [chart_episode('tt2', 'Show', year='soon')]
+        self.stub._fetch_discovery_bg()
+        cache = rt.load_media_cache()
+        self.assertEqual((cache['imdb:tt1']['year'], cache['imdb:tt2']['year']), ('2021', ''))
+
+    def test_what_is_not_an_imdb_id_is_not_taken_for_one(self):
+        self.charts[MOVIES] = [chart_episode('some-slug', 'Odd One')]
+        self.stub._fetch_discovery_bg()
+        self.assertEqual([k for k in rt.load_media_cache() if 'odd one' in k], ['fallback:movie:odd one:'])
+
+
+class TestWatchingATitle(unittest.TestCase):
+    ITEM = {'_cache_key': 'imdb:tt15239678', 'title': 'Dune: Part Two', 'type': 'movie', 'imdb_id': 'tt15239678',
+            'urls': {'imdb-charts': 'https://www.imdb.com/title/tt15239678/'}, '_plugin': 'imdb-charts',
+            'id': 'https://www.imdb.com/title/tt15239678/'}
+
+    def setUp(self):
+        isolate_media_caches(self)
+        self.idle = []
+        self.stub = Stub()
+        self.stub.start_media_check = mock.Mock()
+        self.settings = {'discovery_types': ('movies', 'series'), 'interval': 3600, 'discovery': []}
+        for name, value in (('load_media_settings', mock.Mock(side_effect=lambda: dict(self.settings))),
+                            ('save_state', mock.Mock()), ('save_media', mock.Mock()),
+                            ('load_media_movies', mock.Mock(return_value=set())),
+                            ('get_cached_metadata', mock.Mock(return_value=None))):
+            patcher = mock.patch.object(rt, name, value)
+            setattr(self, name, patcher.start())
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(rt.GLib, 'idle_add', side_effect=lambda f, *a: self.idle.append((f, a)))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.site = FakeFinder('fsonline_one', 'https://fsonline.one/film/dune-part-two-2024')
+        self.stub.media_registry.finding = [self.site]
+
+    def watch_entry(self, **extra):
+        entry = rt.new_watch_entry(self.ITEM, 1000, year='2024')
+        entry.update(extra)
+        self.stub.media['watch'][self.ITEM['_cache_key']] = entry
+        return entry
+
+    # --- the left click
+
+    def test_a_click_puts_the_title_on_the_watch_list_with_its_year_and_dismisses_it_from_discovery(self):
+        self.get_cached_metadata.return_value = {'year': '2024'}
+        with mock.patch.object(rt.threading, 'Thread') as thread:
+            self.stub._on_discovery_row_activated(dict(self.ITEM))
+        entry = self.stub.media['watch']['imdb:tt15239678']
+        self.assertEqual((entry['title'], entry['year'], entry['type'], entry['imdb_id'], entry['source']),
+                         ('Dune: Part Two', '2024', 'movie', 'tt15239678', None))
+        self.assertEqual(self.stub.state['media_discovery_seen'], ['imdb:tt15239678'])
+        self.save_media.assert_called()
+        thread.assert_called_once()  # the first search starts at once, in a thread
+        self.stub.start_media_check.assert_not_called()  # nothing to read yet
+
+    def test_a_series_year_range_gives_its_first_year(self):
+        self.get_cached_metadata.return_value = {'year': '2019–2024'}
+        with mock.patch.object(rt.threading, 'Thread'):
+            self.stub._on_discovery_row_activated(dict(self.ITEM, type='series'))
+        self.assertEqual(self.stub.media['watch']['imdb:tt15239678']['year'], '2019')
+
+    def test_a_year_that_is_not_known_is_empty(self):
+        with mock.patch.object(rt.threading, 'Thread'):
+            self.stub._on_discovery_row_activated(dict(self.ITEM))
+        self.assertEqual(self.stub.media['watch']['imdb:tt15239678']['year'], '')
+
+    def test_a_second_click_on_a_title_already_watched_does_not_start_it_over(self):
+        entry = self.watch_entry(checked=5.0)
+        with mock.patch.object(rt.threading, 'Thread'):
+            self.stub._on_discovery_row_activated(dict(self.ITEM))
+        self.assertEqual(self.stub.media['watch']['imdb:tt15239678'], entry)
+
+    def test_a_title_that_is_already_looked_for_does_nothing_when_clicked(self):
+        with mock.patch.object(rt.threading, 'Thread') as thread:
+            self.stub._on_discovery_row_activated(dict(self.ITEM, watching=True))
+        thread.assert_not_called()
+        self.assertEqual(self.stub.media['watch'], {})
+
+    def test_without_a_plugin_that_can_find_titles_a_click_adds_the_page_as_a_source_as_before(self):
+        self.stub.media_registry.finding = []
+        item = dict(self.ITEM, imdb_id=None, _plugin='fsonline_one', id='https://fsonline.one/film/x', type='movie',
+                    urls={'fsonline_one': 'https://fsonline.one/film/x'})
+        self.stub._on_discovery_row_activated(item)
+        source = 'fsonline_one:https://fsonline.one/film/x'
+        self.assertEqual(self.stub.media['watch'], {})
+        self.assertEqual((self.stub.media['sources'][source]['title'], self.stub.media['sources'][source]['movie']), ('Dune: Part Two', True))
+        self.stub.start_media_check.assert_called_once_with(only=[source])
+
+    # --- the search
+
+    def test_a_title_a_site_has_becomes_a_film_source_that_is_read_at_once(self):
+        self.watch_entry()
+        self.stub._search_watched()
+        source = 'fsonline_one:https://fsonline.one/film/dune-part-two-2024'
+        record = self.stub.media['watch']['imdb:tt15239678']
+        self.assertEqual(record['source'], source)
+        self.assertIsNotNone(record['checked'])
+        entry = self.stub.media['sources'][source]
+        self.assertEqual((entry['title'], entry['movie']), ('Dune: Part Two', True))
+        self.stub.start_media_check.assert_called_once_with(only=[source])
+        self.site.module.find.assert_called_once_with(title='Dune: Part Two', year='2024', imdb_id='tt15239678', kind='movie')
+
+    def test_a_series_found_is_not_a_film(self):
+        self.watch_entry(type='series')
+        self.stub._search_watched()
+        self.assertFalse(self.stub.media['sources']['fsonline_one:https://fsonline.one/film/dune-part-two-2024']['movie'])
+
+    def test_a_title_no_site_has_stays_on_the_list_and_is_asked_again_only_after_the_wait(self):
+        self.site.module.find.return_value = None
+        self.watch_entry()
+        self.stub._search_watched()
+        self.assertIsNone(self.stub.media['watch']['imdb:tt15239678']['source'])
+        self.stub.start_media_check.assert_not_called()
+        self.stub._search_watched()  # at once again: not due
+        self.assertEqual(self.site.module.find.call_count, 1)
+        self.stub.media['watch']['imdb:tt15239678']['checked'] -= 3601
+        self.stub._search_watched()
+        self.assertEqual(self.site.module.find.call_count, 2)
+
+    def test_a_title_that_is_found_is_not_looked_for_again(self):
+        self.watch_entry()
+        self.stub._search_watched()
+        self.stub.media['watch']['imdb:tt15239678']['checked'] -= 10 ** 6
+        self.stub._search_watched()
+        self.assertEqual(self.site.module.find.call_count, 1)
+
+    def test_without_a_plugin_that_can_find_titles_the_time_is_still_noted(self):
+        self.stub.media_registry.finding = []
+        self.watch_entry()
+        self.stub._search_watched()
+        self.assertIsNotNone(self.stub.media['watch']['imdb:tt15239678']['checked'])
+
+    def test_a_title_stopped_while_the_sites_were_asked_is_left_stopped(self):
+        self.watch_entry()
+        self.site.module.find.side_effect = lambda **kw: (self.stub.media['watch'].clear(), 'https://fsonline.one/film/x')[1]
+        self.stub._search_watched()
+        self.assertEqual((self.stub.media['watch'], self.stub.media['sources']), ({}, {}))
+
+    def test_the_sites_are_asked_outside_the_media_lock(self):
+        self.watch_entry()
+        held = []
+        self.site.module.find.side_effect = lambda **kw: (held.append(self.stub._media_data_lock.locked()), None)[1]
+        self.stub._search_watched()
+        self.assertEqual(held, [False])
+
+    def test_only_one_search_runs_at_a_time(self):
+        self.watch_entry()
+        self.assertTrue(rt._watch_searching.acquire(blocking=False))
+        try:
+            self.stub._search_watched()
+        finally:
+            rt._watch_searching.release()
+        self.site.module.find.assert_not_called()
+
+    def test_a_search_that_breaks_releases_its_guard(self):
+        self.watch_entry()
+        with mock.patch.object(rt, 'find_source', side_effect=RuntimeError('boom')):
+            self.stub._search_watched()
+        self.assertTrue(rt._watch_searching.acquire(blocking=False))
+        rt._watch_searching.release()
+
+    def test_a_full_media_check_looks_for_the_titles_and_one_of_particular_sources_does_not(self):
+        self.stub._search_watched = mock.Mock()
+        self.stub._plan_media_downloads = mock.Mock()
+        self.stub._check_media(only=['x'])
+        self.stub._search_watched.assert_not_called()
+        self.stub._check_media()
+        self.stub._search_watched.assert_called_once_with()
+
+    # --- the pending rows and the right click
+
+    def test_a_title_being_looked_for_is_the_first_row_of_the_discovery_list_the_newest_first(self):
+        self.watch_entry()
+        self.stub.media['watch']['imdb:tt2'] = rt.new_watch_entry({'title': 'Later', 'imdb_id': 'tt2'}, 2000)
+        found = rt.new_watch_entry({'title': 'Found', 'imdb_id': 'tt3'}, 3000)
+        found['source'] = 'p:u'
+        self.stub.media['watch']['imdb:tt3'] = found
+        rt.update_media_cache(lambda c: rt.get_or_create_entry(c, {'title': 'Listed', 'imdb_id': 'tt9', 'type': 'movie', '_plugin': 'p', 'url': 'u', 'rank': 1}))
+        items = self.stub.get_discovery_items()
+        self.assertEqual([(i['title'], bool(i.get('watching'))) for i in items], [('Later', True), ('Dune: Part Two', True), ('Listed', False)])
+        self.assertEqual(self.stub.discovery_source_urls(), ['discovery:imdb:tt2', 'discovery:imdb:tt15239678', 'discovery:imdb:tt9'])
+
+    def test_a_dismissed_title_that_is_being_looked_for_still_shows_as_such(self):
+        self.watch_entry()
+        self.stub.state['media_discovery_seen'] = ['imdb:tt15239678']
+        self.assertEqual([i['title'] for i in self.stub.get_discovery_items()], ['Dune: Part Two'])
+
+    def test_a_right_click_on_a_title_being_looked_for_stops_it_and_it_never_comes_back(self):
+        self.watch_entry()
+        self.stub._on_discovery_dismiss(None, dict(self.ITEM, watching=True))
+        self.assertEqual(self.stub.media['watch'], {})
+        self.assertEqual(self.stub.state['media_discovery_seen'], ['imdb:tt15239678'])
+        self.assertEqual(self.stub.get_discovery_items(), [])
+
+    def test_a_right_click_on_a_listed_title_dismisses_it_for_good_and_does_not_watch_it(self):
+        rt.update_media_cache(lambda c: rt.get_or_create_entry(c, {'title': 'Nope', 'imdb_id': 'tt5', 'type': 'movie', '_plugin': 'p', 'url': 'u'}))
+        item = self.stub.get_discovery_items()[0]
+        self.stub._on_discovery_dismiss(None, item)
+        self.assertEqual(self.stub.get_discovery_items(), [])
+        self.assertEqual(self.stub.media['watch'], {})
+        # and the next time the chart lists it, it is not announced and not shown
+        rt.update_media_cache(lambda c: rt.get_new_items(c, [{'title': 'Nope', 'imdb_id': 'tt5', 'type': 'movie', '_plugin': 'p', 'url': 'u'}],
+                                                         set(self.stub.state['media_discovery_seen'])))
+        self.assertEqual(self.stub.get_discovery_items(), [])
+
+    # --- when the title has been found
+
+    def test_a_source_taken_away_takes_its_watch_record_with_it(self):
+        self.watch_entry(source='fsonline_one:https://x')
+        self.stub.media['watch']['imdb:other'] = rt.new_watch_entry({'title': 'Other'}, 1)
+        with self.stub._media_data_lock:
+            self.stub._forget_watch_of({'fsonline_one:https://x'})
+        self.assertEqual(list(self.stub.media['watch']), ['imdb:other'])
+
+    def test_a_film_added_by_a_click_is_a_film_to_the_rest_of_the_app(self):
+        self.stub.media['sources']['p:u'] = entry_with(ep('a', 1))
+        self.stub.media['sources']['p:u']['movie'] = True
+        self.load_media_movies.return_value = {'configured-film'}
+        self.assertTrue(self.stub._is_movie('p:u'))
+        self.assertTrue(self.stub._is_movie('configured-film'))
+        self.assertFalse(self.stub._is_movie('other'))
+        self.assertEqual(self.stub._movie_sources(), {'p:u', 'configured-film'})
+
+
+class FakeFinder:
+    def __init__(self, name, url):
+        self.name = name
+        self.module = mock.Mock()
+        self.module.find = mock.Mock(return_value=url)
+
+
+class TestTheOrderOfAddedSources(MediaCase):
+    def make(self):
+        stub = Stub()
+        self.video = self.touch('v.mkv')
+        stub.media['sources'] = {
+            'p:old-ready': entry_with(ep('a', 1), files={'a': {'video': self.video, 'subs': []}}),
+            'p:newer-downloading': entry_with(ep('b', 1)),
+            'p:newest-ready': entry_with(ep('c', 1), files={'c': {'video': self.video, 'subs': []}}),
+            'p:all-watched': entry_with(ep('d', 1), watched=['d'], files={'d': {'video': self.video, 'subs': []}}),
+        }
+        return stub
+
+    def test_added_sources_come_before_the_configured_ones_those_that_can_be_watched_first_then_the_newest(self):
+        self.sources = [(URL, None, None)]
+        stub = self.make()
+        stub.media['sources'][URL] = entry_with(ep('z', 1))
+        self.assertEqual(stub.media_source_urls(), ['p:newest-ready', 'p:old-ready', 'p:newer-downloading', URL])
+
+    def test_a_film_added_by_a_click_that_was_watched_and_is_due_is_removed_like_a_configured_one(self):
+        self.sources = []
+        stub = Stub()
+        stub.media['sources']['p:film'] = entry_with(ep('f', 1), watched=['f'], title='Film',
+                                                      files={'f': {'video': self.touch('film.mkv'), 'subs': []}})
+        stub.media['sources']['p:film']['movie'] = True
+        stub.media['sources']['p:film']['remove_at'] = time_now() - 10
+        stub._media_rows_removed = mock.Mock()
+        with mock.patch.object(rt, 'move_to_trash', return_value=True), mock.patch.object(rt, 'remove_media_sources'):
+            self.assertEqual(stub.remove_due_movies(), ['p:film'])
+        self.assertNotIn('p:film', stub.media['sources'])
+
+    def test_a_series_added_by_a_click_is_not_removed_as_a_film(self):
+        stub = Stub()
+        stub.media['sources']['p:show'] = entry_with(ep('s', 1), watched=['s'])
+        stub.media['sources']['p:show']['remove_at'] = time_now() - 10
+        stub._media_rows_removed = mock.Mock()
+        self.assertEqual(stub.remove_due_movies(), [])
+
+
+class TestFromAChartToASource(unittest.TestCase):
+    """The whole way, through the real plugin registry and two small plugins written here: a chart
+    that lists a title, a site that can find it, and what the app does with a left click."""
+    CHART_PLUGIN = (
+        "NAME = 'charts-t'\nORDER = 'newest'\n"
+        "def matches(source):\n    return source.startswith('https://charts.example/')\n"
+        "def list_episodes(source):\n"
+        "    return 'Chart', [{'id': 'tt15239678', 'title': 'Dune: Part Two', 'url': 'https://charts.example/title/tt15239678'},\n"
+        "                     {'id': 'tt2', 'title': 'Not On The Site', 'url': 'https://charts.example/title/tt2'}]\n")
+    SITE_PLUGIN = (
+        "NAME = 'site_t'\nORDER = 'oldest'\nPAGES = {'https://site.example/film/dune-2024': 'Dune: Part Two'}\n"
+        "def matches(source):\n    return 'site.example' in source\n"
+        "def find(title, year, imdb_id, kind):\n"
+        "    return next((url for url, name in PAGES.items() if name == title and kind == 'movie'), None)\n"
+        "def list_episodes(source):\n    return PAGES[source], [{'id': source, 'title': PAGES[source], 'ref': source}]\n"
+        "def resolve(episode):\n    return {'video': {'url': 'https://site.example/v.m3u8', 'ext': '.ts'}, 'subs': []}\n")
+
+    def setUp(self):
+        import tempfile
+        isolate_media_caches(self)
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        for name, code in (('charts_t.py', self.CHART_PLUGIN), ('site_t.py', self.SITE_PLUGIN)):
+            with open(os.path.join(folder, name), 'w') as f:
+                f.write(code)
+        self.stub = Stub()
+        self.stub.media_registry = rt.MediaSources(folder)
+        self.stub._plan_media_downloads = mock.Mock()
+        self.stub.start_media_check = lambda only=None: self.stub._check_media(only)
+        self.idle = []
+        self.settings = {'discovery_types': ('movies', 'series'), 'interval': 3600, 'ahead': 2, 'behind': None,
+                         'discovery': [('https://charts.example/movies', 'movie')]}
+        for name, value in (('load_media_settings', mock.Mock(side_effect=lambda: dict(self.settings))),
+                            ('load_media_sources', mock.Mock(return_value=[])),
+                            ('load_media_movies', mock.Mock(return_value=set())),
+                            ('save_state', mock.Mock()), ('save_media', mock.Mock()),
+                            ('refresh_metadata_cache', mock.Mock(return_value=0)),
+                            ('get_cached_metadata', mock.Mock(return_value=None))):
+            patcher = mock.patch.object(rt, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(rt.GLib, 'idle_add', side_effect=lambda f, *a: self.idle.append((f, a)))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_threads_now(self):
+        class Now:
+            def __init__(self, target=None, args=(), daemon=None):
+                self.target, self.args = target, args
+
+            def start(self):
+                self.target(*self.args)
+        patcher = mock.patch.object(rt.threading, 'Thread', Now)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_chart_lists_a_title_a_click_finds_it_on_the_site_and_it_becomes_a_film_source(self):
+        self.run_threads_now()
+        self.stub._fetch_discovery_bg()
+        items = self.stub.get_discovery_items()
+        self.assertEqual([(i['title'], i['imdb_id'], i['_plugin']) for i in items],
+                         [('Dune: Part Two', 'tt15239678', 'charts-t'), ('Not On The Site', 'tt2', 'charts-t')])
+
+        self.stub._on_discovery_row_activated(items[0])
+        source = 'site_t:https://site.example/film/dune-2024'
+        self.assertEqual(self.stub.media['watch']['imdb:tt15239678']['source'], source)
+        entry = self.stub.media['sources'][source]
+        self.assertEqual((entry['title'], entry['movie'], [e['id'] for e in entry['episodes']]),
+                         ('Dune: Part Two', True, ['https://site.example/film/dune-2024']))
+        self.assertEqual([i['title'] for i in self.stub.get_discovery_items()], ['Not On The Site'])  # it has left the list
+        self.assertIn(source, self.stub.media_source_urls())  # and is in the media list, on top
+        self.stub._plan_media_downloads.assert_called()  # the rules of [media] decide what is downloaded
+
+    def test_a_title_no_site_has_waits_in_the_list_marked_as_being_looked_for_and_is_found_when_a_site_gets_it(self):
+        self.run_threads_now()
+        self.stub._fetch_discovery_bg()
+        item = self.stub.get_discovery_items()[1]
+        self.stub._on_discovery_row_activated(item)
+        self.assertEqual([(i['title'], bool(i.get('watching'))) for i in self.stub.get_discovery_items()], [('Not On The Site', True), ('Dune: Part Two', False)])
+        site = self.stub.media_registry.by_name('site_t').module
+        site.PAGES['https://site.example/film/not-on-the-site'] = 'Not On The Site'
+        self.stub.media['watch']['imdb:tt2']['checked'] -= 3601  # a media check later
+        self.stub._check_media()
+        self.assertEqual(self.stub.media['watch']['imdb:tt2']['source'], 'site_t:https://site.example/film/not-on-the-site')
+        self.assertEqual([i['title'] for i in self.stub.get_discovery_items()], ['Dune: Part Two'])
+
+    def test_a_right_click_on_a_chart_title_dismisses_it_for_good(self):
+        self.stub._fetch_discovery_bg()
+        item = self.stub.get_discovery_items()[0]
+        self.stub._on_discovery_dismiss(None, item)
+        self.stub._fetch_discovery_bg()
+        self.stub._fetch_discovery_bg()
+        self.assertEqual([i['title'] for i in self.stub.get_discovery_items()], ['Not On The Site'])
+        self.assertEqual(self.stub.media['watch'], {})
+        self.assertEqual(self.stub.media['sources'], {})

@@ -126,6 +126,8 @@ def get_or_create_entry(cache: dict, item: dict) -> dict:
             'date': item.get('date', ''), 'quality': item.get('quality'), 'first_seen': now,
         }
     entry['last_seen'] = now
+    if item.get('rank'):
+        entry['rank'] = item['rank']  # its place in the chart it was last seen in
     if url:
         entry['urls'][plugin] = url
     for field in ('image', 'genre', 'date'):
@@ -137,11 +139,13 @@ def get_or_create_entry(cache: dict, item: dict) -> dict:
 
 
 def get_new_items(cache: dict, items: list[dict], seen_set: set[str]) -> list[dict]:
-    """The items whose key is not in `seen_set` (not dismissed); every item is put in
-    the cache, a dismissed one too, so its newest URLs are kept."""
+    """The items that are new: not in the cache before this call and not dismissed (`seen_set`). An
+    item that is still on its chart, or came back to it, is not new again at every check. Every item
+    is put in the cache, a dismissed one too, so its newest URLs are kept."""
     new_items = []
     for item in items:
-        if _cache_key(item) not in seen_set:
+        key = _cache_key(item)
+        if key not in cache and key not in seen_set:
             new_items.append(item)
         get_or_create_entry(cache, item)
     return new_items
@@ -156,10 +160,26 @@ def is_seen(seen_set: set[str], item: dict) -> bool:
     return _cache_key(item) in seen_set
 
 
-def get_all_cached_items(cache: dict) -> list[dict]:
-    """Every cached item in the shape the list shows, the newest first."""
+def mark_listing(cache: dict, items: list[dict], scopes: set[tuple[str, str]]):
+    """After fetches that gave `items`: `scopes` are the (plugin, 'movie' or 'series') pairs whose
+    fetch gave something. An entry of such a pair is `listed` if one of the items is it and not
+    if none is (it has dropped off the chart); the other entries are not touched. A fetch that
+    gave no item at all is not a scope: that is a page that could not be read as much as an
+    empty chart."""
+    now_listed = {_cache_key(item) for item in items}
+    for key, entry in cache.items():
+        if any((plugin, entry.get('type', 'movie')) in scopes for plugin in entry.get('urls') or {}):
+            entry['listed'] = key in now_listed
+
+
+def get_all_cached_items(cache: dict, only_listed: bool = True) -> list[dict]:
+    """Every cached item in the shape the list shows (not the ones that dropped off their chart,
+    unless `only_listed` is false): by its place in its chart first (two charts' titles of the same
+    place in the order they were first filed), those with none after, the newest first."""
     items = []
     for key, entry in cache.items():
+        if only_listed and not entry.get('listed', True):
+            continue
         urls = entry.get('urls') or {}
         items.append({
             'id': next(iter(urls.values()), key),
@@ -168,8 +188,11 @@ def get_all_cached_items(cache: dict) -> list[dict]:
             'image': entry.get('image'), 'genre': entry.get('genre') or [], 'quality': entry.get('quality'),
             'tmdb_id': entry.get('tmdb_id'), 'imdb_id': entry.get('imdb_id'),
             'urls': urls, '_cache_key': key, 'first_seen': entry.get('first_seen', ''),
+            'rank': entry.get('rank'), 'listed': entry.get('listed', True),
         })
-    items.sort(key=lambda item: item['date'] or item['first_seen'], reverse=True)
+    ranked = sorted((i for i in items if i['rank'] is not None), key=lambda item: item['rank'])  # ties keep the order filed in
+    unranked = sorted((i for i in items if i['rank'] is None), key=lambda item: item['date'] or item['first_seen'], reverse=True)
+    items = ranked + unranked
     return items
 
 
@@ -198,7 +221,7 @@ def sync_metadata_ids(cache: dict, seen_set: set[str], lookup) -> tuple[dict, se
         else:
             for plugin, url in entry.get('urls', {}).items():
                 target['urls'].setdefault(plugin, url)
-            for field in ('image', 'genre', 'date', 'year', 'quality'):
+            for field in ('image', 'genre', 'date', 'year', 'quality', 'rank'):
                 if entry.get(field) and not target.get(field):
                     target[field] = entry[field]
             target['first_seen'] = min(target.get('first_seen', ''), entry.get('first_seen', '')) or target.get('first_seen', '')
