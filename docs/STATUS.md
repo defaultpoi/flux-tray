@@ -8,7 +8,7 @@ the tests' place.
 | What | How | Result |
 |------|-----|--------|
 | The 1233 tests the code had at baseline commit `eb73c7d` | real GTK under Xvfb, and GTK stubbed | pass, before any change |
-| Everything now | the same two modes, on Python 3.14.6 with PyGObject 3.50.2, GTK 3.24 (1623 tests); `pyflakes` clean | pass |
+| Everything now | the same two modes, on Python 3.14.6 with PyGObject 3.50.2, GTK 3.24 (1721 tests); `pyflakes` clean | pass |
 | Popup look and click hooks | `test_golden_popup`, two scenarios; identical on three runs and in the dark and default theme; a changed header and a changed colour digit both fail it | pass |
 | Each hardening change | its new tests run against the old code | fail there, pass now |
 | yt-dlp and ffmpeg | the real binaries in the tests that use them (ffmpeg 6.1) | pass |
@@ -20,6 +20,8 @@ the tests' place.
 | CI on GitHub | `.github/workflows/ci.yml`: uv, Python 3.14, PyGObject built from source, both test modes; runs for commits `ae91f8a`, `36aed96` and `e50d623` (on `next` and on `main`) | pass |
 
 ## What was NOT checked
+
+IMDb's chart pages (`imdb_charts.py` was run on fake pages only), `find` against the live fsonline sitemaps (it reads them the way the plugin's discovery does: the `page=` parameter, and whether the slugs carry the titles IMDb gives, are assumptions), OMDb answering with a real key (its error texts "Movie not found!", "Incorrect IMDb ID.", "Request limit reached!" are taken from its documentation), the day OMDb counts its limit by (UTC is used), a left click on a real desktop.
 
 TMDb and OMDb answering (the lookups are tested against a fake network with the replies' shape taken from their documentation; nothing was asked of the real services, and a TMDb *API Read Access Token* is what `tmdb_key` takes), a stream surviving the app's exit (a Python child with a closed log pipe was seen to; streamlink itself was not), the licence of MeteoAlarm's wind and rain icons, mpv other than 0.37 and 0.41.0.
 
@@ -45,6 +47,7 @@ differ in the classes it adds.
 - Fully watched sources can be taken off the Media list from a right-click menu (one, or all of them); not tried on a real desktop yet. `.coverage` is no longer tracked.
 - Discovery and the metadata behind it (commit `28cd916`; first written in `18a64e2` with Claude Code, reworked here): plugins' `fetch_discovery` filed in one cache keyed by TMDb id, IMDb id, or title, year and type; the hover preview; TMDb and OMDb lookups. Reworked because the first version had no tests and: raised `NameError` on every lookup failure and then cached the title as "not found" for a week; gave the same film from two sites two entries (the discovery date stood in for the year); never re-keyed an entry (a size comparison that could not be true) and wrote `state.json` from a thread over the app's own copy; asked TMDb's `/find` for an IMDb id from a TMDb id (it cannot) so OMDb never enriched anything; did its disk and network work on the main loop; and added two hover handlers to every media row at every download tick. See README (Discovery) and F40, F41.
 - The forecast-day alerts of `ae931a9` are back: `18a64e2` had been made from its parent, so the push replaced them with a second, weaker version of the feature (its alert-to-day mapper needed an `onset` the feed code never returned, so no day was ever marked). What was new in `18a64e2` and kept: the alert's own text from the CAP document (https meteoalarm.org only, 1 MB, cached) and a sentence built from the entry when it is missing.
+- Discovery from IMDb's charts, the watch list and OMDb's daily limit (F45-F47). `discovery=` names the sources of the discovery list (charts, by the address their plugin matches); their titles come with IMDb ids, in chart order, and OMDb is asked for each by that id (one exact request, at most `omdb_daily_limit=` a day, the count in `omdb_quota.json`); `tmdb_key` is ignored unless `tmdb=on`. A left click puts the title on the watch list in `media.json`; the plugins' `find(title, year, imdb_id, kind)` are asked at every media check until one has it, and it then becomes a source read at every check (sources added by a click were only read once, at the click: a series was never followed), downloaded by the rules of `[media]`, a film removed after it is watched like the configured ones, and listed on top of the media list. A right click dismisses a title for good. Found while doing this: `get_new_items` called every undismissed item new at every check (with a chart, the popup would have opened with a sound every hour); the media check read the network while holding the media lock; the prefix of `imdb-charts:moviemeter` is cut off before the plugin sees it, so the plugin's own handling of that form could never have worked.
 - Live-channel keys: Right and Left cycle from the channel playing (the first version indexed a list of configured channels, not the live ones) through an mpv input section held over the listener's own connection (mpv drops a section with the client that defined it), instead of `keybind` set to an empty command on removal. `_strip_emojis` no longer deletes CJK, Hangul or fullwidth text.
 - News entries a feed edits come back once as `LIVE` items (`18a64e2`), now with a baseline on the first update time, at most one announcement an hour per entry, an unread item replaced in place, and the second sound only for items really added; undocumented before, README and F42 now say it.
 - The hazard icons on the tray icon: one cached parser and drawer (there were two, the first dead), the thunderstorm and flood shapes drawn for the app (the ones in `18a64e2` were not MeteoAlarm's and not recognisable), a test that every path parses and stays inside its viewBox. With nothing unread the icon alternates between the temperature and a **white** hazard icon: the severity colour of `ac0c82d` is gone from the icon, and the severity shows in the rate only (README says so).
@@ -93,6 +96,8 @@ Not taken, deliberately:
 - Its dropping of archive.org.
 
 ## Open items found, not changed
+
+- Only the fsonline plugin has a `find`; sitefilme's has none (it has no search that is known), so a title only sitefilme has is never found. A site that names its pages by the Romanian title will not match an English chart title by its address.
 
 - The tray icon no longer shows an alert's severity colour (above): wanted?
 - sitefilme's discovery items are dated the day they were fetched, and fsonline's feed is read for the last 24 hours only: a check that comes more than a day after the last (the app off, or suspended) misses what appeared in between. The plugins are outside this repository.
