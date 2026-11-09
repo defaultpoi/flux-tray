@@ -21,7 +21,7 @@ the tests' place.
 
 ## What was NOT checked
 
-IMDb's chart pages (`imdb_charts.py` was run on fake pages only), `find` against the live fsonline sitemaps (it reads them the way the plugin's discovery does: the `page=` parameter, and whether the slugs carry the titles IMDb gives, are assumptions), OMDb answering with a real key (its error texts "Movie not found!", "Incorrect IMDb ID.", "Request limit reached!" are taken from its documentation), the day OMDb counts its limit by (UTC is used), a left click on a real desktop.
+IMDb's chart pages (`imdb_charts.py` was run on fake pages only), `find` against the live fsonline site (its address pattern `<title>-<year>-online-subtitrat` and the IMDb id in `window.DFO_COMMUNITY_V5` were confirmed from one real page, "2012", which the plugin's tests use; the sitemap's `page=` parameter, which is the fallback, is not), OMDb answering with a real key (its error texts "Movie not found!", "Incorrect IMDb ID.", "Request limit reached!" are taken from its documentation), the day OMDb counts its limit by (UTC is used), a left click on a real desktop.
 
 TMDb and OMDb answering (the lookups are tested against a fake network with the replies' shape taken from their documentation; nothing was asked of the real services, and a TMDb *API Read Access Token* is what `tmdb_key` takes), a stream surviving the app's exit (a Python child with a closed log pipe was seen to; streamlink itself was not), the licence of MeteoAlarm's wind and rain icons, mpv other than 0.37 and 0.41.0.
 
