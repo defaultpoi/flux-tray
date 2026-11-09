@@ -97,10 +97,15 @@ def ensure_config():
             "# screen=<width>x<height> the video size to download: the best that fits it, or the\n"
             "# smallest there is when none does (default: the monitor's own size)\n"
             "# ytdlp=<arguments> added to every yt-dlp run, e.g. -S res:720 --cookies-from-browser firefox\n"
+            "# discovery=<source> [movie|series], ...: what the discovery list shows, e.g.\n"
+            "# discovery=https://www.imdb.com/chart/moviemeter/ movie, https://www.imdb.com/chart/tvmeter/ series\n"
+            "# (default: what the plugins that have a fetch_discovery function find on their sites)\n"
             "# discovery_types=movies,series (comma-separated; default: movies,series)\n"
             "# tmdb_key=<API Read Access Token> (themoviedb.org): posters, ratings and ids for the\n"
             "# discovery list and the hover preview\n"
             "# omdb_key=<key> (omdbapi.com): adds the IMDb rating; alone, it finds titles by name\n"
+            "# omdb_daily_limit=<n> requests to OMDb a day (default 1000, the free key's)\n"
+            "# tmdb=on: lets the tmdb_key be used (default: off, tmdb_key is ignored)\n"
             "# One source per line: url|display name (optional)|order (optional)\n"
             "#   url: an archive.org collection or item (https://archive.org/details/...),\n"
             "#        a YouTube channel, playlist or video, or any podcast / video RSS or Atom feed.\n"
@@ -599,7 +604,7 @@ DEFAULT_MEDIA_GRACE_HOURS = 24
 MAX_MEDIA_BEHIND = 1000
 MIN_MEDIA_SLEEP_MINUTES = 5
 _MEDIA_SETTINGS = ('path', 'interval', 'ahead', 'behind', 'grace', 'sleep', 'ytdlp', 'screen', 'omdb_key', 'tmdb_key',
-                   'discovery_types')
+                   'tmdb', 'omdb_daily_limit', 'discovery', 'discovery_types')
 _MEDIA_SOURCE_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.\-_]*:\S')  # https://..., yt-dlp:https://..., mysite:show-1
 
 
@@ -617,7 +622,7 @@ def load_media_settings():
     a watched movie waits before it is removed), 'sleep' (seconds without any key or
     mouse input after which playback is paused, 0 for never), 'ytdlp' (extra yt-dlp
     arguments, a list), 'screen' ((width, height) or None for the monitor's own),
-    'omdb_key', 'tmdb_key', 'discovery_types'} from [media], defaults for anything missing or unusable."""
+    'omdb_key', 'tmdb_key' (None unless `tmdb=on`), 'omdb_daily_limit', 'discovery' ([(source, 'movie' or\n    'series')], empty for what the plugins' fetch_discovery find), 'discovery_types'} from [media], defaults for\n    anything missing or unusable."""
     path = _media_setting('path') or DEFAULT_MEDIA_PATH
     try:
         minutes = max(MIN_MEDIA_CHECK_MINUTES, int(_media_setting('interval')))
@@ -653,8 +658,47 @@ def load_media_settings():
         discovery_types = ('movies', 'series')
     return {'path': os.path.expanduser(path), 'interval': minutes * 60, 'ahead': ahead, 'behind': behind,
             'grace': int(grace_hours * 3600), 'sleep': sleep_minutes * 60, 'ytdlp': ytdlp, 'screen': screen,
-            'omdb_key': _media_setting('omdb_key'), 'tmdb_key': _media_setting('tmdb_key'),
+            'omdb_key': _media_setting('omdb_key'), 'tmdb_key': tmdb_key(),
+            'omdb_daily_limit': omdb_daily_limit(), 'discovery': _discovery_sources(_media_setting('discovery')),
             'discovery_types': discovery_types}
+
+
+DEFAULT_OMDB_DAILY_LIMIT = 1000  # what a free OMDb key may ask a day
+
+
+def omdb_daily_limit():
+    """How many requests a day OMDb may be asked (`omdb_daily_limit=`; 1000, a free key's, if unset or unusable)."""
+    try:
+        return max(0, int(_media_setting('omdb_daily_limit')))
+    except (TypeError, ValueError):
+        return DEFAULT_OMDB_DAILY_LIMIT
+
+
+def tmdb_key():
+    """The TMDb token of [media], or None: it is only used with `tmdb=on`, so that a key that
+    is in the file can be switched off without taking it out."""
+    if (_media_setting('tmdb') or '').strip().lower() not in ('on', 'yes', 'true', '1'):
+        return None
+    return _media_setting('tmdb_key')
+
+
+def _discovery_sources(value):
+    """[(source, kind)] from the `discovery=` value: sources separated by commas, each
+    followed, if it is not a movie, by `series` (`movie` may be written too). A source
+    that is there twice counts once."""
+    sources, seen = [], set()
+    for part in (value or '').split(','):
+        words = part.split()
+        if not words:
+            continue
+        kind = 'movie'
+        if len(words) > 1 and words[-1].lower() in ('movie', 'series'):
+            kind = words.pop().lower()
+        source = ' '.join(words)
+        if source not in seen:
+            seen.add(source)
+            sources.append((source, kind))
+    return sources
 
 
 

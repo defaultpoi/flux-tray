@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from .config import _media_setting
+from .config import _media_setting, omdb_daily_limit, tmdb_key
 from .constants import CONFIG_DIR
 from .fileutil import write_atomic
 from .log import _log
@@ -28,12 +28,13 @@ from .log import _log
 
 METADATA_CACHE_FILE = Path(CONFIG_DIR) / 'metadata_cache.json'
 POSTER_CACHE_DIR = Path(CONFIG_DIR) / 'posters'
+OMDB_QUOTA_FILE = Path(CONFIG_DIR) / 'omdb_quota.json'
 METADATA_CACHE_TTL_DAYS = 30
 POSTER_CACHE_TTL_DAYS = 90
 # Only a service's own "not found" is cached, for this many days
 NEGATIVE_CACHE_TTL_DAYS = 7
-# Most titles looked up per refresh cycle
-MAX_API_CALLS_PER_CYCLE = 10
+# Most titles looked up per refresh cycle (OMDb's daily limit is what really bounds them)
+MAX_API_CALLS_PER_CYCLE = 50
 MAX_REPLY_BYTES = 2_000_000
 MAX_POSTER_BYTES = 5_000_000
 
@@ -114,13 +115,15 @@ def _update_metadata_cache(change):
         _write_store(METADATA_CACHE_FILE, cache)
 
 
-def _make_negative_key(title, year, media_type):
+def _make_negative_key(title, year, media_type, imdb_id=None):
+    if imdb_id:
+        return f'neg:imdb:{imdb_id}'
     clean_title, _ = _parse_title_year(title)
     return f'neg:{clean_title.lower()}:{year or ""}:{media_type}'
 
 
-def _mark_negative_cache(title, year, media_type):
-    neg_key = _make_negative_key(title, year, media_type)
+def _mark_negative_cache(title, year, media_type, imdb_id=None):
+    neg_key = _make_negative_key(title, year, media_type, imdb_id)
     _update_metadata_cache(lambda c: c.__setitem__(neg_key, {'negative': True, 'cached_at': time.time()}))
 
 
@@ -189,6 +192,43 @@ def get_cached_poster(title, media_type='movie', imdb_id=None, tmdb_id=None):
         if path and os.path.exists(path):
             return path
     return None
+
+
+# --- OMDb's daily limit -------------------------------------------------------------
+
+
+def _omdb_day():
+    """The day the limit is counted by: UTC's (OMDb does not say whose day its own is)."""
+    return time.strftime('%Y-%m-%d', time.gmtime())
+
+
+def _omdb_used_today():
+    data = _read_store(OMDB_QUOTA_FILE)
+    used = data.get('used')
+    return used if data.get('day') == _omdb_day() and isinstance(used, int) else 0
+
+
+def omdb_requests_left():
+    """How many more requests today's limit lets OMDb be asked."""
+    with _cache_lock:
+        return max(0, omdb_daily_limit() - _omdb_used_today())
+
+
+def _omdb_spend():
+    """Counts a request against today's limit and saves the count (so a restart does not
+    forget it). False, with nothing counted, when the limit has been reached."""
+    with _cache_lock:
+        used = _omdb_used_today()
+        if used >= omdb_daily_limit():
+            return False
+        _write_store(OMDB_QUOTA_FILE, {'day': _omdb_day(), 'used': used + 1})
+        return True
+
+
+def _omdb_used_up():
+    """OMDb says the limit has been reached, whatever the count was: no more today."""
+    with _cache_lock:
+        _write_store(OMDB_QUOTA_FILE, {'day': _omdb_day(), 'used': max(omdb_daily_limit(), _omdb_used_today())})
 
 
 # --- Titles ------------------------------------------------------------------------
@@ -263,6 +303,8 @@ def _omdb_get(api_key, **params):
     LookupFailed if it cannot be asked (an unusable or used-up key answers 200 with an
     Error text, which is not a "not found"). The key is in the address OMDb is
     asked, so no address is ever logged."""
+    if not _omdb_spend():
+        raise LookupFailed('OMDb: the daily limit is reached')
     try:
         data = _get_json(OMDB_BASE + '?' + urllib.parse.urlencode({'apikey': api_key, **params}),
                          {'User-Agent': METADATA_USER_AGENT})
@@ -272,8 +314,10 @@ def _omdb_get(api_key, **params):
         raise LookupFailed('OMDb: unexpected reply')
     if data.get('Response') != 'True':
         error = str(data.get('Error', ''))
-        if 'not found' in error.lower():
-            return None
+        if 'not found' in error.lower() or 'incorrect imdb id' in error.lower():
+            return None  # OMDb's way of saying it has nothing under that title or id
+        if 'limit' in error.lower():
+            _omdb_used_up()
         raise LookupFailed(f'OMDb: {error or "no reply"}')
     return data
 
@@ -393,11 +437,21 @@ def get_tmdb_details(tmdb_id, media_type='movie', api_key=None):
 # --- Looking a title up --------------------------------------------------------------
 
 
-def _lookup(title, year, media_type, omdb_key, tmdb_key):
-    """The metadata of a title from the services, or None if they have none. Raises
+def _lookup(title, year, media_type, omdb_key, tmdb_key, imdb_id=None):
+    """The metadata of a title from the services, or None if they have none. An IMDb id
+    is asked of OMDb first: one exact request, and nothing else is needed. Raises
     LookupFailed when no service could be asked and none had an answer."""
     result = None
     failure = None
+    omdb_said_none = False
+    if imdb_id and omdb_key:
+        try:
+            result = search_omdb_by_id(imdb_id, media_type, omdb_key)
+            omdb_said_none = result is None
+        except LookupFailed as e:
+            failure = e
+        if result:
+            return result
     if tmdb_key:
         try:
             result = search_tmdb(title, year, media_type, tmdb_key)
@@ -413,7 +467,7 @@ def _lookup(title, year, media_type, omdb_key, tmdb_key):
                             result[field] = details[field]
         except LookupFailed as e:
             failure = e
-    if result is None and omdb_key:
+    if result is None and omdb_key and not omdb_said_none and not (imdb_id and failure):
         try:
             result = search_omdb(title, year, media_type, omdb_key)
         except LookupFailed as e:
@@ -432,49 +486,55 @@ def _lookup(title, year, media_type, omdb_key, tmdb_key):
     return result
 
 
-def get_metadata(title, year=None, media_type='movie', omdb_key=None, tmdb_key=None):
-    """Metadata for a title: from the cache, else from TMDb (search, details), with
-    OMDb adding the IMDb rating and more (and answering alone when there is no TMDb
-    key). The poster is fetched too. None if there is none, with a service's own
-    "no such title" remembered for NEGATIVE_CACHE_TTL_DAYS; a lookup that could not
-    be made is not remembered, nor is a missing key."""
+def get_metadata(title, year=None, media_type='movie', omdb_key=None, tmdb_key=None, imdb_id=None):
+    """Metadata for a title: from the cache, else from the services (see _lookup; TMDb's
+    search and details, OMDb for the IMDb rating and more, or alone). The poster is
+    fetched too. None if there is none, with a service's own "no such title" remembered
+    for NEGATIVE_CACHE_TTL_DAYS; a lookup that could not be made (the OMDb daily limit
+    included) is not remembered, nor is a missing key."""
     clean_title, parsed_year = _parse_title_year(title)
     year = year or parsed_year
     key = _make_key(clean_title, year, media_type)
     cached = _load_metadata_cache()
-    if key in cached:
-        return cached[key]
-    if not (omdb_key or tmdb_key) or _make_negative_key(clean_title, year, media_type) in cached:
+    for known in (f'imdb:{imdb_id}' if imdb_id else None, key):
+        if known and known in cached:
+            return cached[known]
+    if not (omdb_key or tmdb_key) or _make_negative_key(clean_title, year, media_type, imdb_id) in cached:
         return None
     try:
-        result = _lookup(clean_title, year, media_type, omdb_key, tmdb_key)
+        result = _lookup(clean_title, year, media_type, omdb_key, tmdb_key, imdb_id)
     except LookupFailed as e:
         _log(f'metadata lookup of {clean_title!r} failed: {e}')
         return None
     if result is None:
-        _mark_negative_cache(clean_title, year, media_type)
+        _mark_negative_cache(clean_title, year, media_type, imdb_id)
         return None
     result['cached_at'] = time.time()
-    imdb_id, tmdb_id = result.get('imdb_id'), result.get('tmdb_id')
+    found_imdb, tmdb_id = result.get('imdb_id'), result.get('tmdb_id')
     if result.get('poster'):
-        _cache_poster_image(result['poster'], key, imdb_id=imdb_id, tmdb_id=tmdb_id)
+        _cache_poster_image(result['poster'], key, imdb_id=found_imdb, tmdb_id=tmdb_id)
+    # the title's own key needs a year: without one two films of a name would share it
+    title_key = _make_key(clean_title, year or (result.get('year') or '')[:4] or None, media_type)
 
     def remember(cache):
-        cache[key] = result
-        if imdb_id:
-            cache[f'imdb:{imdb_id}'] = result
+        if not (imdb_id and title_key.endswith(':unknown')):
+            cache[title_key] = result
+        if found_imdb:
+            cache[f'imdb:{found_imdb}'] = result
         if tmdb_id:
             cache[f'tmdb:{tmdb_id}'] = result
     _update_metadata_cache(remember)
     return result
 
 
-def refresh_metadata_cache(titles, media_types=None, omdb_key=None, tmdb_key=None):
+def refresh_metadata_cache(titles, media_types=None, omdb_key=None, tmdb_key=None, imdb_ids=None):
     """Looks up the titles that have no cached answer (a thread's job: it asks the
     network). `titles` is a list of strings, `media_types` a list of the same length or
-    one type ('movie' or 'series'). Titles with a year are tried first, and at most
-    MAX_API_CALLS_PER_CYCLE are; a TMDb rate limit ends the cycle. Returns how many
-    titles got metadata."""
+    one type ('movie' or 'series'), `imdb_ids` a list of the same length (None or '' for
+    a title without one). Titles with an IMDb id are tried first (one exact request each),
+    then those with a year, and at most MAX_API_CALLS_PER_CYCLE are. A TMDb rate limit
+    ends the cycle, and so does OMDb's daily limit when OMDb is all there is. Returns how
+    many titles got metadata."""
     omdb_key = omdb_key if omdb_key is not None else load_omdb_api_key()
     tmdb_key = tmdb_key if tmdb_key is not None else load_tmdb_api_key()
     if not omdb_key and not tmdb_key:
@@ -483,20 +543,24 @@ def refresh_metadata_cache(titles, media_types=None, omdb_key=None, tmdb_key=Non
         media_types = ['movie'] * len(titles)
     elif isinstance(media_types, str):
         media_types = [media_types] * len(titles)
+    imdb_ids = list(imdb_ids) if imdb_ids else [None] * len(titles)
     items = []
-    for title, mtype in zip(titles, media_types):
+    for title, mtype, imdb_id in zip(titles, media_types, imdb_ids):
         clean_title, year = _parse_title_year(title)
-        items.append((year is not None, clean_title, year, mtype))
-    items.sort(key=lambda item: not item[0])  # stable: titles with a year first
+        items.append((bool(imdb_id), year is not None, clean_title, year, mtype, imdb_id or None))
+    items.sort(key=lambda item: (not item[0], not item[1]))  # stable: an id first, then a year
     found = tried = 0
-    for _has_year, clean_title, year, mtype in items:
+    for _has_id, _has_year, clean_title, year, mtype, imdb_id in items:
         if tried >= MAX_API_CALLS_PER_CYCLE or time.time() < _tmdb_rate_limit_until:
             break
+        if not tmdb_key and omdb_requests_left() <= 0:
+            break
         cache = _load_metadata_cache()
-        if _make_key(clean_title, year, mtype) in cache or _make_negative_key(clean_title, year, mtype) in cache:
+        if (_make_key(clean_title, year, mtype) in cache or (imdb_id and f'imdb:{imdb_id}' in cache)
+                or _make_negative_key(clean_title, year, mtype, imdb_id) in cache):
             continue
         tried += 1
-        if get_metadata(clean_title, year, mtype, omdb_key, tmdb_key):
+        if get_metadata(clean_title, year, mtype, omdb_key, tmdb_key, imdb_id):
             found += 1
     return found
 
@@ -578,5 +642,6 @@ def load_omdb_api_key():
 
 
 def load_tmdb_api_key():
-    """tmdb_key (an API Read Access Token) from [media] of config.conf, or None."""
-    return _media_setting('tmdb_key')
+    """tmdb_key (an API Read Access Token) from [media] of config.conf, or None: it is
+    only used with `tmdb=on` there."""
+    return tmdb_key()

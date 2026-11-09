@@ -42,6 +42,7 @@ def isolate_media_caches(case):
         rt,
         METADATA_CACHE_FILE=folder / 'metadata_cache.json',
         POSTER_CACHE_DIR=folder / 'posters',
+        OMDB_QUOTA_FILE=folder / 'omdb_quota.json',
         CACHE_FILE=folder / 'media_cache.json',
     )
     patcher.start()

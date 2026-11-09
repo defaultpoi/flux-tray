@@ -556,6 +556,34 @@ class TestMediaConfig(TmpConfigCase):
         self.assertEqual(self.setting('grace', '1.5'), 5400)
         self.assertEqual(self.setting('grace', '-4'), 0)
 
+    def test_discovery_lists_sources_each_a_movie_unless_it_says_series(self):
+        self.assertEqual(self.setting('discovery', ''), [])
+        self.assertEqual(self.setting('discovery', 'https://www.imdb.com/chart/moviemeter/ movie,  https://www.imdb.com/chart/tvmeter/ series'),
+                         [('https://www.imdb.com/chart/moviemeter/', 'movie'), ('https://www.imdb.com/chart/tvmeter/', 'series')])
+        self.assertEqual(self.setting('discovery', 'a:b, c:d SERIES , , a:b movie'), [('a:b', 'movie'), ('c:d', 'series')])
+        self.assertEqual(self.setting('discovery', 'imdb-charts:tvmeter'), [('imdb-charts:tvmeter', 'movie')])
+
+    def test_the_tmdb_key_is_ignored_unless_tmdb_is_on(self):
+        self.conf('[media]\ntmdb_key=SECRET\n')
+        self.assertIsNone(rt.load_media_settings()['tmdb_key'])
+        self.assertIsNone(rt.load_tmdb_api_key())
+        for on in ('on', 'ON', 'yes', 'true', '1'):
+            self.conf(f'[media]\ntmdb_key=SECRET\ntmdb={on}\n')
+            self.assertEqual((rt.load_media_settings()['tmdb_key'], rt.load_tmdb_api_key()), ('SECRET', 'SECRET'), on)
+        self.conf('[media]\ntmdb_key=SECRET\ntmdb=off\n')
+        self.assertIsNone(rt.load_tmdb_api_key())
+
+    def test_a_setting_line_is_not_taken_for_a_source(self):
+        self.conf('[media]\ndiscovery=https://www.imdb.com/chart/moviemeter/ movie\ntmdb=on\nomdb_daily_limit=500\nhttps://example.com/feed.xml\n')
+        self.assertEqual([url for url, _n, _o in rt.load_media_sources()], ['https://example.com/feed.xml'])
+
+    def test_the_omdb_daily_limit_defaults_to_a_thousand(self):
+        self.assertEqual(self.setting('omdb_daily_limit', ''), 1000)
+        self.assertEqual(self.setting('omdb_daily_limit', 'lots'), 1000)
+        self.assertEqual(self.setting('omdb_daily_limit', '250'), 250)
+        self.assertEqual(self.setting('omdb_daily_limit', '0'), 0)
+        self.assertEqual(self.setting('omdb_daily_limit', '-5'), 0)
+
     def test_sleep_is_minutes_without_input_and_off_unless_given(self):
         self.assertEqual(self.setting('sleep', ''), 0)
         self.assertEqual(self.setting('sleep', 'x'), 0)
@@ -589,7 +617,7 @@ class TestMediaConfig(TmpConfigCase):
         self.assertEqual(rt.load_media_settings(),
                          {'path': os.path.expanduser('~/videos'), 'interval': 3600, 'ahead': 2, 'behind': None,
                           'grace': 24 * 3600, 'sleep': 0, 'ytdlp': [], 'screen': None,
-                          'omdb_key': None, 'tmdb_key': None, 'discovery_types': ('movies', 'series')})
+                          'omdb_key': None, 'tmdb_key': None, 'omdb_daily_limit': 1000, 'discovery': [], 'discovery_types': ('movies', 'series')})
         self.assertEqual(rt.load_media_sources(), [])
 
     def test_defaults_without_a_config_file(self):
@@ -600,7 +628,7 @@ class TestMediaConfig(TmpConfigCase):
         self.conf('[media]\npath=~/shows\ninterval=30\nahead=4\n')
         self.assertEqual(rt.load_media_settings(), {'path': os.path.expanduser('~/shows'), 'interval': 1800, 'ahead': 4,
                                                     'behind': None, 'grace': 24 * 3600, 'sleep': 0, 'ytdlp': [], 'screen': None,
-                                                    'omdb_key': None, 'tmdb_key': None, 'discovery_types': ('movies', 'series')})
+                                                    'omdb_key': None, 'tmdb_key': None, 'omdb_daily_limit': 1000, 'discovery': [], 'discovery_types': ('movies', 'series')})
 
     def test_the_interval_has_a_minimum_and_ahead_a_range(self):
         self.conf('[media]\ninterval=1\nahead=500\n')

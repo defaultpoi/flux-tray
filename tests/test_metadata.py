@@ -241,7 +241,7 @@ class TestRefreshing(MetadataCase):
                                              c.__setitem__('neg:gone:2001:movie', {'negative': True, 'cached_at': time.time()})))
         asked = []
 
-        def fake(title, year, mtype, omdb_key, tmdb_key):
+        def fake(title, year, mtype, omdb_key, tmdb_key, imdb_id=None):
             asked.append((title, year))
             return {'title': title}
         with mock.patch.object(rt, 'get_metadata', side_effect=fake):
@@ -251,7 +251,7 @@ class TestRefreshing(MetadataCase):
 
     def test_a_cycle_is_at_most_so_many_lookups(self):
         with mock.patch.object(rt, 'get_metadata', return_value=None) as get:
-            rt.refresh_metadata_cache([f'Title {i} (2000)' for i in range(25)], 'movie', tmdb_key='T')
+            rt.refresh_metadata_cache([f'Title {i} (2000)' for i in range(75)], 'movie', tmdb_key='T')
         self.assertEqual(get.call_count, rt.MAX_API_CALLS_PER_CYCLE)
 
     def test_a_rate_limit_ends_the_cycle(self):
@@ -266,9 +266,141 @@ class TestRefreshing(MetadataCase):
 
     def test_the_series_and_movie_types_go_with_their_titles(self):
         types = []
-        with mock.patch.object(rt, 'get_metadata', side_effect=lambda t, y, m, *a: types.append(m)):
+        with mock.patch.object(rt, 'get_metadata', side_effect=lambda t, y, m, *a, **k: types.append(m)):
             rt.refresh_metadata_cache(['A (2000)', 'B (2001)'], ['movie', 'series'], tmdb_key='T')
         self.assertEqual(sorted(types), ['movie', 'series'])
+
+
+class TestLookingATitleUpByItsImdbId(MetadataCase):
+    CHART_OMDB = dict(OMDB_HIT, imdbID='tt15239678', Title='Dune: Part Two', Year='2024', Poster='https://m.media-amazon.com/p.jpg')
+
+    def test_an_imdb_id_is_one_exact_request_to_omdb_and_nothing_else(self):
+        net = self.net(('omdbapi.com', self.CHART_OMDB), ('media-amazon.com', b'img'))
+        meta = rt.get_metadata('Dune: Part Two', None, 'movie', omdb_key='K', imdb_id='tt15239678')
+        self.assertEqual((meta['imdb_id'], meta['year'], meta['imdb_rating']), ('tt15239678', '2024', 8.7))
+        omdb = net.urls('omdbapi.com')
+        self.assertEqual(len(omdb), 1)
+        self.assertIn('i=tt15239678', omdb[0])
+        self.assertNotIn('t=Dune', omdb[0])
+
+    def test_it_is_cached_by_the_id_and_asked_for_once(self):
+        net = self.net(('omdbapi.com', self.CHART_OMDB), ('media-amazon.com', b'img'))
+        rt.get_metadata('Dune: Part Two', None, 'movie', omdb_key='K', imdb_id='tt15239678')
+        rt.get_metadata('Dune: Part Two', None, 'movie', omdb_key='K', imdb_id='tt15239678')
+        self.assertEqual(len(net.urls('omdbapi.com')), 1)
+        self.assertEqual(rt.get_cached_metadata('whatever', imdb_id='tt15239678')['title'], 'Dune: Part Two')
+        self.assertTrue(rt.get_cached_poster('x', imdb_id='tt15239678'))
+
+    def test_a_title_without_a_year_is_not_filed_under_its_bare_name(self):
+        # two films of the same name must not share an entry: only the id (and the year the answer gave) are keys
+        self.net(('omdbapi.com', self.CHART_OMDB), ('media-amazon.com', b'img'))
+        rt.get_metadata('Dune', None, 'movie', omdb_key='K', imdb_id='tt15239678')
+        cache = rt._load_metadata_cache()
+        self.assertIn('imdb:tt15239678', cache)
+        self.assertIn('movie:dune:2024', cache)
+        self.assertNotIn('movie:dune:unknown', cache)
+
+    def test_an_id_omdb_does_not_know_is_remembered_by_the_id_and_not_asked_about_by_name(self):
+        net = self.net(('omdbapi.com', {'Response': 'False', 'Error': 'Incorrect IMDb ID.'}))
+        # "Incorrect IMDb ID" is OMDb saying it has nothing under that id
+        self.assertIsNone(rt.get_metadata('Dune', None, 'movie', omdb_key='K', imdb_id='tt0000000'))
+        self.assertIsNone(rt.get_metadata('Dune', None, 'movie', omdb_key='K', imdb_id='tt0000000'))
+        self.assertEqual(len(net.requests), 1)
+        self.assertIn('neg:imdb:tt0000000', rt._load_metadata_cache())
+
+    def test_a_failure_with_an_id_is_not_remembered_and_does_not_fall_back_to_a_name_search(self):
+        net = self.net(('omdbapi.com', urllib.error.URLError('down')))
+        self.assertIsNone(rt.get_metadata('Dune', None, 'movie', omdb_key='K', imdb_id='tt15239678'))
+        self.assertEqual(rt._load_metadata_cache(), {})
+        self.assertEqual(len(net.requests), 1)  # the budget is not spent on a search by name
+
+    def test_refresh_asks_by_id_first_and_passes_the_ids_along(self):
+        calls = []
+        with mock.patch.object(rt, 'get_metadata', side_effect=lambda t, y, m, ok, tk, imdb_id=None: calls.append((t, imdb_id))):
+            rt.refresh_metadata_cache(['No Id (2020)', 'Has Id'], 'movie', omdb_key='K', tmdb_key='', imdb_ids=['', 'tt1'])
+        self.assertEqual(calls, [('Has Id', 'tt1'), ('No Id', None)])
+
+    def test_titles_already_cached_by_id_are_not_asked_again(self):
+        rt._update_metadata_cache(lambda c: c.__setitem__('imdb:tt1', {'cached_at': time.time()}))
+        with mock.patch.object(rt, 'get_metadata') as get:
+            rt.refresh_metadata_cache(['Has Id'], 'movie', omdb_key='K', tmdb_key='', imdb_ids=['tt1'])
+        get.assert_not_called()
+
+
+class TestOmdbDailyLimit(MetadataCase):
+    def setUp(self):
+        super().setUp()
+        self.limit = 3
+        self.day = '2026-11-08'
+        for patcher in (mock.patch.object(rt, 'omdb_daily_limit', side_effect=lambda: self.limit),
+                        mock.patch.object(rt, '_omdb_day', side_effect=lambda: self.day)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def ask(self, net, n=1):
+        for i in range(n):
+            rt._omdb_get('K', t=f'x{i}')
+
+    def test_every_request_is_counted_and_the_limit_stops_the_next_without_a_request(self):
+        net = self.net(('omdbapi.com', OMDB_HIT))
+        self.ask(net, 3)
+        self.assertEqual(rt.omdb_requests_left(), 0)
+        with self.assertRaises(rt.LookupFailed):
+            self.ask(net)
+        self.assertEqual(len(net.requests), 3)
+
+    def test_a_failed_request_counts_too(self):
+        net = self.net(('omdbapi.com', urllib.error.URLError('down')))
+        with self.assertRaises(rt.LookupFailed):
+            self.ask(net)
+        self.assertEqual(rt.omdb_requests_left(), 2)
+
+    def test_the_count_survives_a_restart_and_a_new_day_starts_from_nothing(self):
+        net = self.net(('omdbapi.com', OMDB_HIT))
+        self.ask(net, 2)
+        rt._memo.clear()  # a new process: only the file is left
+        self.assertEqual(rt.omdb_requests_left(), 1)
+        self.day = '2026-11-09'
+        self.assertEqual(rt.omdb_requests_left(), 3)
+        self.ask(net, 3)
+        self.assertEqual(len(net.requests), 5)
+
+    def test_the_limit_comes_from_the_setting(self):
+        self.limit = 0
+        net = self.net(('omdbapi.com', OMDB_HIT))
+        with self.assertRaises(rt.LookupFailed):
+            self.ask(net)
+        self.assertEqual(net.requests, [])
+        self.limit = 5
+        self.ask(net, 5)
+        self.assertEqual(rt.omdb_requests_left(), 0)
+
+    def test_omdb_saying_the_limit_is_reached_ends_the_day_whatever_the_count_was(self):
+        net = self.net(('omdbapi.com', {'Response': 'False', 'Error': 'Request limit reached!'}))
+        with self.assertRaises(rt.LookupFailed):
+            self.ask(net)
+        self.assertEqual(rt.omdb_requests_left(), 0)
+        with self.assertRaises(rt.LookupFailed):
+            self.ask(net)
+        self.assertEqual(len(net.requests), 1)
+
+    def test_a_title_looked_up_when_the_limit_is_reached_is_not_remembered_as_unknown(self):
+        self.limit = 0
+        self.net(('omdbapi.com', OMDB_HIT))
+        self.assertIsNone(rt.get_metadata('A', 2001, 'movie', omdb_key='K'))
+        self.assertEqual(rt._load_metadata_cache(), {})
+
+    def test_a_refresh_with_only_omdb_stops_when_the_limit_is_reached(self):
+        self.limit = 0
+        with mock.patch.object(rt, 'get_metadata') as get:
+            rt.refresh_metadata_cache(['A (2001)', 'B (2002)'], 'movie', omdb_key='K', tmdb_key='')
+        get.assert_not_called()
+
+    def test_the_quota_file_is_replaced_whole(self):
+        net = self.net(('omdbapi.com', OMDB_HIT))
+        self.ask(net, 2)
+        self.assertEqual(json.loads((self.folder / 'omdb_quota.json').read_text()), {'day': '2026-11-08', 'used': 2})
+        self.assertEqual(sorted(p.name for p in self.folder.iterdir() if p.is_file()), ['omdb_quota.json'])
 
 
 class TestPosters(MetadataCase):
@@ -331,8 +463,10 @@ class TestTheHoverText(MetadataCase):
         self.assertIsNone(rt.format_metadata_for_tooltip({}))
 
     def test_the_keys_come_from_the_media_section_of_the_config(self):
-        with mock.patch.object(rt, '_media_setting', side_effect=lambda name: {'omdb_key': 'O', 'tmdb_key': 'T'}.get(name)):
+        with mock.patch.object(rt, '_media_setting', side_effect=lambda name: {'omdb_key': 'O', 'tmdb_key': 'T', 'tmdb': 'on'}.get(name)):
             self.assertEqual((rt.load_omdb_api_key(), rt.load_tmdb_api_key()), ('O', 'T'))
+        with mock.patch.object(rt, '_media_setting', side_effect=lambda name: {'omdb_key': 'O', 'tmdb_key': 'T'}.get(name)):
+            self.assertEqual((rt.load_omdb_api_key(), rt.load_tmdb_api_key()), ('O', None))  # tmdb is off unless it is on
 
 
 if __name__ == '__main__':
