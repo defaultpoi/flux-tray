@@ -8,13 +8,13 @@ the tests' place.
 | What | How | Result |
 |------|-----|--------|
 | The 1233 tests the code had at baseline commit `eb73c7d` | real GTK under Xvfb, and GTK stubbed | pass, before any change |
-| Everything now | the same two modes, on Python 3.14.6 with PyGObject 3.50.2, GTK 3.24 (1721 tests); `pyflakes` clean | pass |
+| Everything now | the same two modes, on Python 3.14.6 with PyGObject 3.50.2, GTK 3.24 (1742 tests); `pyflakes` clean | pass |
 | Popup look and click hooks | `test_golden_popup`, two scenarios; identical on three runs and in the dark and default theme; a changed header and a changed colour digit both fail it | pass |
 | Each hardening change | its new tests run against the old code | fail there, pass now |
 | yt-dlp and ffmpeg | the real binaries in the tests that use them (ffmpeg 6.1) | pass |
 | mpv, the live-channel keys and `loadfile` with a start | the real mpv: 0.37.0 (Ubuntu) and 0.41.0 (AppImage build of 2026-10-24); `test_playback.TestLiveChannelKeysInARealMpv` on both, and the app's own `_load_in_mpv(..., start=20)` on 0.41.0, which takes the index form and starts at 20 s | pass |
 | The way the old live-channel keys were taken away (`keybind Right ''`) | the same real mpv, both versions | left Right dead: no seeking in any file played after a stream. Replaced |
-| New tests against the code they test | a deliberate break of each fix, one at a time , the new tests run | each break fails a test (19 breaks) |
+| New tests against the code they test | a deliberate break of each fix, one at a time , the new tests run | each break fails a test (23 breaks) |
 | `install.sh`, `uninstall.sh` | tests with a temporary HOME | pass |
 | Python 3.14 only | an older version number is refused at import with a message; the metadata says `>=3.14` | pass |
 | CI on GitHub | `.github/workflows/ci.yml`: uv, Python 3.14, PyGObject built from source, both test modes; runs for commits `ae91f8a`, `36aed96` and `e50d623` (on `next` and on `main`) | pass |
@@ -115,5 +115,14 @@ Not taken, deliberately:
 - `sitefilme_com.find()`: "Interstellar (2014)" → `https://sitefilme.com/online/5291/`, "The Odyssey (2026)" → `https://sitefilme.com/online/135644/`
 - `find_source()` priority verified: movies use sitefilme_com first, series use fsonline_one only
 - All 1725 tests pass (Xvfb + stubbed), pyflakes clean
+
+2026-11-10: fsonline sitemap-based watch list check (commit ccf82c0):
+- Added `fetch_new_episodes(since_timestamp, watch_titles)` and `fetch_new_movies(since_timestamp, watch_titles)` to `fsonline_one` plugin
+- Scans episodes/movies sitemaps (newest-first with `lastmod` timestamps), stops when items are older than `since_timestamp`
+- Caches sitemap pages for 5 minutes (`SITEMAP_CACHE_SECONDS = 300`)
+- `_search_fsonline_sitemap()` in `MediaMixin` runs at media check interval, checks watch list entries still searching, triggers targeted media checks only for series/movies with new episodes
+- Shared `_norm_title()` in `watch.py` for title normalization (no accents, lowercase, dash-joined)
+- 17 new tests in `test_fsonline.py` covering: empty cache, no matching titles, matching titles, pagination, stopping at older items, cache behavior, title extraction, title normalization
+- All 1742 tests pass (Xvfb + stubbed), pyflakes clean; 4 mutations caught by tests (reversed comparison, wrong suffix check, disabled new-item detection, numbers stripped from title)
 
 No run on a real desktop yet.
