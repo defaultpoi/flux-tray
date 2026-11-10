@@ -7,10 +7,19 @@ any other and is downloaded by the rules of [media]. Pure: no GTK, no files.
 """
 
 import math
+import re
+import unicodedata
 
 from .log import _log
 
 KINDS = ('movie', 'series')
+
+
+def _norm_title(text):
+    """A title as it is compared: no accents, lower case, words joined by one dash."""
+    text = unicodedata.normalize('NFKD', text or '')
+    text = ''.join(c for c in text if not unicodedata.combining(c)).lower()
+    return '-'.join(re.findall(r'[a-z0-9]+', text))
 
 
 def new_watch_entry(item, now, year=''):

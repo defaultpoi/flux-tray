@@ -35,7 +35,7 @@ from ..media_cache import (
     load_media_cache, update_media_cache, get_new_items, mark_listing, mark_seen, is_seen,
     get_all_cached_items, sync_metadata_ids, title_with_year,
 )
-from ..watch import find_source, is_searching, new_watch_entry, search_due, source_line
+from ..watch import find_source, is_searching, new_watch_entry, search_due, source_line, _norm_title
 from ..log import _log
 
 
@@ -644,6 +644,86 @@ class MediaMixin:
             _log(f'watch search error: {e}')
         finally:
             _watch_searching.release()
+
+    def _search_fsonline_sitemap(self):
+        """Efficient check for new episodes/movies on fsonline.one using their sitemaps.
+        Only checks watch list entries that match fsonline_one plugin.
+        Scrapes episodes and movies sitemaps until items are older than last check."""
+        # Get fsonline_one plugin
+        fsonline = self.media_registry.by_name('fsonline_one')
+        if not fsonline or not hasattr(fsonline.module, 'fetch_new_episodes'):
+            return  # plugin not available or doesn't support sitemap check
+
+        # Build set of normalized titles from watch list (only those not yet found)
+        with self._media_data_lock:
+            watch_items = [
+                (key, dict(w)) for key, w in self.media.get('watch', {}).items()
+                if is_searching(w)  # still looking for a source
+            ]
+        if not watch_items:
+            return
+
+        # Separate by type
+        series_titles = set()
+        movie_titles = set()
+        for key, entry in watch_items:
+            norm = _norm_title(entry.get('title', ''))
+            if entry.get('type') == 'series':
+                series_titles.add(norm)
+            else:
+                movie_titles.add(norm)
+
+        if not series_titles and not movie_titles:
+            return
+
+        # Get the last check time for fsonline sitemap (stored in state)
+        with self.lock:
+            last_check = self.state.get('fsonline_sitemap_last_check', 0)
+            self.state['fsonline_sitemap_last_check'] = time_module.time()
+            save_state(self.state)
+
+        # Fetch new episodes and movies
+        try:
+            if series_titles:
+                new_series = fsonline.module.fetch_new_episodes(last_check, series_titles)
+                for series_url in new_series:
+                    source = source_line('fsonline_one', series_url)
+                    with self._media_data_lock:
+                        # Find and update the watch entry
+                        for key, entry in self.media.get('watch', {}).items():
+                            if is_searching(entry) and entry.get('type') == 'series':
+                                if _norm_title(entry.get('title', '')) == _norm_title(series_url.split('/')[-2]):
+                                    entry['source'] = source
+                                    entry['checked'] = time_module.time()
+                                    break
+                        source_entry = self.media['sources'].setdefault(source, new_media_entry())
+                        source_entry['movie'] = False
+                    _log(f"fsonline sitemap: new episodes for series at {series_url}")
+
+            if movie_titles:
+                new_movies = fsonline.module.fetch_new_movies(last_check, movie_titles)
+                for movie_url in new_movies:
+                    source = source_line('fsonline_one', movie_url)
+                    with self._media_data_lock:
+                        for key, entry in self.media.get('watch', {}).items():
+                            if is_searching(entry) and entry.get('type') == 'movie':
+                                if _norm_title(entry.get('title', '')) == _norm_title(movie_url.split('/')[-2]):
+                                    entry['source'] = source
+                                    entry['checked'] = time_module.time()
+                                    break
+                        source_entry = self.media['sources'].setdefault(source, new_media_entry())
+                        source_entry['movie'] = True
+                    _log(f"fsonline sitemap: new movie at {movie_url}")
+
+            # Trigger media check for any new sources found
+            with self._media_data_lock:
+                new_sources = [url for url in self.media['sources']
+                               if url.startswith('fsonline_one:') and self.media['sources'][url].get('episodes')]
+            if new_sources:
+                self.start_media_check(only=new_sources)
+                GLib.idle_add(self._discovery_refresh)
+        except Exception as e:
+            _log(f'fsonline sitemap check error: {e}')
 
     def _is_movie(self, url):
         """A film: a source of [media] marked `movie`, or one that was added from the watch list
