@@ -1,18 +1,18 @@
 """Tests for fsonline.one plugin sitemap-based new episode/movie detection."""
 
+import os
+import sys
 import time
 import unittest
 from unittest import mock
-
 
 
 class TestFsonlineSitemapFunctions(unittest.TestCase):
     """Test the fsonline_one plugin's fetch_new_episodes and fetch_new_movies functions."""
 
     def setUp(self):
-        # Import the plugin module
-        import sys
-        plugin_path = '/home/l/.config/flux-tray/media-plugins'
+        # Import the plugin module from addons/media-plugins
+        plugin_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'addons', 'media-plugins')
         if plugin_path not in sys.path:
             sys.path.insert(0, plugin_path)
         import fsonline_one

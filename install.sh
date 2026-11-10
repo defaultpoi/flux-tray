@@ -4,7 +4,7 @@
 #   ./install.sh                   link only
 #   ./install.sh --autostart       link and add ~/.config/autostart/flux-tray.desktop
 #   ./install.sh --no-autostart    link and remove that entry
-# Never touches ~/.config/flux-tray (config.conf, state.json, media.json).
+# Copies media plugins from addons/media-plugins/ to ~/.config/flux-tray/media-plugins/.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd -P)
@@ -28,6 +28,16 @@ if [ -e "$link" ] && [ ! -L "$link" ]; then
 fi
 ln -sf "$here/flux-tray" "$link"
 echo "linked $link -> $here/flux-tray"
+
+# Copy media plugins from repo addons/ to user config directory
+config_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/flux-tray"
+plugin_src="${here}/addons/media-plugins"
+plugin_dst="${config_dir}/media-plugins"
+mkdir -p "$plugin_dst"
+if [ -d "$plugin_src" ]; then
+    cp -n "$plugin_src"/*.py "$plugin_dst/" 2>/dev/null || true
+    echo "copied media plugins to $plugin_dst"
+fi
 
 case "$autostart" in
     yes)

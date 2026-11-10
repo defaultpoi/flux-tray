@@ -4,13 +4,15 @@ import os
 
 
 CONFIG_DIR = os.path.expanduser('~/.config/flux-tray')
+REPO_DIR = os.path.dirname(os.path.dirname(__file__))  # flux-tray/ root
 
 
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.conf')
 
 
 # Python files here add sources to the Media section (see "Media plugins" in the README).
-MEDIA_PLUGIN_DIR = os.path.join(CONFIG_DIR, 'media-plugins')
+# Default to the addons/media-plugins in the repo; install.sh copies them to CONFIG_DIR/media-plugins.
+MEDIA_PLUGIN_DIR = os.path.join(REPO_DIR, 'addons', 'media-plugins')
 
 
 DEFAULT_HIGHLIGHT_WORDS = ('breaking',)

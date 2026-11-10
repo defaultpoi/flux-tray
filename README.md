@@ -44,7 +44,12 @@ Flux Tray is a personal tray application for XFCE on Void Linux, written for Pyt
 
 ### Media plugins
 
-A plugin is a Python file in `~/.config/flux-tray/media-plugins/` (create the folder) that teaches the Media section a site. It is loaded at the next check after you save it, with no restart, and a plugin that does not load is named on the row of any source that needed it. A plugin runs inside the app with your permissions, like the scripts in `[launcher]`, so only keep files there that you wrote or read.
+A plugin is a Python file in `~/.config/flux-tray/media-plugins/` that teaches the Media section a site. On install, the built-in plugins from `addons/media-plugins/` are copied there (see `install.sh`). You can add your own plugins to that folder; they are loaded at the next check after you save them, with no restart. A plugin that does not load is named on the row of any source that needed it. A plugin runs inside the app with your permissions, like the scripts in `[launcher]`, so only keep files there that you wrote or read.
+
+Built-in plugins (in `addons/media-plugins/`):
+- `fsonline_one.py` — fsonline.one series and movies (with `find` for the watch list)
+- `sitefilme_com.py` — sitefilme.com movies (with `find` for the watch list)
+- `imdb_charts.py` — IMDb chart discovery (movies/series charts)
 
 A `[media]` line reaches a plugin in one of two ways: the plugin's `matches(line)` returns true for it (plugins are asked before the built-in drivers, so one can also take over a site they handle), or the line starts with the plugin's name and a colon, `retrotv:the-show|Retro TV`, and the plugin gets what follows the colon.
 
