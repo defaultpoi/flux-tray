@@ -67,13 +67,31 @@ def source_line(plugin_name, url):
 
 
 def find_source(finders, entry):
-    """(plugin name, address) of the first plugin in `finders` that has the title, else None. A
-    plugin that fails, or answers with anything but an http(s) address, has not got it: its bug
-    must not stop the others being asked."""
-    for finder in finders:
+    """(plugin name, address) of the first plugin in `finders` that has the title, else None.
+
+    Priority logic:
+    - For movies: search sitefilme_com first (movies only, direct m3u8), then fsonline_one
+    - For series: search fsonline_one only (sitefilme doesn't have series)
+
+    A plugin that fails, or answers with anything but an http(s) address, has not got it:
+    its bug must not stop the others being asked."""
+    kind = entry.get('type', 'movie')
+
+    # Build ordered list of finders based on content type
+    if kind == 'movie':
+        # Movies: sitefilme_com first, then fsonline_one
+        ordered = [f for f in finders if f.name == 'sitefilme_com']
+        ordered += [f for f in finders if f.name == 'fsonline_one']
+        # Any other finders after
+        ordered += [f for f in finders if f.name not in ('sitefilme_com', 'fsonline_one')]
+    else:
+        # Series: fsonline_one only (sitefilme doesn't have series)
+        ordered = [f for f in finders if f.name == 'fsonline_one']
+
+    for finder in ordered:
         try:
             url = finder.module.find(title=entry['title'], year=entry.get('year') or None,
-                                     imdb_id=entry.get('imdb_id'), kind=entry.get('type', 'movie'))
+                                     imdb_id=entry.get('imdb_id'), kind=kind)
         except Exception as error:
             _log(f'media plugin {finder.name}: find() failed: {error!r}')
             continue

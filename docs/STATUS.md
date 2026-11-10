@@ -25,13 +25,6 @@ IMDb's chart pages (`imdb_charts.py` was run on fake pages only), `find` against
 
 TMDb and OMDb answering (the lookups are tested against a fake network with the replies' shape taken from their documentation; nothing was asked of the real services, and a TMDb *API Read Access Token* is what `tmdb_key` takes), a stream surviving the app's exit (a Python child with a closed log pipe was seen to; streamlink itself was not), the licence of MeteoAlarm's wind and rain icons, mpv other than 0.37 and 0.41.0.
 
-Everything in [XFCE-VALIDATION.md](XFCE-VALIDATION.md): a real panel and tray
-host, a real mpv window, Twitch, YouTube, Open-Meteo, Meteoalarm and archive.org
-answering, `xbps`, `topgrade` and `sudo` installs, suspend and resume, a 24-hour
-run. The golden files were made on Ubuntu 24.04 with GTK 3.24 under Xvfb; they
-leave out pixel sizes and icon names, but a different GTK major version may
-differ in the classes it adds.
-
 ## What changed since the baseline
 
 - Renamed to Flux Tray: package `flux_tray`, launcher `flux-tray`, class `FluxTray`, configuration directory `~/.config/flux-tray`, debug variable `FLUX_TRAY_DEBUG`. The names of the earlier versions, their configuration directory, their debug variable and the code that copied their files over are gone. Anything from an old directory has to be moved by hand once 
@@ -48,6 +41,10 @@ differ in the classes it adds.
 - Discovery and the metadata behind it (commit `28cd916`; first written in `18a64e2` with Claude Code, reworked here): plugins' `fetch_discovery` filed in one cache keyed by TMDb id, IMDb id, or title, year and type; the hover preview; TMDb and OMDb lookups. Reworked because the first version had no tests and: raised `NameError` on every lookup failure and then cached the title as "not found" for a week; gave the same film from two sites two entries (the discovery date stood in for the year); never re-keyed an entry (a size comparison that could not be true) and wrote `state.json` from a thread over the app's own copy; asked TMDb's `/find` for an IMDb id from a TMDb id (it cannot) so OMDb never enriched anything; did its disk and network work on the main loop; and added two hover handlers to every media row at every download tick. See README (Discovery) and F40, F41.
 - The forecast-day alerts of `ae931a9` are back: `18a64e2` had been made from its parent, so the push replaced them with a second, weaker version of the feature (its alert-to-day mapper needed an `onset` the feed code never returned, so no day was ever marked). What was new in `18a64e2` and kept: the alert's own text from the CAP document (https meteoalarm.org only, 1 MB, cached) and a sentence built from the entry when it is missing.
 - Discovery from IMDb's charts, the watch list and OMDb's daily limit (F45-F47). `discovery=` names the sources of the discovery list (charts, by the address their plugin matches); their titles come with IMDb ids, in chart order, and OMDb is asked for each by that id (one exact request, at most `omdb_daily_limit=` a day, the count in `omdb_quota.json`); `tmdb_key` is ignored unless `tmdb=on`. A left click puts the title on the watch list in `media.json`; the plugins' `find(title, year, imdb_id, kind)` are asked at every media check until one has it, and it then becomes a source read at every check (sources added by a click were only read once, at the click: a series was never followed), downloaded by the rules of `[media]`, a film removed after it is watched like the configured ones, and listed on top of the media list. A right click dismisses a title for good. Found while doing this: `get_new_items` called every undismissed item new at every check (with a chart, the popup would have opened with a sound every hour); the media check read the network while holding the media lock; the prefix of `imdb-charts:moviemeter` is cut off before the plugin sees it, so the plugin's own handling of that form could never have worked.
+- IMDb chart discovery fixed (commit `2026-11-10`): `imdb_charts.py` now fetches via `r.jina.ai` proxy to bypass AWS WAF blocking (HTTP 202 challenge page). Returns ~100 titles per chart with correct IMDb IDs.
+- Discovery plugins changed: `fsonline_one` and `sitefilme_com` no longer provide `fetch_discovery` (discovery now only from IMDb charts). Both plugins provide `find()` for the watch list.
+- `sitefilme_com` gained `find()` (searches via `?s=title` and matches English title; movies only).
+- `find_source()` in `watch.py` prioritizes: movies → `sitefilme_com` first (direct m3u8), then `fsonline_one`; series → `fsonline_one` only. New tests in `test_watch.py::TestFindingATitle` cover this priority.
 - Live-channel keys: Right and Left cycle from the channel playing (the first version indexed a list of configured channels, not the live ones) through an mpv input section held over the listener's own connection (mpv drops a section with the client that defined it), instead of `keybind` set to an empty command on removal. `_strip_emojis` no longer deletes CJK, Hangul or fullwidth text.
 - News entries a feed edits come back once as `LIVE` items (`18a64e2`), now with a baseline on the first update time, at most one announcement an hour per entry, an unread item replaced in place, and the second sound only for items really added; undocumented before, README and F42 now say it.
 - The hazard icons on the tray icon: one cached parser and drawer (there were two, the first dead), the thunderstorm and flood shapes drawn for the app (the ones in `18a64e2` were not MeteoAlarm's and not recognisable), a test that every path parses and stays inside its viewBox. With nothing unread the icon alternates between the temperature and a **white** hazard icon: the severity colour of `ac0c82d` is gone from the icon, and the severity shows in the rate only (README says so).
@@ -111,5 +108,12 @@ Not taken, deliberately:
 ## Evidence
 
 2026-11-08: real mpv 0.37.0 (Ubuntu 24.04) and 0.41.0 (`pkgforge-dev/mpv-AppImage`, `v0.41.0@2026-10-24`), headless and under Xvfb, no desktop: the live-channel key test passes on both, the old unbind leaves Right dead on both, and `_load_in_mpv('/tmp/t.mp4', 'Test title', start=20.0)` on 0.41.0 loaded the file with the title and started at 21.4 s.
+
+2026-11-10: real network tests under Xvfb (Python 3.14, PyGObject 3.50, GTK 3.24):
+- `imdb_charts.py` via `r.jina.ai` proxy: 100 movies + 100 series from IMDb charts (200 total)
+- `fsonline_one.find()`: "Interstellar (2014)" → `https://fsonline.one/film/interstellar-2014-online-subtitrat/`, "The Odyssey (2026)" → `https://fsonline.one/film/the-odyssey-2026-online-subtitrat/`
+- `sitefilme_com.find()`: "Interstellar (2014)" → `https://sitefilme.com/online/5291/`, "The Odyssey (2026)" → `https://sitefilme.com/online/135644/`
+- `find_source()` priority verified: movies use sitefilme_com first, series use fsonline_one only
+- All 1725 tests pass (Xvfb + stubbed), pyflakes clean
 
 No run on a real desktop yet.

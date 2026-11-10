@@ -92,6 +92,41 @@ class TestFindingATitle(unittest.TestCase):
     def test_the_source_line_is_the_plugin_name_and_the_address(self):
         self.assertEqual(rt.source_line('fsonline_one', 'https://f/film/dune-2024'), 'fsonline_one:https://f/film/dune-2024')
 
+    def test_movie_searches_sitefilme_first_then_fsonline(self):
+        """Movies: sitefilme_com is searched before fsonline_one."""
+        sitefilme = finder('sitefilme_com', 'https://sitefilme.com/online/123/')
+        fsonline = finder('fsonline_one', 'https://fsonline.one/film/dune-2024/')
+        # sitefilme should be called first and win
+        self.assertEqual(rt.find_source([fsonline, sitefilme], self.ENTRY), ('sitefilme_com', 'https://sitefilme.com/online/123/'))
+        sitefilme.module.find.assert_called_once_with(title='Dune: Part Two', year='2024', imdb_id='tt15239678', kind='movie')
+        fsonline.module.find.assert_not_called()
+
+    def test_movie_falls_back_to_fsonline_when_sitefilme_has_none(self):
+        """Movies: if sitefilme_com returns None, fsonline_one is tried."""
+        sitefilme = finder('sitefilme_com', None)
+        fsonline = finder('fsonline_one', 'https://fsonline.one/film/dune-2024/')
+        self.assertEqual(rt.find_source([fsonline, sitefilme], self.ENTRY), ('fsonline_one', 'https://fsonline.one/film/dune-2024/'))
+        sitefilme.module.find.assert_called_once()
+        fsonline.module.find.assert_called_once_with(title='Dune: Part Two', year='2024', imdb_id='tt15239678', kind='movie')
+
+    def test_series_only_searches_fsonline(self):
+        """Series: only fsonline_one is searched (sitefilme doesn't have series)."""
+        sitefilme = finder('sitefilme_com', 'https://sitefilme.com/online/123/')
+        fsonline = finder('fsonline_one', 'https://fsonline.one/serial/breaking-bad-2008/')
+        series_entry = dict(self.ENTRY, type='series', title='Breaking Bad', year='2008', imdb_id='tt0903747')
+        self.assertEqual(rt.find_source([sitefilme, fsonline], series_entry), ('fsonline_one', 'https://fsonline.one/serial/breaking-bad-2008/'))
+        fsonline.module.find.assert_called_once_with(title='Breaking Bad', year='2008', imdb_id='tt0903747', kind='series')
+        sitefilme.module.find.assert_not_called()
+
+    def test_series_returns_none_when_fsonline_has_none(self):
+        """Series: if fsonline_one returns None, no other plugin is tried."""
+        fsonline = finder('fsonline_one', None)
+        sitefilme = finder('sitefilme_com', 'https://sitefilme.com/online/123/')
+        series_entry = dict(self.ENTRY, type='series', title='Breaking Bad', year='2008', imdb_id='tt0903747')
+        self.assertIsNone(rt.find_source([sitefilme, fsonline], series_entry))
+        fsonline.module.find.assert_called_once()
+        sitefilme.module.find.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
