@@ -38,7 +38,8 @@ MAX_API_CALLS_PER_CYCLE = 50
 MAX_REPLY_BYTES = 2_000_000
 MAX_POSTER_BYTES = 5_000_000
 
-METADATA_USER_AGENT = 'flux-tray'
+# Browser-like User-Agent for poster/image downloads (OMDb uses its own via api)
+METADATA_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 OMDB_BASE = 'https://www.omdbapi.com/'
 TMDB_BASE = 'https://api.themoviedb.org/3'  # called with a v4 "API Read Access Token" as a Bearer token
 TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w300'
@@ -170,15 +171,22 @@ def _cache_poster_image(poster_url, media_key, imdb_id=None, tmdb_id=None):
             data = resp.read(MAX_POSTER_BYTES + 1)
         if len(data) > MAX_POSTER_BYTES:
             return None
-        POSTER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        path = POSTER_CACHE_DIR / (hashlib.sha1(cache_key.encode()).hexdigest() + _get_poster_extension(poster_url))
-        write_atomic(path, lambda f: f.write(data), binary=True)
-        entry = {'path': str(path), 'url': poster_url, 'cached_at': time.time()}
-        _update_poster_index(lambda index: index.__setitem__(cache_key, entry))
-        return str(path)
+        return _save_poster_data(data, poster_url, cache_key)
     except (OSError, ValueError) as e:
         _log(f'poster not cached: {e}')
         return None
+
+
+def _save_poster_data(data, poster_url, cache_key):
+    """Saves already-downloaded poster data to the cache. Returns the file's path, or None."""
+    if len(data) > MAX_POSTER_BYTES:
+        return None
+    POSTER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = POSTER_CACHE_DIR / (hashlib.sha1(cache_key.encode()).hexdigest() + _get_poster_extension(poster_url))
+    write_atomic(path, lambda f: f.write(data), binary=True)
+    entry = {'path': str(path), 'url': poster_url, 'cached_at': time.time()}
+    _update_poster_index(lambda index: index.__setitem__(cache_key, entry))
+    return str(path)
 
 
 def get_cached_poster(title, media_type='movie', imdb_id=None, tmdb_id=None):

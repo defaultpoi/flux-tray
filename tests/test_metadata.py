@@ -135,7 +135,7 @@ class TestLookingATitleUp(MetadataCase):
         self.assertEqual(len(net.urls('api.themoviedb.org')), 2)  # the credits and ids ride along with the details
         self.assertIn('append_to_response=credits%2Cexternal_ids', net.urls()[1])
         self.assertEqual(net.requests[0].get_header('Authorization'), 'Bearer TOKEN')
-        self.assertEqual(net.requests[0].get_header('User-agent'), 'flux-tray')
+        self.assertEqual(net.requests[0].get_header('User-agent'), 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
 
     def test_the_answer_is_cached_by_title_and_by_both_ids_and_asked_for_once(self):
         net = self.net(*self.tmdb_routes())

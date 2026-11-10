@@ -192,7 +192,10 @@ def create_metadata_tooltip(meta):
     else:
         # Fallback: load from URL in background (for cases where poster not yet cached)
         poster_url = meta.get('poster') or meta.get('Poster')
-        if poster_url and poster_url != 'N/A':
+        imdb_id = meta.get('imdb_id')
+        tmdb_id = meta.get('tmdb_id')
+        title_for_key = meta.get('title') or meta.get('Title')
+        if poster_url and poster_url != 'N/A' and title_for_key:
             try:
                 image = Gtk.Image()
                 image.set_halign(Gtk.Align.START)
@@ -201,11 +204,16 @@ def create_metadata_tooltip(meta):
                 def load_poster():
                     try:
                         import urllib.request
-                        from ..metadata import TMDB_USER_AGENT
-                        ua = TMDB_USER_AGENT if 'image.tmdb.org' in poster_url else 'flux-tray/1.0'
+                        from ..metadata import METADATA_USER_AGENT, _save_poster_data, _parse_title_year, _make_key
+                        ua = METADATA_USER_AGENT
                         req = urllib.request.Request(poster_url, headers={'User-Agent': ua})
                         with urllib.request.urlopen(req, timeout=5) as resp:
                             data = resp.read()
+                        # Save to poster cache for future use
+                        clean_title, year = _parse_title_year(title_for_key)
+                        media_type = 'movie'  # default, the key is only used if no imdb/tmdb id
+                        cache_key = f'tmdb:{tmdb_id}' if tmdb_id else f'imdb:{imdb_id}' if imdb_id else _make_key(clean_title, year, media_type)
+                        _save_poster_data(data, poster_url, cache_key)
                         loader = GdkPixbuf.PixbufLoader()
                         loader.write(data)
                         loader.close()
