@@ -135,6 +135,8 @@ class Stub:
     _has_something_to_watch = rt.FluxTray._has_something_to_watch
     _on_media_row_enter = rt.FluxTray._on_media_row_enter
     _on_media_row_leave = rt.FluxTray._on_media_row_leave
+    _invalidate_discovery_cache = rt.FluxTray._invalidate_discovery_cache
+    _get_discovery_items_cached = rt.FluxTray._get_discovery_items_cached
 
     def __init__(self):
         self.media = {'sources': {}, 'watch': {}}
@@ -154,6 +156,7 @@ class Stub:
         self._media_current = None
         self._media_worker_running = False
         self._media_cancel = set()
+        self._discovery_items_cache = None
         self._media_playlist_episodes = {}
         self.popup = mock.MagicMock()
         self.popup.get_visible.return_value = False

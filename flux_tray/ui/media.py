@@ -429,6 +429,7 @@ class MediaMixin:
                 mark_seen(seen, item)
             self.state['media_discovery_seen'] = sorted(seen)
             save_state(self.state)
+        self._invalidate_discovery_cache()
 
     def _fetch_discovery_bg(self):
         """A discovery check, all of it but the window, in a thread: reads what `discovery=` names
@@ -456,6 +457,7 @@ class MediaMixin:
             GLib.idle_add(self._discovery_news)
         else:
             _log('discovery: no new items')
+        self._invalidate_discovery_cache()
         self._enrich_discovery()
 
     def _read_discovery_plugins(self, types):
@@ -529,11 +531,15 @@ class MediaMixin:
                 self.state['media_discovery_seen'] = sorted(seen)
                 save_state(self.state)
         if moved:
+            self._invalidate_discovery_cache()
             GLib.idle_add(self._discovery_refresh)
+        else:
+            self._invalidate_discovery_cache()
 
     def _discovery_news(self):
         """New discovery items: the same sound and popup as new feed items."""
         self.on_new_items()
+        self._invalidate_discovery_cache()
         self._discovery_refresh()
         return False
 
@@ -1529,31 +1535,75 @@ class MediaMixin:
                  'type': w['type'], 'imdb_id': w['imdb_id'], 'tmdb_id': None, 'urls': {}, 'genre': [],
                  'quality': None, 'rank': None, 'watching': True} for key, w in watching]
 
+    def _get_discovery_items_cached(self):
+        """Get discovery items with caching: computes once per refresh cycle.
+        Returns (items_list, items_by_key_dict, metadata_by_key_dict).
+
+        The watching items (from watch list) are NOT cached - they are computed fresh
+        each time because the watch list can change between discovery refreshes.
+        Only the discovery cache items are cached.
+        """
+        if hasattr(self, '_discovery_items_cache') and self._discovery_items_cache is not None:
+            cached_items, items_by_key, metadata_by_key = self._discovery_items_cache
+        else:
+            cached_items = items_by_key = metadata_by_key = None
+
+        # Always compute watching items fresh (they come from self.media['watch'] which can change)
+        watching_items = self._watching_items()
+
+        if cached_items is not None:
+            # Use cached discovery items, prepend fresh watching items
+            items = watching_items + cached_items
+        else:
+            # Build from scratch
+            cache = load_media_cache()
+            seen = set(self.state.get('media_discovery_seen', []))
+            cached_items = []
+            for item in get_all_cached_items(cache):
+                if not is_seen(seen, item):
+                    urls = item.get('urls', {})
+                    item['_plugin'] = list(urls.keys())[0] if urls else 'unknown'
+                    cached_items.append(item)
+            items = watching_items + cached_items
+            # Build lookup dict for O(1) access by cache key (for discovery items only)
+            items_by_key = {item.get('_cache_key'): item for item in cached_items if item.get('_cache_key')}
+
+            # Pre-fetch metadata for all items in one batch
+            metadata_by_key = {}
+            for item in items:
+                key = item.get('_cache_key')
+                if not key:
+                    continue
+                first_url = next(iter(item.get('urls', {}).values()), None)
+                meta = get_cached_metadata(
+                    title_with_year(item),
+                    media_type=item.get('type', 'movie'),
+                    url=first_url,
+                    imdb_id=item.get('imdb_id'),
+                    tmdb_id=item.get('tmdb_id')
+                )
+                metadata_by_key[key] = meta
+
+            self._discovery_items_cache = (cached_items, items_by_key, metadata_by_key)
+
+        return items, items_by_key, metadata_by_key
+
     def discovery_source_urls(self):
         """Return only discovery item URLs (unseen items from unified cache).
         These are the items shown in the discovery section of the media list: the titles being
         looked for first, then what is listed."""
-        cache = load_media_cache()
-        seen = set(self.state.get('media_discovery_seen', []))
-        urls = [f'discovery:{item["_cache_key"]}' for item in self._watching_items()]
-        for item in get_all_cached_items(cache):
-            if not is_seen(seen, item):
-                urls.append(f'discovery:{item["_cache_key"]}')
-        return urls
+        items, _, _ = self._get_discovery_items_cached()
+        return [f'discovery:{item["_cache_key"]}' for item in items if item.get('_cache_key')]
 
     def get_discovery_items(self):
         """Get current discovery items from unified cache, filtered by dismissal state, after the
-        titles being looked for."""
-        cache = load_media_cache()
-        seen = set(self.state.get('media_discovery_seen', []))
-        items = self._watching_items()
-        for item in get_all_cached_items(cache):
-            if not is_seen(seen, item):
-                # Add _plugin for backward compatibility (use first URL's plugin)
-                urls = item.get('urls', {})
-                item['_plugin'] = list(urls.keys())[0] if urls else 'unknown'
-                items.append(item)
+        titles being looked for. Uses cached result within a refresh cycle."""
+        items, _, _ = self._get_discovery_items_cached()
         return items
+
+    def _invalidate_discovery_cache(self):
+        """Invalidate the discovery items cache (call when cache/state changes)."""
+        self._discovery_items_cache = None
 
     def build_media_row(self, url):
         # Check if this is a discovery item
@@ -1593,9 +1643,10 @@ class MediaMixin:
         """Build a row for a plugin discovery item in the Media list."""
         # Parse the virtual URL: discovery:<cache_key>
         prefix, _, cache_key = url.partition(':')
-        # Find the item by fetching current discovery items
-        items = self.get_discovery_items()
-        item = next((i for i in items if i.get('_cache_key') == cache_key), None)
+        # Use cached items and metadata (O(1) lookup instead of O(n) search)
+        _, items_by_key, metadata_by_key = self._get_discovery_items_cached()
+        item = items_by_key.get(cache_key)
+        meta = metadata_by_key.get(cache_key)
         if not item:
             return None
 
@@ -1625,16 +1676,7 @@ class MediaMixin:
         title_label.set_hexpand(True)
         text_box.pack_start(title_label, False, False, 0)
 
-        # Show genre for both movies and series - use API genre from TMDb/OMDB cache
-        # Pass first URL for year extraction if title doesn't have year
-        first_url = next(iter(item.get('urls', {}).values()), None)
-        meta = get_cached_metadata(
-            title_with_year(item),
-            media_type=item.get('type', 'movie'),
-            url=first_url,
-            imdb_id=item.get('imdb_id'),
-            tmdb_id=item.get('tmdb_id')
-        )
+        # Show genre for both movies and series - use pre-fetched metadata
         api_genre = meta.get('genre') if meta else None
         # Fall back to site genre if API genre not available
         site_genre = ', '.join(item['genre']) if item.get('genre') else None
