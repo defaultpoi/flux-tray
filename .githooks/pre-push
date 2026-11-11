@@ -1,0 +1,20 @@
+#!/bin/sh
+# Refuses a push that would drop commits from the remote branch, even a forced one: what is on origin and not in
+# what you push is work that would be lost. Install once per clone:  git config core.hooksPath .githooks
+# To replace a remote branch on purpose, say so:  ALLOW_DROPPING_REMOTE_COMMITS=1 git push --force-with-lease ...
+zero=0000000000000000000000000000000000000000
+while read local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue      # deleting a branch: not this hook's business
+  [ "$remote_sha" = "$zero" ] && continue     # a new branch
+  if ! git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    echo "pre-push: origin has $remote_sha on $remote_ref, which you do not have: fetch first." >&2
+    [ -n "$ALLOW_DROPPING_REMOTE_COMMITS" ] || exit 1
+    continue
+  fi
+  if ! git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+    echo "pre-push: this push would drop commits from $remote_ref:" >&2
+    git log --oneline "$local_sha..$remote_sha" >&2
+    [ -n "$ALLOW_DROPPING_REMOTE_COMMITS" ] || { echo "Merge or rebase them in. (To drop them on purpose: ALLOW_DROPPING_REMOTE_COMMITS=1)" >&2; exit 1; }
+  fi
+done
+exit 0

@@ -34,6 +34,7 @@ def new_watch_entry(item, now, year=''):
         'added': float(now),
         'checked': None,
         'source': None,
+        'monitoring': False,
     }
 
 
@@ -46,6 +47,7 @@ def clean_watch(raw):
     for key, entry in (raw.items() if isinstance(raw, dict) else ()):
         if not isinstance(key, str) or not isinstance(entry, dict) or not isinstance(entry.get('title'), str):
             continue
+        monitoring = entry.get('monitoring')
         clean[key] = {
             'title': entry['title'],
             'year': entry['year'] if isinstance(entry.get('year'), str) else '',
@@ -54,12 +56,14 @@ def clean_watch(raw):
             'added': float(entry['added']) if number(entry.get('added')) else 0.0,
             'checked': float(entry['checked']) if number(entry.get('checked')) else None,
             'source': entry['source'] if isinstance(entry.get('source'), str) and entry['source'] else None,
+            'monitoring': bool(monitoring) if monitoring is not None else False,
         }
     return clean
 
 
 def is_searching(entry):
-    """True while no site has been found to have the title."""
+    """True while no site has been found to have the title.
+    Also true for monitoring entries (monitoring=True, source=None) which need periodic checking."""
     return entry.get('source') is None
 
 

@@ -1648,38 +1648,59 @@ class MediaMixin:
             # Build lookup dict for O(1) access by cache key (for discovery items only)
             items_by_key = {item.get('_cache_key'): item for item in cached_items if item.get('_cache_key')}
 
-            # Pre-fetch metadata for all items in one batch
-            metadata_by_key = {}
-            for item in items:
-                key = item.get('_cache_key')
-                if not key:
-                    continue
-                first_url = next(iter(item.get('urls', {}).values()), None)
-                meta = get_cached_metadata(
-                    title_with_year(item),
-                    media_type=item.get('type', 'movie'),
-                    url=first_url,
-                    imdb_id=item.get('imdb_id'),
-                    tmdb_id=item.get('tmdb_id')
-                )
-                metadata_by_key[key] = meta
+        # Deduplicate by cache key: watching items (from watch list) take priority over cached items
+        # This prevents a monitored/searching title from also appearing in the Discover tab
+        seen_keys = set()
+        deduped_items = []
+        for item in items:
+            key = item.get('_cache_key')
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                deduped_items.append(item)
+            elif not key:
+                # Items without a cache key (shouldn't happen, but keep them)
+                deduped_items.append(item)
+        items = deduped_items
 
-            self._discovery_items_cache = (cached_items, items_by_key, metadata_by_key)
+        # Pre-fetch metadata for all items in one batch
+        metadata_by_key = {}
+        for item in items:
+            key = item.get('_cache_key')
+            if not key:
+                continue
+            first_url = next(iter(item.get('urls', {}).values()), None)
+            meta = get_cached_metadata(
+                title_with_year(item),
+                media_type=item.get('type', 'movie'),
+                url=first_url,
+                imdb_id=item.get('imdb_id'),
+                tmdb_id=item.get('tmdb_id')
+            )
+            metadata_by_key[key] = meta
+
+        self._discovery_items_cache = (cached_items, items_by_key, metadata_by_key)
 
         return items, items_by_key, metadata_by_key
 
     def discovery_source_urls(self):
         """Return only discovery item URLs (unseen items from unified cache).
         These are the items shown in the discovery section of the media list: the titles being
-        looked for first, then what is listed."""
+        looked for first, then what is listed. Excludes watching items (from watch list)."""
         items, _, _ = self._get_discovery_items_cached()
-        return [f'discovery:{item["_cache_key"]}' for item in items if item.get('_cache_key')]
+        return [f'discovery:{item["_cache_key"]}' for item in items if item.get('_cache_key') and not item.get('watching')]
 
     def get_discovery_items(self):
         """Get current discovery items from unified cache, filtered by dismissal state, after the
         titles being looked for. Uses cached result within a refresh cycle."""
         items, _, _ = self._get_discovery_items_cached()
         return items
+
+    def track_item_count(self):
+        """Return the number of items in the Track tab (monitoring + searching entries)."""
+        with self._media_data_lock:
+            watch = self.media.get('watch', {})
+            count = sum(1 for w in watch.values() if w.get('monitoring') or (not w.get('source') and not w.get('monitoring')))
+        return count
 
     def _invalidate_discovery_cache(self):
         """Invalidate the discovery items cache (call when cache/state changes)."""
@@ -2057,3 +2078,556 @@ class MediaMixin:
                 if hasattr(row, 'media_source'):
                     self._update_media_row(row, configured)
         return False
+
+
+# ===== MediaAccordion: slide-up accordion with three tabs =====================
+
+class MediaAccordion:
+    """A slide-up accordion (Gtk.Revealer) containing a Gtk.Notebook with three tabs:
+    Watch (ready/downloading episodes), Discover (IMDb charts), Track (monitoring + searching).
+    Collapsed by default, header shows item counts."""
+
+    def __init__(self, parent):
+        self.parent = parent  # The PopupMixin instance
+        self.revealer = None
+        self.notebook = None
+        self.header_button = None
+        self.header_label = None
+        self.watch_scroller = None
+        self.discover_scroller = None
+        self.track_scroller = None
+        self.watch_listbox = None
+        self.discover_listbox = None
+        self.track_listbox = None
+        self._tab_labels = {}  # tab index -> label widget for updating counts
+
+    def build(self):
+        """Build the accordion widget: a header button + revealer with notebook."""
+        # Header button that toggles the revealer (no icon, no chevron, centered text)
+        self.header_button = Gtk.Button()
+        self.header_button.set_relief(Gtk.ReliefStyle.NONE)
+        self.header_button.get_style_context().add_class('media-accordion-header')
+        self.header_button.connect('clicked', self._on_header_clicked)
+
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header_box.set_margin_start(6)
+        header_box.set_margin_end(6)
+        header_box.set_margin_top(4)
+        header_box.set_margin_bottom(4)
+        header_box.set_halign(Gtk.Align.CENTER)
+        header_box.set_hexpand(True)
+
+        self.header_label = Gtk.Label(label='Media')
+        self.header_label.set_xalign(0.5)  # centered
+        self.header_label.set_hexpand(True)
+        header_box.pack_start(self.header_label, True, True, 0)
+
+        self.header_button.add(header_box)
+
+        # Revealer with slide-up animation
+        self.revealer = Gtk.Revealer()
+        self.revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
+        self.revealer.set_transition_duration(200)
+        self.revealer.set_reveal_child(False)  # collapsed by default
+
+        # Notebook with three tabs
+        self.notebook = Gtk.Notebook()
+        self.notebook.set_show_tabs(True)
+        self.notebook.set_show_border(False)
+        self.notebook.set_scrollable(True)
+        self.revealer.add(self.notebook)
+
+        # Tab 0: Watch - downloadable episodes
+        self.watch_listbox = Gtk.ListBox()
+        self.watch_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.watch_listbox.connect('row-activated', self._on_watch_row_activated)
+        self.watch_listbox.connect('button-press-event', self._on_watch_button_press)
+        self.watch_scroller = Gtk.ScrolledWindow()
+        self.watch_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # Do NOT set_propagate_natural_height - it breaks scrolling inside Revealer/Notebook
+        self.watch_scroller.add(self.watch_listbox)
+        self._add_tab(self.watch_scroller, 'Watch', 0)
+
+        # Tab 1: Discover - IMDb charts
+        self.discover_listbox = Gtk.ListBox()
+        self.discover_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.discover_listbox.connect('row-activated', self._on_discover_row_activated)
+        self.discover_listbox.connect('button-press-event', self._on_discover_button_press)
+        self.discover_scroller = Gtk.ScrolledWindow()
+        self.discover_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.discover_scroller.add(self.discover_listbox)
+        self._add_tab(self.discover_scroller, 'Discover', 1)
+
+        # Tab 2: Track - monitoring + searching entries
+        self.track_listbox = Gtk.ListBox()
+        self.track_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.track_listbox.connect('row-activated', self._on_track_row_activated)
+        self.track_listbox.connect('button-press-event', self._on_track_button_press)
+        self.track_scroller = Gtk.ScrolledWindow()
+        self.track_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.track_scroller.add(self.track_listbox)
+        self._add_tab(self.track_scroller, 'Track', 2)
+
+        # Constrain the notebook height so scrolled windows can scroll
+        # 75% of screen height minus header/footer space (similar to main scroller)
+        try:
+            display = Gdk.Display.get_default()
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
+            screen_height = monitor.get_geometry().height
+        except Exception:
+            screen_height = 1080
+        max_height = int(screen_height * 0.5)  # accordion gets half the screen
+        self.notebook.set_size_request(-1, max_height)
+
+        # Set up hover events for metadata popovers
+        self._setup_listbox_hover_events()
+
+        return self.header_button, self.revealer
+
+    def _add_tab(self, child, title, index):
+        """Add a tab to the notebook with a label that can be updated for counts."""
+        label = Gtk.Label(label=title)
+        label.set_xalign(0)
+        label.set_margin_start(6)
+        label.set_margin_end(6)
+        self._tab_labels[index] = label
+        self.notebook.append_page(child, label)
+
+    def _setup_listbox_hover_events(self):
+        """Connect motion and leave events to accordion listboxes for metadata popover tracking."""
+        for listbox in (self.watch_listbox, self.discover_listbox, self.track_listbox):
+            listbox.connect('motion-notify-event', self._on_listbox_motion)
+            listbox.connect('leave-notify-event', self._on_listbox_leave)
+            # Enable motion and leave events
+            listbox.set_events(listbox.get_events() | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        self._hovered_row = None
+
+    def _on_listbox_motion(self, listbox, event):
+        """Track mouse motion over listbox to show metadata popover for hovered row."""
+        # Get row at current Y position
+        row = listbox.get_row_at_y(int(event.y))
+        if row and hasattr(row, 'media_source'):
+            box = row.get_child()
+            if box and hasattr(box, 'popover_data') and box.popover_data:
+                # Check if this is a different row than currently hovered
+                if self._hovered_row != row:
+                    self._hovered_row = row
+                    # Trigger enter handler
+                    self.parent._on_media_row_enter(box, None)
+        elif row and hasattr(row, 'discovery_item'):
+            box = row.get_child()
+            if box and hasattr(box, 'popover_data') and box.popover_data:
+                if self._hovered_row != row:
+                    self._hovered_row = row
+                    self.parent._on_media_row_enter(box, None)
+        elif row and hasattr(row, 'track_key'):
+            box = row.get_child()
+            if box and hasattr(box, 'popover_data') and box.popover_data:
+                if self._hovered_row != row:
+                    self._hovered_row = row
+                    self.parent._on_media_row_enter(box, None)
+        elif self._hovered_row:
+            # Mouse left all media rows
+            self._hovered_row = None
+            GLib.timeout_add(100, self.parent._hide_metadata_popover)
+        return False
+
+    def _on_listbox_leave(self, listbox, event):
+        """Mouse left the listbox entirely."""
+        self._hovered_row = None
+        GLib.timeout_add(100, self.parent._hide_metadata_popover)
+        return False
+
+    def _on_header_clicked(self, _btn):
+        """Toggle the revealer."""
+        expanded = not self.revealer.get_reveal_child()
+        self.revealer.set_reveal_child(expanded)
+
+    def refresh(self):
+        """Rebuild all three tabs with current data and update header counts."""
+        self._refresh_watch_tab()
+        self._refresh_discover_tab()
+        self._refresh_track_tab()
+        self._update_header_label()
+
+    def _update_header_label(self):
+        """Update the header button label with total counts (Watch + Discover only;
+        Track tab items are not counted in the header badge)."""
+        watch_count = len(self.watch_listbox.get_children())
+        discover_count = len(self.discover_listbox.get_children())
+        total = watch_count + discover_count
+        if total > 0:
+            self.header_label.set_markup(f'<b>Media</b> <span size="small">({total})</span>')
+        else:
+            self.header_label.set_markup('<b>Media</b>')
+
+    def _update_tab_counts(self):
+        """Update tab labels with item counts."""
+        for idx, label in self._tab_labels.items():
+            listbox = [self.watch_listbox, self.discover_listbox, self.track_listbox][idx]
+            count = len(listbox.get_children())
+            base_title = ['Watch', 'Discover', 'Track'][idx]
+            if count > 0:
+                label.set_markup(f'<b>{base_title}</b> <span size="small">({count})</span>')
+            else:
+                label.set_markup(f'<b>{base_title}</b>')
+
+    def _clear_listbox(self, listbox):
+        for child in listbox.get_children():
+            listbox.remove(child)
+
+    # ---- Watch tab -----------------------------------------------------------
+
+    def _refresh_watch_tab(self):
+        """Show downloadable media sources (episodes ready or downloading)."""
+        self._clear_listbox(self.watch_listbox)
+        media_urls = self.parent.media_source_urls()
+        for url in media_urls:
+            row = self.parent.build_media_row(url)
+            if row:
+                self.watch_listbox.add(row)
+        self.watch_listbox.show_all()
+        self._update_tab_counts()
+
+    def _on_watch_row_activated(self, _listbox, row):
+        if hasattr(row, 'media_source'):
+            self.parent.on_media_row_clicked(row.media_source)
+
+    def _on_watch_button_press(self, _listbox, event):
+        if event.button == 3:  # right-click
+            row = self.watch_listbox.get_row_at_y(int(event.y))
+            if row and hasattr(row, 'media_source'):
+                self.parent._show_media_menu(row, event)
+                return True
+        return False
+
+    # ---- Discover tab --------------------------------------------------------
+
+    def _refresh_discover_tab(self):
+        """Show discovery items (unseen items from unified cache) with a Monitor button."""
+        self._clear_listbox(self.discover_listbox)
+        discovery_urls = self.parent.discovery_source_urls()
+        for url in discovery_urls:
+            row = self._build_discover_row(url)
+            if row:
+                self.discover_listbox.add(row)
+        # Ensure rows are sized for natural height propagation in scrolled window
+        self.discover_listbox.show_all()
+        self._update_tab_counts()
+
+    def _build_discover_row(self, url):
+        """Build a discovery row with a Monitor button."""
+        # Parse the virtual URL: discovery:<cache_key>
+        prefix, _, cache_key = url.partition(':')
+        # Use cached items and metadata (O(1) lookup instead of O(n) search)
+        _, items_by_key, metadata_by_key = self.parent._get_discovery_items_cached()
+        item = items_by_key.get(cache_key)
+        meta = metadata_by_key.get(cache_key)
+        if not item:
+            return None
+
+        row = Gtk.ListBoxRow()
+        row.set_selectable(False)
+        row.set_activatable(True)
+        row.discovery_item = item  # for click/dismiss handlers
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        box.set_margin_top(3)
+        box.set_margin_bottom(3)
+
+        badge_text = '🎬' if item.get('type') == 'movie' else '📺'
+        badge = Gtk.Label(label=badge_text)
+        badge.set_margin_end(6)
+        box.pack_start(badge, False, False, 0)
+
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text_box.set_hexpand(True)
+        title_label = Gtk.Label()
+        title_label.set_markup(f'<b>{GLib.markup_escape_text(item["title"])}</b>')
+        title_label.set_xalign(0)
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        title_label.set_hexpand(True)
+        text_box.pack_start(title_label, False, False, 0)
+
+        # Show genre and rating
+        api_genre = meta.get('genre') if meta else None
+        site_genre = ', '.join(item['genre']) if item.get('genre') else None
+        rating = meta.get('imdb_rating') if meta else None
+        genre = ' '.join(part for part in (f'⭐ {rating}' if rating else '', f'🎭 {api_genre or site_genre}' if (api_genre or site_genre) else '') if part)
+
+        # Show genre and source on the same row
+        genre_source_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        genre_source_box.set_hexpand(True)
+        genre_source_box.set_halign(Gtk.Align.FILL)
+        if genre:
+            genre_label = Gtk.Label(label=genre)
+            genre_label.set_xalign(0)
+            genre_label.get_style_context().add_class('menu-text')
+            genre_label.set_ellipsize(Pango.EllipsizeMode.END)
+            genre_label.set_max_width_chars(60)
+            genre_source_box.pack_start(genre_label, False, False, 0)
+
+        # Show source badges (which sites have this movie/series) on the same row as genre, at the end
+        urls = item.get('urls', {})
+        if urls:
+            # Create a filler to push sources to the right
+            filler = Gtk.Box()
+            filler.set_hexpand(True)
+            genre_source_box.pack_start(filler, True, True, 0)
+
+            source_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            for source_name in urls.keys():
+                # Convert plugin name to real site address (e.g., fsonline_one -> fsonline.one)
+                display_name = source_name.replace('_', '.')
+                src_label = Gtk.Label(label=display_name)
+                src_label.set_margin_end(4)
+                src_label.get_style_context().add_class('menu-text')
+                src_label.set_markup(f'<span size="small"><b>{GLib.markup_escape_text(display_name)}</b></span>')
+                source_box.pack_start(src_label, False, False, 0)
+            genre_source_box.pack_start(source_box, False, False, 0)
+
+        if genre or urls:
+            text_box.pack_start(genre_source_box, True, True, 0)
+
+        box.pack_start(text_box, True, True, 0)
+
+        # Show quality badge for movies (from fsonline plugin)
+        if item.get('type') == 'movie' and item.get('quality'):
+            quality = item['quality'].upper()
+            quality_label = Gtk.Label(label=f'  {quality}  ')
+            quality_label.set_margin_start(6)
+            quality_label.set_margin_end(6)
+            if quality == 'HD':
+                quality_label.get_style_context().add_class('quality-hd')
+            else:
+                quality_label.get_style_context().add_class('quality-low')
+            box.pack_start(quality_label, False, False, 0)
+
+        # Monitor button - adds to watch list with monitoring=True
+        monitor_btn = Gtk.Button(label='Monitor')
+        monitor_btn.set_relief(Gtk.ReliefStyle.NONE)
+        monitor_btn.get_style_context().add_class('menu-text')
+        monitor_btn.connect('clicked', self._on_monitor_clicked, item)
+        box.pack_start(monitor_btn, False, False, 0)
+
+        # Add custom metadata tooltip with poster (TMDb/OMDB) - using Popover on left of popup
+        box.popover_data = {
+            'type': 'discovery',
+            'title': title_with_year(item),
+            'media_type': item.get('type', 'movie'),
+            'urls': item.get('urls', {}),
+            'imdb_id': item.get('imdb_id'),
+            'tmdb_id': item.get('tmdb_id'),
+        }
+
+        row.add(box)
+        return row
+
+    def _on_monitor_clicked(self, _btn, item):
+        """Add a discovery item to the watch list with monitoring=True (not searching)."""
+        # Create a watch entry with monitoring=True
+        key = item.get('_cache_key')
+        now = time_module.time()
+        meta = get_cached_metadata(title_with_year(item), item.get('type') or 'movie', imdb_id=item.get('imdb_id'))
+        year = item.get('year') or ((meta or {}).get('year') or '')[:4]
+        with self.parent._media_data_lock:
+            self.parent.media.setdefault('watch', {}).setdefault(
+                key, new_watch_entry(item, now, year if year.isdigit() else ''))
+            self.parent.media['watch'][key]['monitoring'] = True
+            save_media(self.parent.media)
+        # Invalidate discovery cache so the item moves to Track tab
+        self.parent._invalidate_discovery_cache()
+        GLib.idle_add(self.refresh)
+
+    def _on_discover_row_activated(self, _listbox, row):
+        if hasattr(row, 'discovery_item'):
+            self.parent._on_discovery_row_activated(row.discovery_item)
+
+    def _on_discover_button_press(self, _listbox, event):
+        if event.button == 3:  # right-click
+            row = self.discover_listbox.get_row_at_y(int(event.y))
+            if row and hasattr(row, 'discovery_item'):
+                self.parent._on_discovery_dismiss(None, row.discovery_item)
+                self.parent._invalidate_discovery_cache()
+                GLib.idle_add(self.refresh)
+                return True
+        return False
+
+    # ---- Track tab -----------------------------------------------------------
+
+    def _refresh_track_tab(self):
+        """Show monitoring entries (monitoring=True) and searching entries (source=None)."""
+        self._clear_listbox(self.track_listbox)
+
+        # Monitoring entries: watch list items with monitoring=True
+        with self.parent._media_data_lock:
+            watch_items = [
+                (key, dict(w)) for key, w in self.parent.media.get('watch', {}).items()
+                if w.get('monitoring')
+            ]
+
+        for key, entry in watch_items:
+            row = self._build_track_monitoring_row(key, entry)
+            if row:
+                self.track_listbox.add(row)
+
+        # Searching entries: watch list items with no source and not monitoring
+        with self.parent._media_data_lock:
+            searching_items = [
+                (key, dict(w)) for key, w in self.parent.media.get('watch', {}).items()
+                if not w.get('monitoring') and not w.get('source')
+            ]
+
+        for key, entry in searching_items:
+            row = self._build_track_searching_row(key, entry)
+            if row:
+                self.track_listbox.add(row)
+
+        self.track_listbox.show_all()
+        self._update_tab_counts()
+
+    def _build_track_monitoring_row(self, key, entry):
+        """Build a row for a monitoring entry (monitoring=True)."""
+        row = Gtk.ListBoxRow()
+        row.set_selectable(False)
+        row.set_activatable(True)
+        row.track_key = key
+        row.track_type = 'monitoring'
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        box.set_margin_top(3)
+        box.set_margin_bottom(3)
+
+        # Badge
+        badge_text = '📺' if entry.get('type') == 'series' else '🎬'
+        badge = Gtk.Label(label=badge_text)
+        badge.set_margin_end(4)
+        box.pack_start(badge, False, False, 0)
+
+        # Title and status
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text_box.set_hexpand(True)
+
+        title_label = Gtk.Label()
+        title_label.set_markup(f'<b>{GLib.markup_escape_text(entry["title"])}</b>')
+        title_label.set_xalign(0)
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        title_label.set_hexpand(True)
+        text_box.pack_start(title_label, False, False, 0)
+
+        # Status: monitoring
+        status_label = Gtk.Label()
+        status_label.set_markup('<span size="small"><i>Monitoring for new episodes…</i></span>')
+        status_label.set_xalign(0)
+        status_label.get_style_context().add_class('menu-text')
+        text_box.pack_start(status_label, False, False, 0)
+
+        box.pack_start(text_box, True, True, 0)
+
+        # Stop tracking button
+        stop_btn = Gtk.Button(label='Stop tracking')
+        stop_btn.set_relief(Gtk.ReliefStyle.NONE)
+        stop_btn.get_style_context().add_class('menu-text')
+        stop_btn.connect('clicked', self._on_stop_tracking_clicked, key, entry)
+        box.pack_start(stop_btn, False, False, 0)
+
+        row.add(box)
+        return row
+
+    def _build_track_searching_row(self, key, entry):
+        """Build a row for a searching entry (source=None, monitoring=False)."""
+        row = Gtk.ListBoxRow()
+        row.set_selectable(False)
+        row.set_activatable(True)
+        row.track_key = key
+        row.track_type = 'searching'
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+        box.set_margin_top(3)
+        box.set_margin_bottom(3)
+
+        # Badge
+        badge_text = '📺' if entry.get('type') == 'series' else '🎬'
+        badge = Gtk.Label(label=badge_text)
+        badge.set_margin_end(4)
+        box.pack_start(badge, False, False, 0)
+
+        # Title and status
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text_box.set_hexpand(True)
+
+        title_label = Gtk.Label()
+        title_label.set_markup(f'<b>{GLib.markup_escape_text(entry["title"])}</b>')
+        title_label.set_xalign(0)
+        title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        title_label.set_hexpand(True)
+        text_box.pack_start(title_label, False, False, 0)
+
+        # Status: searching
+        status_label = Gtk.Label()
+        status_label.set_markup('<span size="small"><i>Looking for a source…</i></span>')
+        status_label.set_xalign(0)
+        status_label.get_style_context().add_class('menu-text')
+        text_box.pack_start(status_label, False, False, 0)
+
+        box.pack_start(text_box, True, True, 0)
+
+        # Stop tracking button (removes from watch list)
+        stop_btn = Gtk.Button(label='Stop tracking')
+        stop_btn.set_relief(Gtk.ReliefStyle.NONE)
+        stop_btn.get_style_context().add_class('menu-text')
+        stop_btn.connect('clicked', self._on_stop_tracking_clicked, key, entry)
+        box.pack_start(stop_btn, False, False, 0)
+
+        row.add(box)
+        return row
+
+    def _on_track_row_activated(self, _listbox, row):
+        # Left-click on track row - could trigger a manual search
+        pass
+
+    def _on_track_button_press(self, _listbox, event):
+        if event.button == 3:  # right-click
+            row = self.track_listbox.get_row_at_y(int(event.y))
+            if row and hasattr(row, 'track_key'):
+                self._on_stop_tracking_clicked(None, row.track_key, None)
+                return True
+        return False
+
+    def _on_stop_tracking_clicked(self, _btn, key, entry):
+        """Stop tracking: remove from watch list, add to track_dismissed so it doesn't reappear in Discover."""
+        # Add to track_dismissed set
+        with self.parent.lock:
+            track_dismissed = set(self.parent.state.get('media_track_dismissed', []))
+            track_dismissed.add(key)
+            self.parent.state['media_track_dismissed'] = sorted(track_dismissed)
+            from ..state import save_state
+            save_state(self.parent.state)
+
+        # Remove from watch list
+        with self.parent._media_data_lock:
+            self.parent.media.setdefault('watch', {}).pop(key, None)
+            from ..state import save_media
+            save_media(self.parent.media)
+
+        # Invalidate discovery cache so the item doesn't reappear
+        self.parent._invalidate_discovery_cache()
+
+        # Refresh
+        GLib.idle_add(self.refresh)
+
+    # Public method to expand the accordion
+    def expand(self):
+        if not self.revealer.get_reveal_child():
+            self.revealer.set_reveal_child(True)
+
+    # Public method to collapse the accordion
+    def collapse(self):
+        if self.revealer.get_reveal_child():
+            self.revealer.set_reveal_child(False)

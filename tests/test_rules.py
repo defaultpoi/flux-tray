@@ -342,7 +342,8 @@ class TestHeaderClicks(unittest.TestCase):
         def __init__(self):
             self.popup = mock.MagicMock()
             self._show_feed_menu = mock.Mock()
-            self.on_mark_read_clicked = mock.Mock()
+            self._remove_unread_row = mock.Mock()
+            self.on_mark_read_clicked = mock.Mock()  # kept for test_right_click_on_a_saved_item
             self.remove_read_later = mock.Mock()
             self._show_media_menu = mock.Mock()
 
@@ -405,7 +406,7 @@ class TestHeaderClicks(unittest.TestCase):
         row = mock.Mock(spec=['entry_id', 'link'], entry_id='1', link='l')
         handled, _, _ = self.press(stub, row, button=3)
         self.assertTrue(handled)
-        stub.on_mark_read_clicked.assert_called_once_with(None, '1')
+        stub._remove_unread_row.assert_called_once_with(row, '1')
 
     def test_right_click_on_a_saved_item_takes_it_off_the_list_without_opening_it(self):
         stub = self.Stub()

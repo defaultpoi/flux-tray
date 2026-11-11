@@ -14,7 +14,7 @@ class TestAWatchRecord(unittest.TestCase):
         item = {'title': 'Dune: Part Two', 'type': 'movie', 'imdb_id': 'tt15239678', 'url': 'https://www.imdb.com/title/tt15239678/'}
         self.assertEqual(rt.new_watch_entry(item, 1000, year='2024'), {
             'title': 'Dune: Part Two', 'year': '2024', 'type': 'movie', 'imdb_id': 'tt15239678',
-            'added': 1000.0, 'checked': None, 'source': None})
+            'added': 1000.0, 'checked': None, 'source': None, 'monitoring': False})
 
     def test_a_series_stays_one_and_anything_else_is_a_movie(self):
         self.assertEqual(rt.new_watch_entry({'title': 'S', 'type': 'series'}, 1)['type'], 'series')
@@ -31,9 +31,27 @@ class TestAWatchRecord(unittest.TestCase):
         entry['source'] = 'fsonline_one:https://f/x'
         self.assertFalse(rt.is_searching(entry))
 
+    def test_new_watch_entry_includes_monitoring_false_by_default(self):
+        entry = rt.new_watch_entry({'title': 'X'}, 1)
+        self.assertIn('monitoring', entry)
+        self.assertFalse(entry['monitoring'])
+
+    def test_is_searching_true_for_monitoring_entries(self):
+        """Entries with monitoring=True but no source are still 'searching' (need checking)."""
+        entry = rt.new_watch_entry({'title': 'X'}, 1)
+        entry['monitoring'] = True
+        self.assertTrue(rt.is_searching(entry))
+
+    def test_is_searching_false_when_source_found_even_if_monitoring(self):
+        """Once a source is found, not searching anymore regardless of monitoring flag."""
+        entry = rt.new_watch_entry({'title': 'X'}, 1)
+        entry['monitoring'] = True
+        entry['source'] = 'fsonline_one:https://f/x'
+        self.assertFalse(rt.is_searching(entry))
+
 
 class TestWhatIsStored(unittest.TestCase):
-    GOOD = {'title': 'X', 'year': '2024', 'type': 'series', 'imdb_id': 'tt1', 'added': 5, 'checked': 6.5, 'source': 'p:u'}
+    GOOD = {'title': 'X', 'year': '2024', 'type': 'series', 'imdb_id': 'tt1', 'added': 5, 'checked': 6.5, 'source': 'p:u', 'monitoring': False}
 
     def test_a_good_record_comes_back_the_same(self):
         self.assertEqual(rt.clean_watch({'imdb:tt1': dict(self.GOOD)}),
@@ -41,9 +59,14 @@ class TestWhatIsStored(unittest.TestCase):
 
     def test_every_field_is_present_and_of_the_right_type(self):
         clean = rt.clean_watch({'k': {'title': 'X', 'year': 2024, 'type': 'tv', 'imdb_id': 5, 'added': 'now',
-                                      'checked': float('nan'), 'source': ''}})
+                                      'checked': float('nan'), 'source': '', 'monitoring': 0}})
         self.assertEqual(clean, {'k': {'title': 'X', 'year': '', 'type': 'movie', 'imdb_id': None,
-                                       'added': 0.0, 'checked': None, 'source': None}})
+                                       'added': 0.0, 'checked': None, 'source': None, 'monitoring': False}})
+
+    def test_monitoring_field_preserved_when_true(self):
+        good_with_monitoring = dict(self.GOOD, monitoring=True)
+        clean = rt.clean_watch({'imdb:tt1': good_with_monitoring})
+        self.assertTrue(clean['imdb:tt1']['monitoring'])
 
     def test_what_is_not_a_record_is_dropped(self):
         self.assertEqual(rt.clean_watch({5: dict(self.GOOD), 'a': 'text', 'b': {'year': '2020'}, 'c': {'title': 7}}), {})
@@ -61,6 +84,19 @@ class TestWhenToLook(unittest.TestCase):
 
     def test_one_that_has_its_source_is_never_looked_for_again(self):
         self.assertFalse(rt.search_due({'source': 'p:u', 'checked': None}, 10 ** 9, 3600))
+
+    def test_monitoring_entry_without_source_is_due_at_once(self):
+        """Monitoring entries (monitoring=True, source=None) are due for checking like searching entries."""
+        self.assertTrue(rt.search_due({'source': None, 'checked': None, 'monitoring': True}, 1000, 3600))
+
+    def test_monitoring_entry_respects_check_interval(self):
+        """Monitoring entries respect the check interval."""
+        self.assertFalse(rt.search_due({'source': None, 'checked': 1000.0, 'monitoring': True}, 1000 + 3599, 3600))
+        self.assertTrue(rt.search_due({'source': None, 'checked': 1000.0, 'monitoring': True}, 1000 + 3600, 3600))
+
+    def test_monitoring_entry_with_source_not_due(self):
+        """Once a monitoring entry has a source, it's no longer due."""
+        self.assertFalse(rt.search_due({'source': 'p:u', 'checked': None, 'monitoring': True}, 10 ** 9, 3600))
 
 
 class TestFindingATitle(unittest.TestCase):

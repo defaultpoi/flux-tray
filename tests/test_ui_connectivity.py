@@ -33,6 +33,9 @@ class TestOfflineBehavior(unittest.TestCase):
         def _remove_unread(self, item_id):
             self.removed.append(item_id)
 
+        def _remove_unread_row(self, row, item_id):
+            self.removed.append(item_id)
+
         def update_icon(self):
             self.updates += 1
 

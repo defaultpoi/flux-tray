@@ -80,6 +80,11 @@ def load_state():
     seen_discovery = state.get('media_discovery_seen')
     state['media_discovery_seen'] = ([k for k in seen_discovery if isinstance(k, str)]
                                      if isinstance(seen_discovery, list) else [])
+    # the track items the person explicitly stopped tracking (removed from Track tab);
+    # these are kept so they don't reappear in Discover tab
+    track_dismissed = state.get('media_track_dismissed')
+    state['media_track_dismissed'] = ([k for k in track_dismissed if isinstance(k, str)]
+                                      if isinstance(track_dismissed, list) else [])
     # the running countdown's end as a wall-clock timestamp; anything else is dropped
     end = state.get('timer_end')
     if isinstance(end, bool) or not isinstance(end, (int, float)) or not math.isfinite(end):
@@ -181,9 +186,17 @@ def merge_feed_check(state, now, newly_seen_ids, last_checked, feed_links, new_i
         if eid not in merged_seen:
             merged_seen[eid] = {'seen_at': now, 'updated': None}
     cutoff = now - SEEN_RETENTION_SECONDS
-    # Prune old entries based on 'seen_at'
+    # Prune old entries: keep if seen_at OR updated is within retention period
+    # (an entry seen long ago but updated recently must not be pruned, or it
+    # will resurface as new on the next check)
+    def _is_recent(val):
+        seen_at = val.get('seen_at', 0)
+        updated = val.get('updated')
+        return (isinstance(seen_at, (int, float)) and seen_at >= cutoff) or \
+               (isinstance(updated, (int, float)) and updated >= cutoff)
+
     merged_seen = {eid: val for eid, val in merged_seen.items()
-                   if isinstance(val, dict) and val.get('seen_at', 0) >= cutoff}
+                   if isinstance(val, dict) and _is_recent(val)}
 
     merged_last_checked = dict(state.get('last_checked', {}))
     merged_last_checked.update(last_checked)

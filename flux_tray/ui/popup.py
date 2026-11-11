@@ -17,8 +17,10 @@ from ..links import open_link
 from ..log import _log
 from ..playback import open_twitch_stream, open_youtube_stream
 from ..rules import group_unread_by_feed, item_detail_text, item_is_highlighted
+from ..state import save_state
 from ..updates import format_change
 from .timer import TIMER_RESERVED_HEIGHT_PX, format_timer_countdown
+from .media import MediaAccordion
 
 
 MAX_LIST_ITEMS = 40
@@ -174,15 +176,17 @@ class PopupMixin:
             self.popup.hide()
 
     def build_popup_window(self):
-        """The popup, top to bottom: weather bar, offline banner, schedule warning, the
-        list with the timer slide over it, the footer buttons. Each part is built by
-        its own method; the order of the calls is the order the widgets were always
-        made in, which the timer widgets depend on."""
+        """The popup, top to bottom: weather bar, offline banner, schedule warning,
+        the list with the timer slide over it, Media accordion (collapsed by default),
+        the footer buttons. Each part is built by its own method; the order of the
+        calls is the order the widgets were always made in, which the timer widgets
+        depend on."""
         win = self._new_popup_window()
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._add_weather_bar(outer)
         self._add_offline_banner(outer)
         self._add_schedule_warning(outer)
+
         content_overlay = self._build_list_overlay()
         timer_children = self._add_timer_slide(content_overlay)
         self._add_timer_status(content_overlay)
@@ -201,8 +205,15 @@ class PopupMixin:
 
         outer.pack_start(content_overlay, True, True, 0)
 
-        outer.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 2)
-        outer.pack_start(self._build_footer(), False, False, 0)
+        # Media accordion (slide-up with Watch/Discover/Track tabs) - placed at bottom, just above footer
+        # Use pack_end so the revealer slides UP from the bottom edge of the popup
+        self._media_accordion = MediaAccordion(self)
+        self.media_accordion_header, self.media_accordion_revealer = self._media_accordion.build()
+        footer = self._build_footer()
+        outer.pack_end(footer, False, False, 0)
+        outer.pack_end(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 2)
+        outer.pack_end(self.media_accordion_revealer, False, False, 0)
+        outer.pack_end(self.media_accordion_header, False, False, 0)
 
         win.add(outer)
         self.popup = win
@@ -562,8 +573,9 @@ class PopupMixin:
         any_live = bool(live_channels or live_youtube_channels)
         media_urls = self.media_source_urls()
         discovery_urls = self.discovery_source_urls()
-        # Discovery items keep the popup open like unread items; regular media sources behave like live channels
-        truly_empty = not unread and not available and not any_live and not discovery_urls and not media_urls
+        track_count = self.track_item_count()
+        # Discovery items and Track items keep the popup open like unread items; regular media sources behave like live channels
+        truly_empty = not unread and not available and not any_live and not discovery_urls and not media_urls and track_count == 0
         # Only live channels or downloadable media (not discovery) collapse the popup when already visible
         only_live_or_downloadable = (not unread and not available and not discovery_urls) and (any_live or bool(media_urls))
         popup_already_visible = bool(self.popup and self.popup.get_visible())
@@ -600,19 +612,10 @@ class PopupMixin:
                 for entry in live_youtube_channels:
                     self.listbox.add(self.build_youtube_row(entry))
 
-            # Single Media section: downloadable items first (live-like), then discovery items (unread-like)
-            if media_urls or discovery_urls:
-                self._media_header_row = self.build_header_row(
-                    '__media__', 'Media', is_first=is_first_section, clickable=False
-                )
-                self.listbox.add(self._media_header_row)
-                is_first_section = False
-                # Downloadable media sources at the top (behave like live channels)
-                for url in media_urls:
-                    self.listbox.add(self.build_media_row(url))
-                # Discovery items after (behave like unread news)
-                for url in discovery_urls:
-                    self.listbox.add(self.build_media_row(url))
+            # Media items are now in the accordion, not in the main list
+            # Refresh the accordion
+            if hasattr(self, '_media_accordion'):
+                self._media_accordion.refresh()
 
             if unread:
                 shown = unread[:MAX_LIST_ITEMS]
@@ -901,7 +904,7 @@ class PopupMixin:
                 self._show_feed_menu(row, event)
                 return True
             if row is not None and hasattr(row, 'entry_id'):
-                self.on_mark_read_clicked(None, row.entry_id)  # mark as read without opening
+                self._remove_unread_row(row, row.entry_id)  # fast remove without full rebuild
                 return True
             if row is not None and hasattr(row, 'readlater_id'):
                 self.remove_read_later(row.readlater_id)  # off the Read later list without opening
@@ -920,6 +923,21 @@ class PopupMixin:
                     self.popup.hide()  # empty space below the last item — close the popup
                 return True
         return False
+
+    def _remove_unread_row(self, row, item_id):
+        """Fast path: remove a single unread row from the listbox and state without full rebuild."""
+        with self.lock:
+            self.state['unread'] = [e for e in self.state.get('unread', []) if e['id'] != item_id]
+            save_state(self.state)
+        # Remove the row from the listbox directly
+        self.listbox.remove(row)
+        # If list is now empty and popup should collapse, handle it
+        if not self.listbox.get_children() and self.popup and self.popup.get_visible():
+            # Need to check if there are other sections (live, read_later, etc.)
+            self.update_icon()
+            self.refresh_list(keep_open=True)
+        else:
+            self.update_icon()
 
     def on_row_activated(self, _listbox, row):
         if getattr(row, 'summary_header', False):

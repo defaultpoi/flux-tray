@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 from facade import rt
-from helpers import isolate_media_caches
+from helpers import isolate_media_caches, TmpConfigCase
 
 
 URL = 'https://archive.org/details/show'
@@ -2527,7 +2527,9 @@ class TestWatchingATitle(unittest.TestCase):
         rt.update_media_cache(lambda c: rt.get_or_create_entry(c, {'title': 'Listed', 'imdb_id': 'tt9', 'type': 'movie', '_plugin': 'p', 'url': 'u', 'rank': 1}))
         items = self.stub.get_discovery_items()
         self.assertEqual([(i['title'], bool(i.get('watching'))) for i in items], [('Later', True), ('Dune: Part Two', True), ('Listed', False)])
-        self.assertEqual(self.stub.discovery_source_urls(), ['discovery:imdb:tt2', 'discovery:imdb:tt15239678', 'discovery:imdb:tt9'])
+        # discovery_source_urls() now returns only cached discovery items (not watching items)
+        # Watching items are shown in the Track tab of the MediaAccordion
+        self.assertEqual(self.stub.discovery_source_urls(), ['discovery:imdb:tt9'])
 
     def test_a_dismissed_title_that_is_being_looked_for_still_shows_as_such(self):
         self.watch_entry()
@@ -2711,3 +2713,316 @@ class TestFromAChartToASource(unittest.TestCase):
         self.assertEqual([i['title'] for i in self.stub.get_discovery_items()], ['Not On The Site'])
         self.assertEqual(self.stub.media['watch'], {})
         self.assertEqual(self.stub.media['sources'], {})
+
+
+class TestMediaAccordion(TmpConfigCase):
+    """Tests for the MediaAccordion class: three-tab slide-up accordion for Watch/Discover/Track."""
+
+    def setUp(self):
+        super().setUp()
+        isolate_media_caches(self)
+        self.idle = []
+        self.sources = [(URL, 'Test Show', None)]
+        self.settings = {'path': '/tmp', 'interval': 3600, 'ahead': 2, 'behind': None, 'grace': 24 * 3600,
+                         'sleep': 0, 'screen': None}
+        self.movies = set()
+        for name, value in (('load_media_sources', mock.Mock(side_effect=lambda: list(self.sources))),
+                            ('load_media_movies', mock.Mock(side_effect=lambda: set(self.movies))),
+                            ('load_media_settings', mock.Mock(side_effect=lambda: dict(self.settings))),
+                            ('save_media', mock.Mock()),
+                            ('load_media_cache', mock.Mock(return_value={})),
+                            ('get_all_cached_items', mock.Mock(return_value=[])),
+                            ('refresh_metadata_cache', mock.Mock(return_value=0)),
+                            ('get_cached_metadata', mock.Mock(return_value=None))):
+            patcher = mock.patch.object(rt, name, value)
+            setattr(self, name, patcher.start())
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(rt.GLib, 'idle_add', side_effect=lambda f, *a: self.idle.append((f, a)))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def make_stub(self):
+        stub = Stub()
+        stub.media = {'sources': {}, 'watch': {}}
+        stub.media_status = {}
+        stub.media_errors = {}
+        stub.media_registry = FakeRegistry()
+        stub._media_request_lock = threading.Lock()
+        stub._media_checking = False
+        stub._media_pending_all = False
+        stub._media_pending = set()
+        stub._media_known_sources = set()
+        stub._media_config_monitor = None
+        stub._media_config_timer = None
+        stub._media_data_lock = threading.Lock()
+        stub._media_queue_lock = threading.Lock()
+        stub._media_queue = []
+        stub._media_current = None
+        stub._media_worker_running = False
+        stub._media_cancel = set()
+        stub._discovery_items_cache = None
+        stub._media_playlist_episodes = {}
+        stub.popup = mock.MagicMock()
+        stub.popup.get_visible.return_value = False
+        stub.listbox = mock.MagicMock()
+        stub.note_request_failure = mock.Mock()
+        stub.on_new_items = mock.Mock()
+        stub.refresh_list = mock.Mock()
+        stub.lock = threading.Lock()
+        stub.state = {}
+        stub._media_header_row = None
+        # Add track_item_count method (from MediaMixin)
+        stub.track_item_count = lambda: sum(
+            1 for w in stub.media.get('watch', {}).values()
+            if w.get('monitoring') or (not w.get('source') and not w.get('monitoring'))
+        )
+        return stub
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_build_creates_header_button_revealer_notebook_and_three_tabs(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        header, revealer = accordion.build()
+
+        self.assertIsInstance(header, rt.Gtk.Button)
+        self.assertIsInstance(revealer, rt.Gtk.Revealer)
+        self.assertIs(accordion.notebook, revealer.get_child())
+        self.assertIsInstance(accordion.notebook, rt.Gtk.Notebook)
+        # Three tabs: Watch, Discover, Track
+        self.assertEqual(accordion.notebook.get_n_pages(), 3)
+        self.assertEqual(accordion._tab_labels[0].get_text(), 'Watch')
+        self.assertEqual(accordion._tab_labels[1].get_text(), 'Discover')
+        self.assertEqual(accordion._tab_labels[2].get_text(), 'Track')
+        # Revealer starts collapsed
+        self.assertFalse(revealer.get_reveal_child())
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_header_button_has_centered_text_no_icon_no_chevron(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        header, revealer = accordion.build()
+
+        # Header is a button
+        self.assertIsInstance(header, rt.Gtk.Button)
+        # Header has no icon child (no Image with video-display-symbolic)
+        header_children = header.get_children()
+        self.assertEqual(len(header_children), 1)  # Only the header_box
+        header_box = header_children[0]
+        self.assertIsInstance(header_box, rt.Gtk.Box)
+        # Header box has centered alignment
+        self.assertEqual(header_box.get_halign(), rt.Gtk.Align.CENTER)
+        self.assertTrue(header_box.get_hexpand())
+        # Header box has one child: the label
+        box_children = header_box.get_children()
+        self.assertEqual(len(box_children), 1)
+        header_label = box_children[0]
+        self.assertIsInstance(header_label, rt.Gtk.Label)
+        # Label is centered
+        self.assertEqual(header_label.get_xalign(), 0.5)
+        self.assertTrue(header_label.get_hexpand())
+        # Label has no markup initially (just "Media")
+        self.assertEqual(header_label.get_text(), 'Media')
+        # No chevron attribute
+        self.assertFalse(hasattr(accordion, 'chevron'))
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_header_click_toggles_revealer(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+
+        # Initially collapsed
+        self.assertFalse(accordion.revealer.get_reveal_child())
+
+        # Click header -> expands
+        accordion._on_header_clicked(accordion.header_button)
+        self.assertTrue(accordion.revealer.get_reveal_child())
+
+        # Click again -> collapses
+        accordion._on_header_clicked(accordion.header_button)
+        self.assertFalse(accordion.revealer.get_reveal_child())
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_refresh_watch_tab_calls_build_media_row_for_each_source(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+
+        # Mock build_media_row to return a mock Gtk.Widget
+        fake_row = mock.MagicMock(spec=rt.Gtk.Widget)
+        fake_row.media_source = URL
+        stub.build_media_row = mock.Mock(return_value=fake_row)
+        stub.media_source_urls = mock.Mock(return_value=[URL])
+        # Mock listbox add
+        accordion.watch_listbox.add = mock.Mock()
+
+        accordion._refresh_watch_tab()
+
+        stub.build_media_row.assert_called_once_with(URL)
+        accordion.watch_listbox.add.assert_called_once_with(fake_row)
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_refresh_discover_tab_uses_cached_items(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+
+        # Mock discovery items
+        cache_key = 'imdb:tt123'
+        item = {'title': 'Test Movie', 'type': 'movie', 'year': '2024', 'genre': ['Action'],
+                'urls': {'imdb-charts': 'https://imdb.com/title/tt123'}, '_cache_key': cache_key}
+        stub.discovery_source_urls = mock.Mock(return_value=[f'discovery:{cache_key}'])
+        stub._get_discovery_items_cached = mock.Mock(return_value=({}, {cache_key: item}, {}))
+        # Mock listbox add
+        accordion.discover_listbox.add = mock.Mock()
+
+        # Mock Gtk.ListBoxRow creation
+        with mock.patch.object(rt.Gtk, 'ListBoxRow', return_value=mock.MagicMock()) as row_cls:
+            row_instance = row_cls.return_value
+            row_instance.discovery_item = None
+            accordion._refresh_discover_tab()
+            row_cls.assert_called()
+            row_instance.add.assert_called()
+            accordion.discover_listbox.add.assert_called()
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_monitor_button_adds_to_watch_list_with_monitoring_true(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+
+        item = {'title': 'New Series', 'type': 'series', 'year': '2023', 'genre': [],
+                'urls': {'fsonline_one': 'https://fsonline.one/series/test'}, '_cache_key': 'imdb:tt456'}
+        stub._invalidate_discovery_cache = mock.Mock()
+        stub.refresh_list = mock.Mock()
+
+        accordion._on_monitor_clicked(None, item)
+
+        # Watch entry should be created with monitoring=True
+        watch = stub.media['watch']
+        self.assertIn('imdb:tt456', watch)
+        self.assertTrue(watch['imdb:tt456']['monitoring'])
+        self.assertEqual(watch['imdb:tt456']['title'], 'New Series')
+        self.assertEqual(watch['imdb:tt456']['type'], 'series')
+        # Discovery cache invalidated and refresh scheduled
+        stub._invalidate_discovery_cache.assert_called_once()
+        self.assertIn(accordion.refresh, [f for f, _ in self.idle])
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_refresh_track_tab_shows_monitoring_and_searching_entries(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+
+        # Add a monitoring entry and a searching entry
+        stub.media['watch'] = {
+            'imdb:tt1': {'title': 'Monitoring Show', 'type': 'series', 'monitoring': True, 'source': None},
+            'imdb:tt2': {'title': 'Searching Show', 'type': 'series', 'monitoring': False, 'source': None},
+            'imdb:tt3': {'title': 'Found Show', 'type': 'movie', 'monitoring': False, 'source': 'some:source'},
+        }
+        # Mock listbox add
+        accordion.track_listbox.add = mock.Mock()
+
+        # Mock Gtk.ListBoxRow creation for track rows
+        with mock.patch.object(rt.Gtk, 'ListBoxRow', return_value=mock.MagicMock()) as row_cls:
+            accordion._refresh_track_tab()
+            # Two rows created: monitoring + searching
+            self.assertEqual(row_cls.call_count, 2)
+            self.assertEqual(accordion.track_listbox.add.call_count, 2)
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_stop_tracking_removes_from_watch_and_adds_to_track_dismissed(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+
+        stub.media['watch'] = {
+            'imdb:tt1': {'title': 'Monitoring Show', 'type': 'series', 'monitoring': True},
+        }
+        stub.state = {}
+        stub._invalidate_discovery_cache = mock.Mock()
+        stub.refresh_list = mock.Mock()
+
+        accordion._on_stop_tracking_clicked(None, 'imdb:tt1', stub.media['watch']['imdb:tt1'])
+
+        # Removed from watch list
+        self.assertNotIn('imdb:tt1', stub.media['watch'])
+        # Added to track_dismissed
+        self.assertIn('imdb:tt1', stub.state.get('media_track_dismissed', []))
+        # Cache invalidated and refresh scheduled
+        stub._invalidate_discovery_cache.assert_called_once()
+        self.assertIn(accordion.refresh, [f for f, _ in self.idle])
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_update_header_label_shows_watch_plus_discover_count(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+
+        # No items initially - use get_text since get_markup doesn't exist on Label
+        accordion._update_header_label()
+        self.assertEqual(accordion.header_label.get_text(), 'Media')
+
+        # Mock get_children to return items (watch=1, discover=1, track=2)
+        # Header should show watch + discover = 2 (not track items)
+        accordion.watch_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()])
+        accordion.discover_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()])
+        accordion.track_listbox.get_children = mock.Mock(return_value=[mock.MagicMock(), mock.MagicMock()])
+
+        # Mock header_label.set_markup
+        accordion.header_label.set_markup = mock.Mock()
+
+        accordion._update_header_label()
+        # Header label uses set_markup, so check that it was called with count (watch + discover = 2)
+        self.assertTrue(accordion.header_label.set_markup.called)
+        markup = accordion.header_label.set_markup.call_args[0][0]
+        self.assertIn('(2)', markup)
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_update_tab_counts_shows_counts_on_tab_labels(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+
+        # Mock get_children to return items
+        accordion.watch_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()])
+        accordion.discover_listbox.get_children = mock.Mock(return_value=[mock.MagicMock(), mock.MagicMock()])
+        accordion.track_listbox.get_children = mock.Mock(return_value=[])
+
+        # Mock tab label set_markup
+        for label in accordion._tab_labels.values():
+            label.set_markup = mock.Mock()
+
+        accordion._update_tab_counts()
+
+        self.assertIn('(1)', accordion._tab_labels[0].set_markup.call_args[0][0])
+        self.assertIn('(2)', accordion._tab_labels[1].set_markup.call_args[0][0])
+        self.assertNotIn('(', accordion._tab_labels[2].set_markup.call_args[0][0])
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_track_item_count_returns_monitoring_plus_searching(self):
+        stub = self.make_stub()
+        # Add monitoring, searching, and found entries
+        stub.media['watch'] = {
+            'imdb:tt1': {'title': 'Monitoring', 'type': 'series', 'monitoring': True, 'source': None},
+            'imdb:tt2': {'title': 'Searching', 'type': 'series', 'monitoring': False, 'source': None},
+            'imdb:tt3': {'title': 'Found', 'type': 'movie', 'monitoring': False, 'source': 'some:source'},
+        }
+        # Use the actual method from MediaMixin
+        count = rt.FluxTray.track_item_count(stub)
+        self.assertEqual(count, 2)  # monitoring + searching
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_expand_and_collapse_methods(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+
+        # Initially collapsed
+        self.assertFalse(accordion.revealer.get_reveal_child())
+
+        accordion.expand()
+        self.assertTrue(accordion.revealer.get_reveal_child())
+
+        accordion.collapse()
+        self.assertFalse(accordion.revealer.get_reveal_child())

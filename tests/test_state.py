@@ -449,6 +449,18 @@ class TestMergeFeedCheck(unittest.TestCase):
         self.assertEqual(state['seen']['a']['seen_at'], self.NOW)
         self.assertNotIn('stale', state['seen'])
 
+    def test_an_entry_seen_long_ago_but_updated_recently_is_not_pruned(self):
+        # An entry seen 31 days ago but updated 1 hour ago must be kept,
+        # otherwise it would resurface as new on the next feed check
+        state = {'seen': {'old_but_updated': {
+            'seen_at': self.NOW - rt.SEEN_RETENTION_SECONDS - 86400,  # 31 days ago
+            'updated': self.NOW - 3600  # 1 hour ago
+        }}}
+        self.merge(state)
+        self.assertIn('old_but_updated', state['seen'])
+        # The seen_at should remain the original first-seen time
+        self.assertEqual(state['seen']['old_but_updated']['seen_at'], self.NOW - rt.SEEN_RETENTION_SECONDS - 86400)
+
     def test_last_checked_times_are_merged_not_replaced(self):
         state = {'last_checked': {'x': 1, 'y': 2}}
         self.merge(state, last_checked={'y': 5, 'z': 6})

@@ -337,37 +337,59 @@ class TestRefreshListOrphans(unittest.TestCase):
             self.media_discovery_urls = []
             self.discovery_source_urls = lambda: list(self.media_discovery_urls)
             self.build_media_row = mock.Mock(return_value=mock.MagicMock())
+            self.track_item_count = mock.Mock(return_value=0)
+
+            # Mock the media accordion
+            self._media_accordion = mock.MagicMock()
+            self._media_accordion.refresh = mock.Mock()
+            # build_popup_window creates the accordion; we'll mock the outer pack_start
+            self._outer_packed = []
+            def pack_start(widget, expand, fill, padding):
+                self._outer_packed.append(widget)
+            self.outer = mock.MagicMock()
+            self.outer.pack_start = pack_start
 
     def refresh(self, stub, nudge=True):
         with mock.patch.object(rt, 'Gtk', mock.MagicMock()), \
                 mock.patch.object(rt, 'load_feeds', return_value=[]), \
                 mock.patch.object(rt, 'load_highlight_words', return_value=('breaking',)), \
-                mock.patch.object(rt, 'load_orphan_nudge', return_value=nudge):
+                mock.patch.object(rt, 'load_orphan_nudge', return_value=nudge), \
+                mock.patch('flux_tray.ui.popup.MediaAccordion', return_value=stub._media_accordion):
             stub.refresh_list()
 
     def unread(self, n=2):
         return [{'id': str(i), 'title': f'Item {i}', 'link': 'l', 'feed_url': 'f'} for i in range(n)]
 
     def test_media_alone_fills_a_popup_that_is_opened_by_hand(self):
+        """Media items go to the accordion, not the main list. The accordion is always present."""
         stub = self.Stub({})
         stub.media_urls = ['https://example.com/feed.xml', 'https://archive.org/details/x']
         self.refresh(stub)
-        self.assertEqual(stub.headers, ['__media__'])
-        self.assertEqual([c.args[0] for c in stub.build_media_row.call_args_list], stub.media_urls)
+        # Main list should NOT have __media__ section - media is in accordion
+        self.assertNotIn('__media__', stub.headers)
+        # build_media_row should NOT be called for the main list
+        stub.build_media_row.assert_not_called()
+        # Accordion refresh should be called
+        stub._media_accordion.refresh.assert_called()
         stub.popup.hide.assert_not_called()
 
     def test_media_comes_after_the_live_channels_and_before_the_news(self):
+        """Media is in the accordion, not the main list. Main list has live then news."""
         stub = self.Stub({'unread': self.unread(), 'live_channels': [{'channel': 'a'}]})
         stub.media_urls = ['https://example.com/feed.xml']
         self.refresh(stub)
-        self.assertEqual(stub.headers[:2], ['__live__', '__media__'])
-        self.assertGreater(len(stub.headers), 2)  # the news follows
+        # Main list: live channels, then news (no __media__)
+        self.assertEqual(stub.headers[:2], ['__live__', 'f'])
+        self.assertNotIn('__media__', stub.headers)
+        # Accordion refresh should be called
+        stub._media_accordion.refresh.assert_called()
 
     def test_a_media_only_popup_that_is_already_open_collapses_like_one_with_only_live_channels(self):
+        """With only media and popup already open, main list shows 'No unread items' (media is in accordion)."""
         stub = self.Stub({}, popup_visible=True)
         stub.media_urls = ['https://example.com/feed.xml']
         self.refresh(stub)
-        self.assertEqual(stub.headers, [])  # "No unread items"; media rows are updated in place instead
+        self.assertEqual(stub.headers, [])  # "No unread items" in main list
         stub.build_media_row.assert_not_called()
         stub.popup.hide.assert_called()
 

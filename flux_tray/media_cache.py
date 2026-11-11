@@ -160,6 +160,11 @@ def is_seen(seen_set: set[str], item: dict) -> bool:
     return _cache_key(item) in seen_set
 
 
+def is_track_dismissed(track_dismissed_set: set[str], item: dict) -> bool:
+    """Check if an item's cache key is in the track dismissed set."""
+    return _cache_key(item) in track_dismissed_set
+
+
 def mark_listing(cache: dict, items: list[dict], scopes: set[tuple[str, str]]):
     """After fetches that gave `items`: `scopes` are the (plugin, 'movie' or 'series') pairs whose
     fetch gave something. An entry of such a pair is `listed` if one of the items is it and not
@@ -172,13 +177,17 @@ def mark_listing(cache: dict, items: list[dict], scopes: set[tuple[str, str]]):
             entry['listed'] = key in now_listed
 
 
-def get_all_cached_items(cache: dict, only_listed: bool = True) -> list[dict]:
+def get_all_cached_items(cache: dict, only_listed: bool = True, track_dismissed: set[str] | None = None) -> list[dict]:
     """Every cached item in the shape the list shows (not the ones that dropped off their chart,
     unless `only_listed` is false): by its place in its chart first (two charts' titles of the same
-    place in the order they were first filed), those with none after, the newest first."""
+    place in the order they were first filed), those with none after, the newest first.
+    Excludes items whose cache key is in `track_dismissed` (items removed from Track tab)."""
+    track_dismissed = track_dismissed or set()
     items = []
     for key, entry in cache.items():
         if only_listed and not entry.get('listed', True):
+            continue
+        if key in track_dismissed:
             continue
         urls = entry.get('urls') or {}
         items.append({

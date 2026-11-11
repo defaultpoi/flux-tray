@@ -126,3 +126,60 @@ Not taken, deliberately:
 - All 1742 tests pass (Xvfb + stubbed), pyflakes clean; 4 mutations caught by tests (reversed comparison, wrong suffix check, disabled new-item detection, numbers stripped from title)
 
 No run on a real desktop yet.
+
+2026-11-10: Media Accordion UI repositioning and header redesign (this commit):
+- Media accordion moved from top (after schedule warning) to bottom (just above footer buttons)
+- Header button: removed icon (video-display-symbolic) and chevron (pan-down/pan-up-symbolic)
+- Header text "Media" centered with count badge, `xalign=0.5`, `halign=CENTER`, `hexpand=True`
+- 4 deliberate breaks caught by tests:
+  1. `header_label.set_xalign(0.5)` → `0` → CAUGHT by `test_header_button_has_centered_text_no_icon_no_chevron`
+  2. `header_box.set_halign(Gtk.Align.CENTER)` → `START` → CAUGHT by same test
+  3. `header_box.set_hexpand(True)` → `False` → CAUGHT by same test
+  4. Accordion at top position (old code) → golden tests FAIL, moved to bottom → PASS
+- All 1760 tests pass (Xvfb + stubbed), pyflakes clean
+- Golden test files updated: `popup_full.json`, `popup_quiet.json`, `popup_media_removed.json`
+
+2026-11-11: Discovery/Track tab separation fix:
+- `discovery_source_urls()` now excludes watching items (watch list entries with `source=None`) from Discover tab
+- `track_item_count()` method added to `MediaMixin` — counts monitoring + searching entries for popup visibility
+- `refresh_list()` uses `track_count` to keep popup open when Track tab has items
+- 3 deliberate breaks caught by tests:
+  1. `discovery_source_urls()` without `not item.get('watching')` filter → test `test_a_title_being_looked_for_is_the_first_row_of_the_discovery_list_the_newest_first` FAILS
+  2. `track_item_count()` formula broken (only monitoring) → test `test_track_item_count_returns_monitoring_plus_searching` FAILS
+  3. `refresh_list()` without `track_count == 0` check → test `test_a_media_only_popup_that_is_already_open_collapses_like_one_with_only_live_channels` FAILS
+
+2026-11-11: Test isolation fix — tests no longer write to real `~/.config/flux-tray/state.json`:
+- Root cause: `TmpConfigCase` patched `rt.STATE_FILE` but `flux_tray.state.STATE_FILE` is a module-level constant captured at import time
+- Fix: `TestMediaAccordion` now inherits from `TmpConfigCase` (was `unittest.TestCase`), calling `super().setUp()` to activate the temp config patching before any state operations
+- Verified: both test suites (1762 stubbed + 1762 Xvfb) pass; real `state.json` remains absent after full test runs
+- All deliberate mutations caught; pyflakes clean
+
+2026-11-11: Header badge count fix — Track tab items no longer counted in Media header badge:
+- Bug: `_update_header_label()` summed `watch_count + discover_count + track_count` for the header badge
+- Fix: Changed to `watch_count + discover_count` only; Track items are for monitoring/searching, not actionable media
+- Test `test_update_header_label_shows_watch_plus_discover_count` verifies Track items (2) are excluded from header badge
+- Mutation test (adding track_count back) caught by test: CAUGHT
+- All 1762 tests pass (both modes); pyflakes clean
+- All 1761 tests pass (Xvfb + stubbed), pyflakes clean
+
+2026-11-11: Fix for old feed news resurfacing as unseen:
+- Bug: `merge_feed_check()` in `state.py` pruned seen entries based only on `seen_at` timestamp (30-day retention). Entries seen long ago but recently updated (e.g., a feed entry edited today) were pruned, causing them to resurface as new unread items on the next feed check.
+- Fix: Updated pruning logic to also keep entries where `updated` timestamp is within the retention period. Added test `test_an_entry_seen_long_ago_but_updated_recently_is_not_pruned`.
+- Verified: All 1762 tests pass (Xvfb + stubbed), pyflakes clean. Deliberate break of the fix caught by new test.
+
+2026-11-11: Fast right-click dismiss for news items:
+- Bug: Right-click to dismiss a news item called `refresh_list()` which rebuilt the entire listbox from scratch (slow, especially with many items).
+- Fix: Added `_remove_unread_row()` method that removes the single row from the listbox directly and updates state without full rebuild. Right-click handler now calls this fast path.
+- Tests updated in `test_rules.py::TestHeaderClicks` and `test_ui_connectivity.py::TestOfflineBehavior` to mock the new method.
+- Mutation test (reverting to `on_mark_read_clicked` / full rebuild) caught by test: CAUGHT
+- All 1762 tests pass (both modes); pyflakes clean
+
+2026-11-11: Fix for Discover tab showing only first item (Mobland):
+- Bug: MediaAccordion's Discover tab (and other tabs) had broken scrolling. The scrolled windows used `set_propagate_natural_height(True)` which made them request their full natural height (8000+ px) from the parent notebook/revealer, instead of being constrained and showing scrollbars. The revealer expanded to fit the huge notebook, but the popup window constrained it, cutting off most items.
+- Fix: Removed `set_propagate_natural_height(True)` from the three tab scrolled windows. Added a fixed max height (50% of screen) to the notebook so scrolled windows get a constrained allocation and can scroll properly.
+- Verified: All 1762 tests pass (Xvfb + stubbed), pyflakes clean. Discover tab now shows all 200 items with working scrollbar.
+
+2026-11-11: Fix for Media Accordion hover popovers not showing:
+- Bug: MediaAccordion's three tab listboxes (Watch, Discover, Track) had no motion/leave event handlers connected, so hovering a row didn't show the metadata popover with title, year, type, IMDb/TMDb IDs, and overview.
+- Fix: Added `_setup_listbox_hover_events()` method that connects `motion-notify-event` and `leave-notify-event` to all three tab listboxes, calling parent's `_on_media_row_enter()` and `_on_media_row_leave()` for metadata popover display.
+- Verified: All 1762 tests pass (Xvfb + stubbed), pyflakes clean. Metadata popovers now appear on hover in all three tabs.
