@@ -22,6 +22,8 @@ from bs4 import BeautifulSoup
 
 NAME = 'fsonline_one'
 ORDER = 'oldest'
+# find(): asked in the order of FIND_PRIORITY (lowest first)
+FIND_PRIORITY = 20
 
 BASE_URL = 'https://fsonline.one'
 AJAX_ENDPOINT = '/ajax/ajax.php'

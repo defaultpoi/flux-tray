@@ -6,7 +6,9 @@
                       when nothing changed since the last green run, so questions and chat cost nothing
 
 Environment: FLUX_PYTHON (default python3) is the interpreter the project runs on; FLUX_NO_XVFB=1 skips the real-GTK
-mode where there is no xvfb-run (the stubbed mode then runs alone, and the report says so).
+mode where there is no xvfb-run (the stubbed mode then runs alone, and the report says so). FLUX_CI_PYTHON, if set, is
+an interpreter with only what .github/workflows/ci.yml installs: the suite runs there too, because a test that needs a
+package CI lacks passes on your machine and fails on CI (that is how three pushes went red).
 """
 import hashlib
 import json
@@ -54,6 +56,11 @@ def run_checks():
     else:
         notes.append('the real-GTK mode was NOT run (no xvfb-run): it must pass before this is pushed')
     problems.append(run('suite stubbed', [PY, '-W', 'ignore', 'tests/run_stubbed.py']))
+    ci_python = os.environ.get('FLUX_CI_PYTHON')
+    if ci_python and shutil.which('xvfb-run'):
+        problems.append(run('suite in the CI-like environment', ['xvfb-run', '-a', ci_python, '-W', 'ignore', '-m', 'unittest', 'discover', '-s', 'tests']))
+    elif not ci_python:
+        notes.append('the CI-like environment was NOT run (set FLUX_CI_PYTHON): a package that CI lacks would only show on CI')
     return [p for p in problems if p], notes
 
 

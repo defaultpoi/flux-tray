@@ -38,7 +38,8 @@ MAX_API_CALLS_PER_CYCLE = 50
 MAX_REPLY_BYTES = 2_000_000
 MAX_POSTER_BYTES = 5_000_000
 
-# Browser-like User-Agent for poster/image downloads (OMDb uses its own via api)
+# A browser-like User-Agent, sent with every request this module makes: the poster downloads (image hosts
+# refuse programs) and the TMDb and OMDb API calls too. A choice made on purpose; leave it as it is.
 METADATA_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 OMDB_BASE = 'https://www.omdbapi.com/'
 TMDB_BASE = 'https://api.themoviedb.org/3'  # called with a v4 "API Read Access Token" as a Bearer token
@@ -94,24 +95,37 @@ def _write_store(path, data):
         _memo[str(path)] = ((st.st_mtime_ns, st.st_size), data)
 
 
+_pruned = {'raw': None, 'at': 0.0, 'valid_until': 0.0, 'data': {}}  # the cache without its expired entries, and when that holds
+
+
 def _load_metadata_cache():
-    """The metadata cache without its expired entries (a new dict; the entries are shared)."""
+    """The metadata cache without its expired entries. It is the same dict, not a new one, until the file
+    changes or an entry expires, so asking for it a thousand times (the popup does, a row at a time)
+    costs a stat call, not a pass over every entry. Callers must not change it: _update_metadata_cache
+    works on a copy."""
+    raw = _read_store(METADATA_CACHE_FILE)
     now = time.time()
-    fresh = {}
-    for k, v in _read_store(METADATA_CACHE_FILE).items():
-        if not isinstance(v, dict):
-            continue
-        days = NEGATIVE_CACHE_TTL_DAYS if v.get('negative') else METADATA_CACHE_TTL_DAYS
-        if now - v.get('cached_at', 0) < days * 86400:
-            fresh[k] = v
-    return fresh
+    with _cache_lock:
+        if _pruned['raw'] is raw and _pruned['at'] <= now < _pruned['valid_until']:
+            return _pruned['data']  # (a clock that went back is not trusted either)
+        fresh, valid_until = {}, float('inf')
+        for k, v in raw.items():
+            if not isinstance(v, dict):
+                continue
+            days = NEGATIVE_CACHE_TTL_DAYS if v.get('negative') else METADATA_CACHE_TTL_DAYS
+            expires = v.get('cached_at', 0) + days * 86400
+            if now < expires:
+                fresh[k] = v
+                valid_until = min(valid_until, expires)
+        _pruned.update(raw=raw, at=now, valid_until=valid_until, data=fresh)
+        return fresh
 
 
 def _update_metadata_cache(change):
     """Applies `change(cache)` to the current cache and saves it, with no other
     thread's change in between (a read-change-write by two threads loses one)."""
     with _cache_lock:
-        cache = _load_metadata_cache()
+        cache = dict(_load_metadata_cache())  # a copy: the one that is shared is read by the popup
         change(cache)
         _write_store(METADATA_CACHE_FILE, cache)
 

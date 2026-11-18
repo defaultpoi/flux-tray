@@ -272,6 +272,14 @@ class TestTheWatchList(TmpConfigCase):
         self.assertEqual(sorted(media['watch']), ['b'])
         self.assertEqual(media['sources']['s']['title'], 'T')
 
+    def test_the_paused_flag_of_a_source_is_kept_only_when_it_is_true(self):
+        with open(rt.MEDIA_FILE, 'w') as f:
+            json.dump({'sources': {'a': {'paused': True}, 'b': {'paused': 'yes'}, 'c': {}}}, f)
+        media = rt.load_media()
+        self.assertEqual([media['sources'][k]['paused'] for k in 'abc'], [True, False, False])
+        self.assertIs(rt.new_media_entry()['paused'], False)
+
+
     def test_the_movie_flag_of_a_source_is_kept_only_when_it_is_true(self):
         with open(rt.MEDIA_FILE, 'w') as f:
             json.dump({'sources': {'a': {'movie': True}, 'b': {'movie': 'yes'}, 'c': {}}}, f)
@@ -342,7 +350,7 @@ class TestMediaState(TmpConfigCase):
     def test_a_new_entry_has_every_field_the_code_reads(self):
         self.assertEqual(rt.new_media_entry(), {'title': '', 'episodes': [], 'known': [], 'new': [], 'watched': [],
                                                 'files': {}, 'last_watched': None, 'resume': {}, 'remove_at': None,
-                                                'baselined': False, 'movie': False})
+                                                'baselined': False, 'movie': False, 'paused': False})
 
     def test_fields_of_the_wrong_type_are_repaired(self):
         self.write({'sources': {'https://x.example/f': {

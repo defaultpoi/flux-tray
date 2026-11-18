@@ -1,12 +1,16 @@
 """Tests for fsonline.one plugin sitemap-based new episode/movie detection."""
 
+import importlib.util
 import os
 import sys
 import time
 import unittest
 from unittest import mock
 
+HAVE_PLUGIN_DEPENDENCIES = all(importlib.util.find_spec(name) for name in ('requests', 'bs4'))
 
+
+@unittest.skipUnless(HAVE_PLUGIN_DEPENDENCIES, 'the site plugins need requests and beautifulsoup4 (CI installs them)')
 class TestFsonlineSitemapFunctions(unittest.TestCase):
     """Test the fsonline_one plugin's fetch_new_episodes and fetch_new_movies functions."""
 

@@ -1,5 +1,6 @@
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from facade import rt
@@ -1169,3 +1170,84 @@ class TestPopupWidthIsFittedBeforePlacing(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FakeListbox:
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    def get_children(self):
+        return list(self.rows)
+
+    def remove(self, row):
+        self.rows.remove(row)
+
+
+class TestRemovingAnUnreadRow(unittest.TestCase):
+    """A right-click on a news row takes just that row away, and its feed's header with the feed's last item."""
+
+    class Stub:
+        _remove_unread_row = rt.FluxTray._remove_unread_row
+        _remove_unread = rt.FluxTray._remove_unread
+
+        def __init__(self, rows):
+            self.listbox = FakeListbox(rows)
+            self.lock = threading.Lock()
+            self.state = {'unread': [{'id': r.entry_id, 'feed_url': r.feed_url} for r in rows if hasattr(r, 'entry_id')]}
+            self.popup = mock.Mock()
+            self.popup.get_visible.return_value = True
+            self.update_icon = mock.Mock()
+            self.refresh_list = mock.Mock()
+
+    @staticmethod
+    def header(feed):
+        return SimpleNamespace(header_feed_url=feed)
+
+    @staticmethod
+    def news(item_id, feed):
+        return SimpleNamespace(entry_id=item_id, feed_url=feed)
+
+    def setUp(self):
+        self.a_header, self.b_header = self.header('a'), self.header('b')
+        self.a1, self.a2, self.b1 = self.news('a1', 'a'), self.news('a2', 'a'), self.news('b1', 'b')
+        self.stub = self.Stub([self.a_header, self.a1, self.a2, self.b_header, self.b1])
+        patcher = mock.patch.object(rt, 'save_state')
+        self.saved = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_one_of_two_items_leaves_the_header(self):
+        self.stub._remove_unread_row(self.a1, 'a1')
+        self.assertEqual(self.stub.listbox.rows, [self.a_header, self.a2, self.b_header, self.b1])
+        self.assertEqual([e['id'] for e in self.stub.state['unread']], ['a2', 'b1'])
+        self.saved.assert_called_once()
+        self.stub.update_icon.assert_called_once()
+
+    def test_the_last_item_of_a_feed_takes_its_header_but_not_the_others(self):
+        self.stub._remove_unread_row(self.a1, 'a1')
+        self.stub._remove_unread_row(self.a2, 'a2')
+        self.assertEqual(self.stub.listbox.rows, [self.b_header, self.b1])
+
+    def test_the_whole_list_is_rebuilt_only_when_nothing_is_left_in_it(self):
+        self.stub._remove_unread_row(self.a1, 'a1')
+        self.stub._remove_unread_row(self.a2, 'a2')
+        self.stub._remove_unread_row(self.b1, 'b1')
+        self.assertEqual(self.stub.listbox.rows, [])
+        self.stub.refresh_list.assert_called_once_with(keep_open=True)
+
+    def test_a_row_that_does_not_know_its_feed_leaves_the_headers_alone(self):
+        odd = SimpleNamespace(entry_id='x')
+        self.stub.listbox.rows.append(odd)
+        self.stub._remove_unread_row(odd, 'x')
+        self.assertEqual(self.stub.listbox.rows, [self.a_header, self.a1, self.a2, self.b_header, self.b1])
+
+    def test_a_news_row_is_tagged_with_its_feed(self):
+        class Builder:
+            build_row = rt.FluxTray.build_row
+
+            def __init__(self):
+                self._highlight_words = ()
+                self.on_save_clicked = mock.Mock()
+                self.on_read_later_remove_clicked = mock.Mock()
+                self._breaking_rows = []
+        row = Builder().build_row({'id': 'n1', 'link': 'l', 'title': 'T', 'feed_url': 'https://a.example/feed'})
+        self.assertEqual((row.entry_id, row.feed_url), ('n1', 'https://a.example/feed'))

@@ -34,7 +34,6 @@ def new_watch_entry(item, now, year=''):
         'added': float(now),
         'checked': None,
         'source': None,
-        'monitoring': False,
     }
 
 
@@ -47,7 +46,6 @@ def clean_watch(raw):
     for key, entry in (raw.items() if isinstance(raw, dict) else ()):
         if not isinstance(key, str) or not isinstance(entry, dict) or not isinstance(entry.get('title'), str):
             continue
-        monitoring = entry.get('monitoring')
         clean[key] = {
             'title': entry['title'],
             'year': entry['year'] if isinstance(entry.get('year'), str) else '',
@@ -56,15 +54,24 @@ def clean_watch(raw):
             'added': float(entry['added']) if number(entry.get('added')) else 0.0,
             'checked': float(entry['checked']) if number(entry.get('checked')) else None,
             'source': entry['source'] if isinstance(entry.get('source'), str) and entry['source'] else None,
-            'monitoring': bool(monitoring) if monitoring is not None else False,
         }
     return clean
 
 
 def is_searching(entry):
-    """True while no site has been found to have the title.
-    Also true for monitoring entries (monitoring=True, source=None) which need periodic checking."""
+    """True while no site has been found to have the title."""
     return entry.get('source') is None
+
+
+def is_following(entry):
+    """True for a series that a site has: it is a source now, read at every check for new episodes."""
+    return entry.get('source') is not None and entry.get('type') == 'series'
+
+
+def is_tracked(entry):
+    """True for what the Track tab lists: a title still being looked for, and a series being followed.
+    A film that was found is no longer tracked: it is in the media list."""
+    return is_searching(entry) or is_following(entry)
 
 
 def search_due(entry, now, wait):
@@ -79,29 +86,27 @@ def source_line(plugin_name, url):
     return f'{plugin_name}:{url}'
 
 
+DEFAULT_FIND_PRIORITY = 100
+
+
 def find_source(finders, entry):
     """(plugin name, address) of the first plugin in `finders` that has the title, else None.
 
-    Priority logic:
-    - For movies: search sitefilme_com first (movies only, direct m3u8), then fsonline_one
-    - For series: search fsonline_one only (sitefilme doesn't have series)
-
-    A plugin that fails, or answers with anything but an http(s) address, has not got it:
-    its bug must not stop the others being asked."""
+    The plugins are asked in the order of their FIND_PRIORITY (a number, the lowest first, 100 if the plugin
+    declares none; ties by name), and only those whose FIND_KINDS (a tuple of 'movie' and 'series', both if it
+    declares none) include what is looked for. A plugin that fails, or answers with anything but an http(s)
+    address, has not got it: its bug must not stop the others being asked."""
     kind = entry.get('type', 'movie')
 
-    # Build ordered list of finders based on content type
-    if kind == 'movie':
-        # Movies: sitefilme_com first, then fsonline_one
-        ordered = [f for f in finders if f.name == 'sitefilme_com']
-        ordered += [f for f in finders if f.name == 'fsonline_one']
-        # Any other finders after
-        ordered += [f for f in finders if f.name not in ('sitefilme_com', 'fsonline_one')]
-    else:
-        # Series: fsonline_one only (sitefilme doesn't have series)
-        ordered = [f for f in finders if f.name == 'fsonline_one']
+    def priority(finder):
+        value = getattr(finder.module, 'FIND_PRIORITY', DEFAULT_FIND_PRIORITY)
+        return (value if isinstance(value, (int, float)) and not isinstance(value, bool) else DEFAULT_FIND_PRIORITY, finder.name)
 
-    for finder in ordered:
+    def handles(finder):
+        kinds = getattr(finder.module, 'FIND_KINDS', KINDS)
+        return kind in kinds if isinstance(kinds, (tuple, list, set, frozenset)) else True
+
+    for finder in sorted((f for f in finders if handles(f)), key=priority):
         try:
             url = finder.module.find(title=entry['title'], year=entry.get('year') or None,
                                      imdb_id=entry.get('imdb_id'), kind=kind)

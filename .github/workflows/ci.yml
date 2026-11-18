@@ -13,7 +13,7 @@ jobs:
         run: |
           pipx install uv
           uv venv --python 3.14 .venv
-          uv pip install --python .venv/bin/python "pygobject<3.51" pycairo feedparser pyflakes yt-dlp
+          uv pip install --python .venv/bin/python "pygobject<3.51" pycairo feedparser pyflakes yt-dlp requests beautifulsoup4
       - name: Static checks
         run: |
           .venv/bin/python -m compileall -q flux_tray tests

@@ -35,7 +35,7 @@ from ..media_cache import (
     load_media_cache, update_media_cache, get_new_items, mark_listing, mark_seen, is_seen,
     get_all_cached_items, sync_metadata_ids, title_with_year,
 )
-from ..watch import find_source, is_searching, new_watch_entry, search_due, source_line, _norm_title
+from ..watch import find_source, is_following, is_searching, is_tracked, new_watch_entry, search_due, source_line
 from ..log import _log
 
 
@@ -131,6 +131,8 @@ def media_row_view(name, entry, order, downloaded, status, error=None, now=None,
         stats, color, hint = 'not downloaded', 'idle', 'Click to download'
     if news:
         stats = f'{stats} - {news} new' if stats else f'{news} new'
+    if entry.get('paused'):
+        hint = f'{hint} (no longer followed: nothing new is read or downloaded)'
 
     # The tooltip is markup: the plain parts are escaped, the metadata already is
     parts = [html.escape(p, quote=False) for p in (text, hint, f'{unwatched_count(entry)} unwatched', last_line, error_line) if p]
@@ -421,15 +423,32 @@ class MediaMixin:
         with self.lock:
             return {key for key in self.state.get('media_discovery_seen', []) if isinstance(key, str)}
 
-    def _dismiss_discovery(self, items):
-        """Marks discovery items dismissed (in the state, under its lock)."""
+    def _dismiss_discovery(self, items, keys=()):
+        """Marks discovery items (and discovery keys) dismissed (in the state, under its lock)."""
         with self.lock:
             seen = {key for key in self.state.get('media_discovery_seen', []) if isinstance(key, str)}
             for item in items:
                 mark_seen(seen, item)
+            seen.update(keys)
             self.state['media_discovery_seen'] = sorted(seen)
             save_state(self.state)
         self._invalidate_discovery_cache()
+
+    def _stop_tracking(self, key):
+        """The person is done with a title of the Track tab, which then never comes back to Discover. One
+        that is still being looked for is dropped from the watch list. A series that is being followed
+        stops being followed: its source is paused, so nothing more is read or downloaded for it, and
+        what was downloaded can still be watched. (Cancelling a download waits for it to notice, so
+        that is done in a thread, not here on the main loop.)"""
+        with self._media_data_lock:
+            record = self.media.setdefault('watch', {}).pop(key, None) or {}
+            source = record.get('source')
+            if source and source in self.media['sources']:
+                self.media['sources'][source]['paused'] = True
+            save_media(self.media)
+        self._dismiss_discovery([], keys=[key])
+        if source:
+            threading.Thread(target=self._cancel_source_downloads, args=(source,), daemon=True).start()
 
     def _fetch_discovery_bg(self):
         """A discovery check, all of it but the window, in a thread: reads what `discovery=` names
@@ -548,17 +567,20 @@ class MediaMixin:
             self.refresh_list()
         return False
 
-    def _on_discovery_dismiss(self, _btn, item):
+    def _on_discovery_dismiss(self, _btn, item, rebuild=True):
         """Right-click: a title nobody wants is dismissed for good; one that is being watched is
-        no longer watched (and so is never shown again either)."""
+        no longer watched (and so is never shown again either). `rebuild` is False for a caller that
+        takes the row away itself (the whole popup need not be built again for one row)."""
         if item.get('watching'):
             self._stop_watching(item['_cache_key'])
         self._dismiss_discovery([item])
-        GLib.idle_add(self.refresh_list, True)  # on the main loop, once the state is saved
+        if rebuild:
+            GLib.idle_add(self.refresh_list, True)  # on the main loop, once the state is saved
 
-    def _on_discovery_row_activated(self, item):
+    def _on_discovery_row_activated(self, item, rebuild=True):
         """Left-click: a chart title is put on the watch list (see watch.py); a title that is already
-        the page of a site is added as a source at once. Either way it leaves the discovery list."""
+        the page of a site is added as a source at once. Either way it leaves the discovery list.
+        `rebuild` as for _on_discovery_dismiss."""
         if item.get('watching'):
             return  # looked for already
         if item.get('imdb_id') and self.media_registry.finders():
@@ -566,7 +588,8 @@ class MediaMixin:
         else:
             self._add_discovered_source(item)
         self._dismiss_discovery([item])
-        GLib.idle_add(self.refresh_list, True)
+        if rebuild:
+            GLib.idle_add(self.refresh_list, True)
 
     def _add_discovered_source(self, item):
         plugin_name = item.get('_plugin', 'unknown')
@@ -645,86 +668,6 @@ class MediaMixin:
         finally:
             _watch_searching.release()
 
-    def _search_fsonline_sitemap(self):
-        """Efficient check for new episodes/movies on fsonline.one using their sitemaps.
-        Only checks watch list entries that match fsonline_one plugin.
-        Scrapes episodes and movies sitemaps until items are older than last check."""
-        # Get fsonline_one plugin
-        fsonline = self.media_registry.by_name('fsonline_one')
-        if not fsonline or not hasattr(fsonline.module, 'fetch_new_episodes'):
-            return  # plugin not available or doesn't support sitemap check
-
-        # Build set of normalized titles from watch list (only those not yet found)
-        with self._media_data_lock:
-            watch_items = [
-                (key, dict(w)) for key, w in self.media.get('watch', {}).items()
-                if is_searching(w)  # still looking for a source
-            ]
-        if not watch_items:
-            return
-
-        # Separate by type
-        series_titles = set()
-        movie_titles = set()
-        for key, entry in watch_items:
-            norm = _norm_title(entry.get('title', ''))
-            if entry.get('type') == 'series':
-                series_titles.add(norm)
-            else:
-                movie_titles.add(norm)
-
-        if not series_titles and not movie_titles:
-            return
-
-        # Get the last check time for fsonline sitemap (stored in state)
-        with self.lock:
-            last_check = self.state.get('fsonline_sitemap_last_check', 0)
-            self.state['fsonline_sitemap_last_check'] = time_module.time()
-            save_state(self.state)
-
-        # Fetch new episodes and movies
-        try:
-            if series_titles:
-                new_series = fsonline.module.fetch_new_episodes(last_check, series_titles)
-                for series_url in new_series:
-                    source = source_line('fsonline_one', series_url)
-                    with self._media_data_lock:
-                        # Find and update the watch entry
-                        for key, entry in self.media.get('watch', {}).items():
-                            if is_searching(entry) and entry.get('type') == 'series':
-                                if _norm_title(entry.get('title', '')) == _norm_title(series_url.split('/')[-2]):
-                                    entry['source'] = source
-                                    entry['checked'] = time_module.time()
-                                    break
-                        source_entry = self.media['sources'].setdefault(source, new_media_entry())
-                        source_entry['movie'] = False
-                    _log(f"fsonline sitemap: new episodes for series at {series_url}")
-
-            if movie_titles:
-                new_movies = fsonline.module.fetch_new_movies(last_check, movie_titles)
-                for movie_url in new_movies:
-                    source = source_line('fsonline_one', movie_url)
-                    with self._media_data_lock:
-                        for key, entry in self.media.get('watch', {}).items():
-                            if is_searching(entry) and entry.get('type') == 'movie':
-                                if _norm_title(entry.get('title', '')) == _norm_title(movie_url.split('/')[-2]):
-                                    entry['source'] = source
-                                    entry['checked'] = time_module.time()
-                                    break
-                        source_entry = self.media['sources'].setdefault(source, new_media_entry())
-                        source_entry['movie'] = True
-                    _log(f"fsonline sitemap: new movie at {movie_url}")
-
-            # Trigger media check for any new sources found
-            with self._media_data_lock:
-                new_sources = [url for url in self.media['sources']
-                               if url.startswith('fsonline_one:') and self.media['sources'][url].get('episodes')]
-            if new_sources:
-                self.start_media_check(only=new_sources)
-                GLib.idle_add(self._discovery_refresh)
-        except Exception as e:
-            _log(f'fsonline sitemap check error: {e}')
-
     def _is_movie(self, url):
         """A film: a source of [media] marked `movie`, or one that was added from the watch list
         or the discovery list as a film."""
@@ -777,8 +720,8 @@ class MediaMixin:
         sources = [(url, configured) for url, _name, configured in load_media_sources()]
         configured_urls = {url for url, _configured in sources}
         with self._media_data_lock:
-            sources += [(url, None) for url in self.media['sources']
-                        if url not in configured_urls and not url.startswith('discovery:')]
+            sources += [(url, None) for url, entry in self.media['sources'].items()
+                        if url not in configured_urls and not url.startswith('discovery:') and not entry.get('paused')]
         if only is None:
             self._search_watched()  # a title found now is read below, with the rest
         for url, configured in sources:
@@ -886,7 +829,7 @@ class MediaMixin:
                                 wanted.append((url, episode['id']))
                 # Dynamically added sources (from discovery clicks) - not in config, format: plugin_name:source_url
                 for url, entry in self.media['sources'].items():
-                    if url in config_sources or url.startswith('discovery:'):
+                    if url in config_sources or url.startswith('discovery:') or entry.get('paused'):
                         continue
                     # Only treat as dynamic source if URL starts with a known plugin name (e.g., "fsonline_one:...")
                     prefix = url.split(':', 1)[0]
@@ -1329,7 +1272,7 @@ class MediaMixin:
         wanted = [url for url in urls if url in consumed and (url not in movies or self._trash_source_files(url))]
         gone = self._drop_media_sources(wanted)
         if gone:
-            self._media_rows_removed(gone)
+            GLib.idle_add(self._media_rows_removed, gone)  # the rows are the main loop's
         return gone
 
     def _drop_media_sources(self, urls):
@@ -1362,12 +1305,15 @@ class MediaMixin:
         replace the media with 'No unread items' (media never fill a popup that is
         showing), so the rows go one by one, the heading with the last of them."""
         if not self.popup:
-            return
+            return False
         with self.lock:
             others = bool(self.state.get('unread') or self.state.get('available_updates'))
         if others:
-            self.refresh_list(keep_open=True)
-            return
+            self.refresh_list(keep_open=True)  # which rebuilds the accordion too
+            return False
+        accordion = getattr(self, '_media_accordion', None)
+        if accordion is not None:
+            accordion.refresh()  # the media rows are in its Watch tab
         for row in self.listbox.get_children():
             if getattr(row, 'media_source', None) in gone:
                 self.listbox.remove(row)
@@ -1378,6 +1324,7 @@ class MediaMixin:
             self._media_header_row = None
         if not self.listbox.get_children():
             self.refresh_list(keep_open=True)  # nothing left at all: say so
+        return False
 
     def _cancel_source_downloads(self, url):
         """Cancel any ongoing download for the given source and clean up partial files.
@@ -1408,39 +1355,39 @@ class MediaMixin:
 
     def _media_menu_remove(self, _button, popover, urls):
         popover.popdown()
-        # Cancel ongoing downloads for these sources
+        threading.Thread(target=self._remove_sources, args=(list(urls),), daemon=True).start()
+
+    def _remove_sources(self, urls):
+        """Cancelling a download waits for it to notice (up to five seconds) and a film's file goes to the
+        Trash: neither belongs on the main loop, where choosing Remove used to freeze the popup."""
         for url in urls:
             self._cancel_source_downloads(url)
         self.remove_consumed_media(urls)
 
     def _media_menu_remove_dynamic(self, _button, popover, url):
-        """Remove a dynamically added source (from discovery click): remove from list,
-        mark discovery item as seen, delete downloaded files, stop ongoing download,
-        and remove partial files."""
+        """Remove a source that was added by a click: off the list, its discovery item dismissed, its
+        download stopped, its files trashed."""
         popover.popdown()
-        # Find the discovery item that corresponds to this URL
+        threading.Thread(target=self._remove_dynamic_source, args=(url,), daemon=True).start()
+
+    def _remove_dynamic_source(self, url):
         # The URL format is "plugin_name:source_url"
         plugin_name, _, source_url = url.partition(':')
         # Mark the discovery item that has this URL dismissed
         self._dismiss_discovery([
             item for item in get_all_cached_items(load_media_cache())
             if item.get('urls', {}).get(plugin_name) == source_url][:1])
-        # Cancel ongoing download if any
         self._cancel_source_downloads(url)
-        # Trash the source files (completed downloads)
         self._trash_source_files(url)
-        # Remove from media sources
         with self._media_data_lock:
             self.media['sources'].pop(url, None)
             self._forget_watch_of({url})
             save_media(self.media)
-        # Remove any pending downloads for this source
         with self._media_queue_lock:
             self._media_queue = [key for key in self._media_queue if key[0] != url]
-        # Remove status entries
         for key in [k for k in self.media_status if k[0] == url]:
             del self.media_status[key]
-        self._media_rows_removed([url])
+        GLib.idle_add(self._media_rows_removed, [url])
 
     def _media_menu_unwatch(self, _button, popover, url, episode_id):
         popover.popdown()
@@ -1615,72 +1562,38 @@ class MediaMixin:
                  'type': w['type'], 'imdb_id': w['imdb_id'], 'tmdb_id': None, 'urls': {}, 'genre': [],
                  'quality': None, 'rank': None, 'watching': True} for key, w in watching]
 
+    @staticmethod
+    def _cached_metadata_of(item):
+        first_url = next(iter(item.get('urls', {}).values()), None)
+        return get_cached_metadata(title_with_year(item), media_type=item.get('type', 'movie'), url=first_url,
+                                   imdb_id=item.get('imdb_id'), tmdb_id=item.get('tmdb_id'))
+
     def _get_discovery_items_cached(self):
-        """Get discovery items with caching: computes once per refresh cycle.
-        Returns (items_list, items_by_key_dict, metadata_by_key_dict).
-
-        The watching items (from watch list) are NOT cached - they are computed fresh
-        each time because the watch list can change between discovery refreshes.
-        Only the discovery cache items are cached.
-        """
-        if hasattr(self, '_discovery_items_cache') and self._discovery_items_cache is not None:
-            cached_items, items_by_key, metadata_by_key = self._discovery_items_cache
-        else:
-            cached_items = items_by_key = metadata_by_key = None
-
-        # Always compute watching items fresh (they come from self.media['watch'] which can change)
-        watching_items = self._watching_items()
-
-        if cached_items is not None:
-            # Use cached discovery items, prepend fresh watching items
-            items = watching_items + cached_items
-        else:
-            # Build from scratch
-            cache = load_media_cache()
+        """(items, items_by_key, metadata_by_key) of the discovery list: what the discovery cache lists
+        and the person has not dismissed, with the cached metadata of each, built once and kept until
+        something that it depends on changes (_invalidate_discovery_cache). The titles on the watch list
+        that no site has yet are put first, from the watch list as it is now, and shadow the same title
+        in the discovery cache. A row asks for this once per row, so building it again each time (and
+        asking for the metadata of every title each time) cost seconds with a few hundred titles."""
+        built = getattr(self, '_discovery_items_cache', None)  # one read: another thread may drop it at any time
+        if built is None:
             seen = set(self.state.get('media_discovery_seen', []))
-            cached_items = []
-            for item in get_all_cached_items(cache):
+            listed = []
+            for item in get_all_cached_items(load_media_cache()):
                 if not is_seen(seen, item):
                     urls = item.get('urls', {})
                     item['_plugin'] = list(urls.keys())[0] if urls else 'unknown'
-                    cached_items.append(item)
-            items = watching_items + cached_items
-            # Build lookup dict for O(1) access by cache key (for discovery items only)
-            items_by_key = {item.get('_cache_key'): item for item in cached_items if item.get('_cache_key')}
-
-        # Deduplicate by cache key: watching items (from watch list) take priority over cached items
-        # This prevents a monitored/searching title from also appearing in the Discover tab
-        seen_keys = set()
-        deduped_items = []
-        for item in items:
-            key = item.get('_cache_key')
-            if key and key not in seen_keys:
-                seen_keys.add(key)
-                deduped_items.append(item)
-            elif not key:
-                # Items without a cache key (shouldn't happen, but keep them)
-                deduped_items.append(item)
-        items = deduped_items
-
-        # Pre-fetch metadata for all items in one batch
-        metadata_by_key = {}
-        for item in items:
-            key = item.get('_cache_key')
-            if not key:
-                continue
-            first_url = next(iter(item.get('urls', {}).values()), None)
-            meta = get_cached_metadata(
-                title_with_year(item),
-                media_type=item.get('type', 'movie'),
-                url=first_url,
-                imdb_id=item.get('imdb_id'),
-                tmdb_id=item.get('tmdb_id')
-            )
-            metadata_by_key[key] = meta
-
-        self._discovery_items_cache = (cached_items, items_by_key, metadata_by_key)
-
-        return items, items_by_key, metadata_by_key
+                    listed.append(item)
+            items_by_key = {item['_cache_key']: item for item in listed if item.get('_cache_key')}
+            built = (listed, items_by_key, {key: self._cached_metadata_of(item) for key, item in items_by_key.items()})
+            self._discovery_items_cache = built
+        listed, items_by_key, metadata_by_key = built
+        watching = self._watching_items()
+        if not watching:
+            return listed, items_by_key, metadata_by_key
+        shadowed = {item['_cache_key'] for item in watching}
+        items = watching + [item for item in listed if item.get('_cache_key') not in shadowed]
+        return items, items_by_key, {**metadata_by_key, **{item['_cache_key']: self._cached_metadata_of(item) for item in watching}}
 
     def discovery_source_urls(self):
         """Return only discovery item URLs (unseen items from unified cache).
@@ -1696,11 +1609,9 @@ class MediaMixin:
         return items
 
     def track_item_count(self):
-        """Return the number of items in the Track tab (monitoring + searching entries)."""
+        """The number of titles the Track tab lists: those being looked for and series being followed."""
         with self._media_data_lock:
-            watch = self.media.get('watch', {})
-            count = sum(1 for w in watch.values() if w.get('monitoring') or (not w.get('source') and not w.get('monitoring')))
-        return count
+            return sum(1 for w in self.media.get('watch', {}).values() if is_tracked(w))
 
     def _invalidate_discovery_cache(self):
         """Invalidate the discovery items cache (call when cache/state changes)."""
@@ -2074,9 +1985,14 @@ class MediaMixin:
         that has only media to show."""
         if self.popup:
             configured = {u: (n, o) for u, n, o in load_media_sources()}
-            for row in self.listbox.get_children():
-                if hasattr(row, 'media_source'):
-                    self._update_media_row(row, configured)
+            lists = [self.listbox]
+            accordion = getattr(self, '_media_accordion', None)
+            if accordion is not None and getattr(accordion, 'watch_listbox', None) is not None:
+                lists.append(accordion.watch_listbox)  # the media rows live in the Watch tab, not in the news list
+            for listbox in lists:
+                for row in listbox.get_children():
+                    if hasattr(row, 'media_source'):
+                        self._update_media_row(row, configured)
         return False
 
 
@@ -2084,7 +2000,7 @@ class MediaMixin:
 
 class MediaAccordion:
     """A slide-up accordion (Gtk.Revealer) containing a Gtk.Notebook with three tabs:
-    Watch (ready/downloading episodes), Discover (IMDb charts), Track (monitoring + searching).
+    Watch (ready/downloading episodes), Discover (IMDb charts), Track (being looked for, being followed).
     Collapsed by default, header shows item counts."""
 
     def __init__(self, parent):
@@ -2158,7 +2074,7 @@ class MediaAccordion:
         self.discover_scroller.add(self.discover_listbox)
         self._add_tab(self.discover_scroller, 'Discover', 1)
 
-        # Tab 2: Track - monitoring + searching entries
+        # Tab 2: Track - titles being looked for and series being followed
         self.track_listbox = Gtk.ListBox()
         self.track_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         self.track_listbox.connect('row-activated', self._on_track_row_activated)
@@ -2405,7 +2321,7 @@ class MediaAccordion:
                 quality_label.get_style_context().add_class('quality-low')
             box.pack_start(quality_label, False, False, 0)
 
-        # Monitor button - adds to watch list with monitoring=True
+        # Monitor button - the same as a left click: onto the watch list
         monitor_btn = Gtk.Button(label='Monitor')
         monitor_btn.set_relief(Gtk.ReliefStyle.NONE)
         monitor_btn.get_style_context().add_class('menu-text')
@@ -2426,75 +2342,64 @@ class MediaAccordion:
         return row
 
     def _on_monitor_clicked(self, _btn, item):
-        """Add a discovery item to the watch list with monitoring=True (not searching)."""
-        # Create a watch entry with monitoring=True
-        key = item.get('_cache_key')
-        now = time_module.time()
-        meta = get_cached_metadata(title_with_year(item), item.get('type') or 'movie', imdb_id=item.get('imdb_id'))
-        year = item.get('year') or ((meta or {}).get('year') or '')[:4]
-        with self.parent._media_data_lock:
-            self.parent.media.setdefault('watch', {}).setdefault(
-                key, new_watch_entry(item, now, year if year.isdigit() else ''))
-            self.parent.media['watch'][key]['monitoring'] = True
-            save_media(self.parent.media)
-        # Invalidate discovery cache so the item moves to Track tab
-        self.parent._invalidate_discovery_cache()
-        GLib.idle_add(self.refresh)
+        """The Monitor button does what a left click on the row does: puts the title on the watch list
+        (looked for at once), and it leaves the Discover tab."""
+        self._chosen(item)
 
     def _on_discover_row_activated(self, _listbox, row):
         if hasattr(row, 'discovery_item'):
-            self.parent._on_discovery_row_activated(row.discovery_item)
+            self._chosen(row.discovery_item)
+
+    def _chosen(self, item):
+        """A title of the Discover tab was chosen: on the watch list, off this tab, in Track. Only what
+        changed is redrawn; building the popup again for one row took a third of a second, and before
+        the discovery list was built once, many seconds."""
+        self.parent._on_discovery_row_activated(item, rebuild=False)
+        self._drop_discover_row(item)
+        self._refresh_track_tab()
+        self._update_header_label()
+
+    def _drop_discover_row(self, item):
+        for row in self.discover_listbox.get_children():
+            if getattr(row, 'discovery_item', {}).get('_cache_key') == item.get('_cache_key'):
+                self.discover_listbox.remove(row)
+        self._update_tab_counts()
 
     def _on_discover_button_press(self, _listbox, event):
-        if event.button == 3:  # right-click
+        if event.button == 3:  # right-click: dismissed for good
             row = self.discover_listbox.get_row_at_y(int(event.y))
             if row and hasattr(row, 'discovery_item'):
-                self.parent._on_discovery_dismiss(None, row.discovery_item)
-                self.parent._invalidate_discovery_cache()
-                GLib.idle_add(self.refresh)
+                item = row.discovery_item
+                self.parent._on_discovery_dismiss(None, item, rebuild=False)
+                self._drop_discover_row(item)
+                self._update_header_label()
                 return True
         return False
 
     # ---- Track tab -----------------------------------------------------------
 
     def _refresh_track_tab(self):
-        """Show monitoring entries (monitoring=True) and searching entries (source=None)."""
+        """Lists the titles being looked for, and the series that are being followed."""
         self._clear_listbox(self.track_listbox)
-
-        # Monitoring entries: watch list items with monitoring=True
         with self.parent._media_data_lock:
-            watch_items = [
-                (key, dict(w)) for key, w in self.parent.media.get('watch', {}).items()
-                if w.get('monitoring')
-            ]
-
-        for key, entry in watch_items:
-            row = self._build_track_monitoring_row(key, entry)
+            tracked = [(key, dict(w)) for key, w in self.parent.media.get('watch', {}).items() if is_tracked(w)]
+        # the ones still being looked for first, the newest of each kind first
+        tracked.sort(key=lambda kw: (not is_searching(kw[1]), -kw[1].get('added', 0)))
+        for key, entry in tracked:
+            row = self._build_track_row(key, entry)
             if row:
                 self.track_listbox.add(row)
-
-        # Searching entries: watch list items with no source and not monitoring
-        with self.parent._media_data_lock:
-            searching_items = [
-                (key, dict(w)) for key, w in self.parent.media.get('watch', {}).items()
-                if not w.get('monitoring') and not w.get('source')
-            ]
-
-        for key, entry in searching_items:
-            row = self._build_track_searching_row(key, entry)
-            if row:
-                self.track_listbox.add(row)
-
         self.track_listbox.show_all()
         self._update_tab_counts()
 
-    def _build_track_monitoring_row(self, key, entry):
-        """Build a row for a monitoring entry (monitoring=True)."""
+    def _build_track_row(self, key, entry):
+        """A row of a title on the watch list: what it is, whether it is still being looked for or is being
+        followed, and a button to stop."""
         row = Gtk.ListBoxRow()
         row.set_selectable(False)
         row.set_activatable(True)
         row.track_key = key
-        row.track_type = 'monitoring'
+        row.track_type = 'following' if is_following(entry) else 'searching'
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         box.set_margin_start(6)
@@ -2502,16 +2407,12 @@ class MediaAccordion:
         box.set_margin_top(3)
         box.set_margin_bottom(3)
 
-        # Badge
-        badge_text = '📺' if entry.get('type') == 'series' else '🎬'
-        badge = Gtk.Label(label=badge_text)
+        badge = Gtk.Label(label='📺' if entry.get('type') == 'series' else '🎬')
         badge.set_margin_end(4)
         box.pack_start(badge, False, False, 0)
 
-        # Title and status
         text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         text_box.set_hexpand(True)
-
         title_label = Gtk.Label()
         title_label.set_markup(f'<b>{GLib.markup_escape_text(entry["title"])}</b>')
         title_label.set_xalign(0)
@@ -2519,66 +2420,14 @@ class MediaAccordion:
         title_label.set_hexpand(True)
         text_box.pack_start(title_label, False, False, 0)
 
-        # Status: monitoring
+        status = 'Monitoring for new episodes…' if is_following(entry) else 'Looking for a source…'
         status_label = Gtk.Label()
-        status_label.set_markup('<span size="small"><i>Monitoring for new episodes…</i></span>')
+        status_label.set_markup(f'<span size="small"><i>{status}</i></span>')
         status_label.set_xalign(0)
         status_label.get_style_context().add_class('menu-text')
         text_box.pack_start(status_label, False, False, 0)
-
         box.pack_start(text_box, True, True, 0)
 
-        # Stop tracking button
-        stop_btn = Gtk.Button(label='Stop tracking')
-        stop_btn.set_relief(Gtk.ReliefStyle.NONE)
-        stop_btn.get_style_context().add_class('menu-text')
-        stop_btn.connect('clicked', self._on_stop_tracking_clicked, key, entry)
-        box.pack_start(stop_btn, False, False, 0)
-
-        row.add(box)
-        return row
-
-    def _build_track_searching_row(self, key, entry):
-        """Build a row for a searching entry (source=None, monitoring=False)."""
-        row = Gtk.ListBoxRow()
-        row.set_selectable(False)
-        row.set_activatable(True)
-        row.track_key = key
-        row.track_type = 'searching'
-
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        box.set_margin_start(6)
-        box.set_margin_end(6)
-        box.set_margin_top(3)
-        box.set_margin_bottom(3)
-
-        # Badge
-        badge_text = '📺' if entry.get('type') == 'series' else '🎬'
-        badge = Gtk.Label(label=badge_text)
-        badge.set_margin_end(4)
-        box.pack_start(badge, False, False, 0)
-
-        # Title and status
-        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        text_box.set_hexpand(True)
-
-        title_label = Gtk.Label()
-        title_label.set_markup(f'<b>{GLib.markup_escape_text(entry["title"])}</b>')
-        title_label.set_xalign(0)
-        title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        title_label.set_hexpand(True)
-        text_box.pack_start(title_label, False, False, 0)
-
-        # Status: searching
-        status_label = Gtk.Label()
-        status_label.set_markup('<span size="small"><i>Looking for a source…</i></span>')
-        status_label.set_xalign(0)
-        status_label.get_style_context().add_class('menu-text')
-        text_box.pack_start(status_label, False, False, 0)
-
-        box.pack_start(text_box, True, True, 0)
-
-        # Stop tracking button (removes from watch list)
         stop_btn = Gtk.Button(label='Stop tracking')
         stop_btn.set_relief(Gtk.ReliefStyle.NONE)
         stop_btn.get_style_context().add_class('menu-text')
@@ -2601,25 +2450,7 @@ class MediaAccordion:
         return False
 
     def _on_stop_tracking_clicked(self, _btn, key, entry):
-        """Stop tracking: remove from watch list, add to track_dismissed so it doesn't reappear in Discover."""
-        # Add to track_dismissed set
-        with self.parent.lock:
-            track_dismissed = set(self.parent.state.get('media_track_dismissed', []))
-            track_dismissed.add(key)
-            self.parent.state['media_track_dismissed'] = sorted(track_dismissed)
-            from ..state import save_state
-            save_state(self.parent.state)
-
-        # Remove from watch list
-        with self.parent._media_data_lock:
-            self.parent.media.setdefault('watch', {}).pop(key, None)
-            from ..state import save_media
-            save_media(self.parent.media)
-
-        # Invalidate discovery cache so the item doesn't reappear
-        self.parent._invalidate_discovery_cache()
-
-        # Refresh
+        self.parent._stop_tracking(key)
         GLib.idle_add(self.refresh)
 
     # Public method to expand the accordion

@@ -211,6 +211,11 @@ def media_scenario(tray):
     menu = tray._media_menu_content(series, Gtk.Popover())
     button = next(w for w in walk(menu) if isinstance(w, Gtk.Button) and (w.get_label() or '').startswith('Remove all'))
     button.clicked()
+    for _ in range(100):  # the removal runs in a thread (it can wait for a download): wait until it is through
+        time.sleep(0.05)
+        pump()
+        if series not in json.loads((config_dir / 'media.json').read_text())['sources']:
+            break
     pump()
     trash = pathlib.Path(HOME, '.local', 'share', 'Trash', 'files')
     return {'config': (config_dir / 'config.conf').read_text(),

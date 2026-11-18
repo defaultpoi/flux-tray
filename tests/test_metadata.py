@@ -105,6 +105,38 @@ class TestTheCacheFiles(MetadataCase):
             self.assertEqual(list(rt._load_metadata_cache()), ['other'])
             self.assertEqual(read.call_count, 1)
 
+    def test_the_same_dict_comes_back_until_the_file_changes_or_an_entry_expires(self):
+        # the popup asks for the cache once per title per row: a pass over every entry each time took seconds
+        now = time.time()
+        rt._update_metadata_cache(lambda c: c.update({'a': {'cached_at': now}, 'b': {'cached_at': now - 29.5 * 86400}}))
+        first = rt._load_metadata_cache()
+        self.assertIs(rt._load_metadata_cache(), first)
+        self.assertEqual(sorted(first), ['a', 'b'])
+        with mock.patch.object(rt.time, 'time', return_value=now + 1 * 86400):  # b has expired, the file has not changed
+            after = rt._load_metadata_cache()
+        self.assertEqual(sorted(after), ['a'])
+        rt._update_metadata_cache(lambda c: c.__setitem__('c', {'cached_at': time.time()}))
+        self.assertEqual(sorted(rt._load_metadata_cache()), ['a', 'b', 'c'])
+
+    def test_what_a_reader_holds_is_not_changed_by_an_update(self):
+        rt._update_metadata_cache(lambda c: c.__setitem__('a', {'cached_at': time.time()}))
+        held = rt._load_metadata_cache()
+        rt._update_metadata_cache(lambda c: c.__setitem__('b', {'cached_at': time.time()}))
+        self.assertEqual(sorted(held), ['a'])
+
+    def test_a_cache_of_thousands_costs_nothing_to_ask_again(self):
+        now = time.time()
+        rt._update_metadata_cache(lambda c: c.update({f'k{i}': {'cached_at': now} for i in range(3000)}))
+        rt._load_metadata_cache()
+        with mock.patch.object(rt.time, 'time', wraps=time.time) as clock:
+            for _ in range(2000):
+                rt._load_metadata_cache()
+        self.assertLessEqual(clock.call_count, 2000)  # one clock reading each, and no pass over 3000 entries
+        started = time.perf_counter()
+        for _ in range(2000):
+            rt._load_metadata_cache()
+        self.assertLess(time.perf_counter() - started, 0.5)
+
     def test_changes_from_several_threads_are_all_kept(self):
         def add(n):
             rt._update_metadata_cache(lambda c: c.__setitem__(f'k{n}', {'cached_at': time.time()}))

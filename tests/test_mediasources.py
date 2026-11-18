@@ -333,6 +333,78 @@ class TestLoadingPlugins(PluginCase):
         self.assertIsNone(self.registry.by_name('mysite'))
 
 
+class TestTwoPluginFolders(PluginCase):
+    """The built-in plugins are in the repo, the person's own in their config folder: both are read, and
+    a file of the person's with the name of a built-in one replaces it."""
+
+    def setUp(self):
+        super().setUp()
+        self.user_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.user_dir, ignore_errors=True)
+        self.registry = rt.MediaSources([self.dir, self.user_dir])
+
+    def user_plugin(self, name, source):
+        with open(os.path.join(self.user_dir, name), 'w') as f:
+            f.write(textwrap.dedent(source))
+
+    def site(self, name, order):
+        return f"""
+            NAME = '{name}'
+            ORDER = '{order}'
+            def matches(url):
+                return url.startswith('https://{name}.example/')
+            def list_episodes(source):
+                return '{name}', []
+        """
+
+    def test_the_plugins_of_both_folders_are_loaded(self):
+        self.plugin('builtin.py', self.site('builtin', 'oldest'))
+        self.user_plugin('mine.py', self.site('mine', 'newest'))
+        self.registry.refresh()
+        self.assertEqual({'builtin', 'mine'} & set(self.names()), {'builtin', 'mine'})
+        self.assertEqual(self.registry.errors, {})
+
+    def test_a_file_of_the_person_with_the_name_of_a_built_in_one_replaces_it(self):
+        self.plugin('site.py', self.site('theirs', 'oldest'))
+        self.user_plugin('site.py', self.site('replacement', 'newest'))
+        self.registry.refresh()
+        self.assertIn('replacement', self.names())
+        self.assertNotIn('theirs', self.names())
+
+    def test_taking_the_replacement_away_brings_the_built_in_one_back(self):
+        self.plugin('site.py', self.site('theirs', 'oldest'))
+        self.user_plugin('site.py', self.site('replacement', 'newest'))
+        self.registry.refresh()
+        os.unlink(os.path.join(self.user_dir, 'site.py'))
+        self.registry.refresh()
+        self.assertIn('theirs', self.names())
+        self.assertNotIn('replacement', self.names())
+
+    def test_a_file_that_is_edited_in_either_folder_is_loaded_again(self):
+        self.user_plugin('mine.py', self.site('mine', 'newest'))
+        self.registry.refresh()
+        path = os.path.join(self.user_dir, 'mine.py')
+        with open(path, 'w') as f:
+            f.write(textwrap.dedent(self.site('mine_edited', 'newest')))
+        stat = os.stat(path)
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+        self.registry.refresh()
+        self.assertIn('mine_edited', self.names())
+        self.assertNotIn('mine', self.names())
+
+    def test_a_folder_that_is_not_there_is_no_error(self):
+        self.registry = rt.MediaSources([os.path.join(self.dir, 'nope'), self.dir])
+        self.plugin('builtin.py', self.site('builtin', 'oldest'))
+        self.registry.refresh()
+        self.assertIn('builtin', self.names())
+
+    def test_a_single_folder_still_works_and_the_app_reads_the_repo_and_the_config_folder(self):
+        self.assertEqual(rt.MediaSources(self.dir).plugin_dirs, [self.dir])
+        self.assertEqual(rt.MEDIA_PLUGIN_DIRS, [rt.MEDIA_PLUGIN_DIR, rt.USER_MEDIA_PLUGIN_DIR])
+        self.assertTrue(rt.MEDIA_PLUGIN_DIR.endswith(os.path.join('addons', 'media-plugins')))
+        self.assertTrue(os.path.isdir(rt.MEDIA_PLUGIN_DIR))
+
+
 class TestListing(PluginCase):
     def test_what_a_plugin_lists_is_checked_and_stamped(self):
         self.plugin('mysite.py', self.GOOD)

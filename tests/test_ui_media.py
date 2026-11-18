@@ -98,6 +98,8 @@ class Stub:
     _consumed_media_sources = rt.FluxTray._consumed_media_sources
     remove_consumed_media = rt.FluxTray.remove_consumed_media
     _media_menu_remove = rt.FluxTray._media_menu_remove
+    _remove_sources = rt.FluxTray._remove_sources
+    _remove_dynamic_source = rt.FluxTray._remove_dynamic_source
     _cancel_source_downloads = rt.FluxTray._cancel_source_downloads
     _drop_media_sources = rt.FluxTray._drop_media_sources
     _set_media_resume = rt.FluxTray._set_media_resume
@@ -119,6 +121,7 @@ class Stub:
     _discovery_refresh = rt.FluxTray._discovery_refresh
     _on_discovery_dismiss = rt.FluxTray._on_discovery_dismiss
     _on_discovery_row_activated = rt.FluxTray._on_discovery_row_activated
+    _cached_metadata_of = staticmethod(rt.FluxTray._cached_metadata_of)
     _media_menu_remove_dynamic = rt.FluxTray._media_menu_remove_dynamic
     _add_discovered_source = rt.FluxTray._add_discovered_source
     _read_discovery_plugins = rt.FluxTray._read_discovery_plugins
@@ -126,6 +129,9 @@ class Stub:
     _enrich_discovery = rt.FluxTray._enrich_discovery
     _watch_title = rt.FluxTray._watch_title
     _stop_watching = rt.FluxTray._stop_watching
+    _stop_tracking = rt.FluxTray._stop_tracking
+    track_item_count = rt.FluxTray.track_item_count
+    _cancel_source_downloads = rt.FluxTray._cancel_source_downloads
     _forget_watch_of = rt.FluxTray._forget_watch_of
     _search_watched = rt.FluxTray._search_watched
     _watching_items = rt.FluxTray._watching_items
@@ -212,6 +218,11 @@ class TestMediaRowView(unittest.TestCase):
 
     def view(self, entry, order='oldest', downloaded=False, status=None, name='Show'):
         return rt.media_row_view(name, entry, order, downloaded, status, is_playing=False)
+
+    def test_the_row_of_a_paused_source_says_it_is_no_longer_followed(self):
+        entry = entry_with(ep('a', 1), ep('b', 2))
+        self.assertNotIn('no longer followed', self.view(entry)[3])
+        self.assertIn('no longer followed', self.view(dict(entry, paused=True))[3])
 
     def test_the_tooltip_is_escaped_markup_and_needs_no_gtk(self):
         entry = entry_with(ep('a', 1), ep('b', 2), watched=['a'], last={'id': 'a', 'title': 'Tom & <Jerry>'})
@@ -376,6 +387,16 @@ class TestChecking(MediaCase):
         stub.media['sources'][self.ADDED] = entry_with(ep('x', 1), title='Added')
         stub.media_registry.by_source[self.ADDED] = FakeDriver('fsonline_one', 'newest')
         return stub
+
+    def test_a_paused_source_is_not_read_any_more_but_is_still_there_to_watch(self):
+        stub = self.with_added_source()
+        stub.media['sources'][self.ADDED]['paused'] = True
+        stub.media_registry.listing(URL, ('Show', [ep('a', 1)]))
+        stub.media_registry.listing(self.ADDED, ('Added', [ep('x', 1), ep('y', 2)]))
+        stub._check_media()
+        stub.media_registry.by_source[self.ADDED].list_episodes.assert_not_called()
+        self.assertEqual([e['id'] for e in stub.media['sources'][self.ADDED]['episodes']], ['x'])  # what it had is kept
+        self.assertIn(self.ADDED, stub.media_source_urls())
 
     def test_a_source_added_by_a_click_is_read_again_at_every_full_check(self):
         # it is monitored: a new episode of a series that was clicked is found, not only the first at the click
@@ -883,6 +904,19 @@ class TestPlanning(MediaCase):
         stub._plan_media_downloads()
         stub._enqueue_media.assert_called_once_with([(URL, 'a')])
 
+    ADDED = 'fsonline_one:https://fsonline.one/serial/show-2024-online-subtitrat/'
+
+    def test_a_source_added_by_a_click_is_planned_for_until_it_is_paused(self):
+        self.sources = []
+        stub = self.stub(entry_with(ep('a', 1), ep('b', 2)), url=self.ADDED)
+        stub.media_registry.by_source[self.ADDED] = FakeDriver('fsonline_one', 'oldest')
+        stub._plan_media_downloads()
+        stub._enqueue_media.assert_called_once_with([(self.ADDED, 'a'), (self.ADDED, 'b')])
+        stub._enqueue_media.reset_mock()
+        stub.media['sources'][self.ADDED]['paused'] = True  # the person stopped following it
+        stub._plan_media_downloads()
+        stub._enqueue_media.assert_called_once_with([])
+
     def test_ahead_zero_downloads_nothing(self):
         self.settings['ahead'] = 0
         stub = self.stub(entry_with(ep('a', 1)))
@@ -1266,6 +1300,7 @@ class TestRemovingWatchedSources(MediaCase):
 
     def setUp(self):
         super().setUp()
+        threads_run_at_once(self)
         self.sources = [(URL, None, None), (POD, 'The Podcast', None), (self.FILM, 'The Film', 'oldest')]
         self.config_lines = [url for url, _n, _o in self.sources]
 
@@ -1304,7 +1339,7 @@ class TestRemovingWatchedSources(MediaCase):
         self.assertNotIn(URL, self.stub.media['sources'])
         self.assertEqual(set(self.stub.media['sources']), {POD, self.FILM})
         self.save_media.assert_called_with(self.stub.media)
-        self.stub._media_rows_removed.assert_called_once_with([URL])
+        self.assertEqual(self.queued(self.stub, '_media_rows_removed'), [([URL],)])  # the rows are the main loop's
 
     def test_removing_clears_what_was_in_memory_about_it_and_nothing_else(self):
         self.stub.media_errors = {URL: 'down', POD: 'down too'}
@@ -1333,7 +1368,7 @@ class TestRemovingWatchedSources(MediaCase):
         self.assertEqual(self.stub.remove_consumed_media([POD, 'https://nowhere.example/']), [])
         self.assertEqual(self.removed_calls, [])
         self.save_media.assert_not_called()
-        self.stub._media_rows_removed.assert_not_called()
+        self.assertEqual(self.queued(self.stub, '_media_rows_removed'), [])
 
     def test_a_config_that_cannot_be_written_leaves_everything_as_it_was(self):
         self.config_writable = False
@@ -1896,6 +1931,7 @@ class TestARemovedMovie(MediaCase):
 
     def setUp(self):
         super().setUp()
+        threads_run_at_once(self)
         self.sources = [(self.FILM, 'The Film', None), (URL, None, None)]
         self.movies = {self.FILM}
         self.trashed, self.refuse = [], set()
@@ -2009,7 +2045,7 @@ class TestARemovedMovie(MediaCase):
         gone = self.stub.remove_consumed_media([self.FILM])
         self.assertEqual(gone, [self.FILM])
         self.assertEqual(sorted(self.trashed), ['film.en.srt', 'film.mkv'])
-        self.stub._media_rows_removed.assert_called_once_with([self.FILM])
+        self.assertEqual(self.queued(self.stub, '_media_rows_removed'), [([self.FILM],)])
 
     def test_removing_by_hand_a_movie_whose_file_cannot_go_leaves_it_as_it_is(self):
         self.refuse = {self.video}
@@ -2082,6 +2118,22 @@ class TestTheHoverHandlersOfARow(MediaCase):
     def test_hovering_a_row_that_was_never_updated_does_nothing(self):
         stub = self.stub()
         self.assertFalse(stub._on_media_row_enter(mock.Mock(spec=[]), None))  # no popover_data on it
+
+
+class RunsAtOnce:
+    """Stands in for threading.Thread: start() runs the target there and then, so a test can look at the result."""
+
+    def __init__(self, target=None, args=(), kwargs=None, daemon=None, name=None):
+        self.target, self.args, self.kwargs = target, args, kwargs or {}
+
+    def start(self):
+        self.target(*self.args, **self.kwargs)
+
+
+def threads_run_at_once(case):
+    patcher = mock.patch.object(rt.threading, 'Thread', RunsAtOnce)
+    patcher.start()
+    case.addCleanup(patcher.stop)
 
 
 class FakePlugin:
@@ -2238,6 +2290,37 @@ SERIES = 'https://www.imdb.com/chart/tvmeter/'
 
 def chart_episode(imdb_id, title, **extra):
     return {'id': imdb_id, 'title': title, 'date': '', 'url': f'https://www.imdb.com/title/{imdb_id}/', 'ref': 'chart', **extra}
+
+
+class TestWhoRedrawsAfterAChoice(unittest.TestCase):
+    ITEM = {'_cache_key': 'imdb:tt1', 'title': 'Film', 'type': 'movie', 'imdb_id': 'tt1', 'urls': {'imdb-charts': 'https://www.imdb.com/title/tt1/'}, '_plugin': 'imdb-charts'}
+
+    def setUp(self):
+        isolate_media_caches(self)
+        self.stub = Stub()
+        self.idle = []
+        for name, value in (('save_state', mock.Mock()), ('save_media', mock.Mock()), ('get_cached_metadata', mock.Mock(return_value=None))):
+            patcher = mock.patch.object(rt, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(rt.GLib, 'idle_add', side_effect=lambda f, *a: self.idle.append(f))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.stub.media_registry.finding = [FakeFinder('fsonline_one', None)]
+
+    def test_by_default_the_whole_list_is_built_again_after_the_state_is_saved(self):
+        with mock.patch.object(rt.threading, 'Thread'):
+            self.stub._on_discovery_row_activated(dict(self.ITEM))
+        self.stub._on_discovery_dismiss(None, dict(self.ITEM))
+        self.assertEqual(self.idle.count(self.stub.refresh_list), 2)
+
+    def test_a_caller_that_takes_the_row_away_itself_asks_for_no_rebuild(self):
+        with mock.patch.object(rt.threading, 'Thread'):
+            self.stub._on_discovery_row_activated(dict(self.ITEM), rebuild=False)
+        self.stub._on_discovery_dismiss(None, dict(self.ITEM), rebuild=False)
+        self.assertNotIn(self.stub.refresh_list, self.idle)
+        self.assertEqual(self.stub.state['media_discovery_seen'], ['imdb:tt1'])  # but it is still dismissed and watched
+        self.assertIn('imdb:tt1', self.stub.media['watch'])
 
 
 class TestDiscoveryFromCharts(unittest.TestCase):
@@ -2771,11 +2854,6 @@ class TestMediaAccordion(TmpConfigCase):
         stub.lock = threading.Lock()
         stub.state = {}
         stub._media_header_row = None
-        # Add track_item_count method (from MediaMixin)
-        stub.track_item_count = lambda: sum(
-            1 for w in stub.media.get('watch', {}).values()
-            if w.get('monitoring') or (not w.get('source') and not w.get('monitoring'))
-        )
         return stub
 
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
@@ -2885,73 +2963,8 @@ class TestMediaAccordion(TmpConfigCase):
             row_instance.add.assert_called()
             accordion.discover_listbox.add.assert_called()
 
-    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
-    def test_monitor_button_adds_to_watch_list_with_monitoring_true(self):
-        stub = self.make_stub()
-        accordion = rt.MediaAccordion(stub)
-        accordion.build()
 
-        item = {'title': 'New Series', 'type': 'series', 'year': '2023', 'genre': [],
-                'urls': {'fsonline_one': 'https://fsonline.one/series/test'}, '_cache_key': 'imdb:tt456'}
-        stub._invalidate_discovery_cache = mock.Mock()
-        stub.refresh_list = mock.Mock()
 
-        accordion._on_monitor_clicked(None, item)
-
-        # Watch entry should be created with monitoring=True
-        watch = stub.media['watch']
-        self.assertIn('imdb:tt456', watch)
-        self.assertTrue(watch['imdb:tt456']['monitoring'])
-        self.assertEqual(watch['imdb:tt456']['title'], 'New Series')
-        self.assertEqual(watch['imdb:tt456']['type'], 'series')
-        # Discovery cache invalidated and refresh scheduled
-        stub._invalidate_discovery_cache.assert_called_once()
-        self.assertIn(accordion.refresh, [f for f, _ in self.idle])
-
-    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
-    def test_refresh_track_tab_shows_monitoring_and_searching_entries(self):
-        stub = self.make_stub()
-        accordion = rt.MediaAccordion(stub)
-        accordion.build()
-
-        # Add a monitoring entry and a searching entry
-        stub.media['watch'] = {
-            'imdb:tt1': {'title': 'Monitoring Show', 'type': 'series', 'monitoring': True, 'source': None},
-            'imdb:tt2': {'title': 'Searching Show', 'type': 'series', 'monitoring': False, 'source': None},
-            'imdb:tt3': {'title': 'Found Show', 'type': 'movie', 'monitoring': False, 'source': 'some:source'},
-        }
-        # Mock listbox add
-        accordion.track_listbox.add = mock.Mock()
-
-        # Mock Gtk.ListBoxRow creation for track rows
-        with mock.patch.object(rt.Gtk, 'ListBoxRow', return_value=mock.MagicMock()) as row_cls:
-            accordion._refresh_track_tab()
-            # Two rows created: monitoring + searching
-            self.assertEqual(row_cls.call_count, 2)
-            self.assertEqual(accordion.track_listbox.add.call_count, 2)
-
-    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
-    def test_stop_tracking_removes_from_watch_and_adds_to_track_dismissed(self):
-        stub = self.make_stub()
-        accordion = rt.MediaAccordion(stub)
-        accordion.build()
-
-        stub.media['watch'] = {
-            'imdb:tt1': {'title': 'Monitoring Show', 'type': 'series', 'monitoring': True},
-        }
-        stub.state = {}
-        stub._invalidate_discovery_cache = mock.Mock()
-        stub.refresh_list = mock.Mock()
-
-        accordion._on_stop_tracking_clicked(None, 'imdb:tt1', stub.media['watch']['imdb:tt1'])
-
-        # Removed from watch list
-        self.assertNotIn('imdb:tt1', stub.media['watch'])
-        # Added to track_dismissed
-        self.assertIn('imdb:tt1', stub.state.get('media_track_dismissed', []))
-        # Cache invalidated and refresh scheduled
-        stub._invalidate_discovery_cache.assert_called_once()
-        self.assertIn(accordion.refresh, [f for f, _ in self.idle])
 
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
     def test_update_header_label_shows_watch_plus_discover_count(self):
@@ -2999,18 +3012,135 @@ class TestMediaAccordion(TmpConfigCase):
         self.assertIn('(2)', accordion._tab_labels[1].set_markup.call_args[0][0])
         self.assertNotIn('(', accordion._tab_labels[2].set_markup.call_args[0][0])
 
+
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
-    def test_track_item_count_returns_monitoring_plus_searching(self):
+    def test_the_monitor_button_does_what_a_left_click_does(self):
         stub = self.make_stub()
-        # Add monitoring, searching, and found entries
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        stub._on_discovery_row_activated = mock.Mock()
+        item = {'title': 'New Series', 'type': 'series', '_cache_key': 'imdb:tt456'}
+        accordion._on_monitor_clicked(None, item)
+        stub._on_discovery_row_activated.assert_called_once_with(item, rebuild=False)
+
+    def test_monitoring_a_title_puts_it_on_the_watch_list_dismisses_it_from_discover_and_looks_for_it_at_once(self):
+        stub = self.make_stub()
+        stub.media_registry.finding = [FakeFinder('fsonline_one', None)]
+        item = {'title': 'New Series', 'type': 'series', 'year': '2023', 'imdb_id': 'tt456', 'genre': [], '_cache_key': 'imdb:tt456',
+                'urls': {'imdb-charts': 'https://www.imdb.com/title/tt456/'}, '_plugin': 'imdb-charts'}
+        stub.save_state = mock.Mock()
+        with mock.patch.object(rt.threading, 'Thread') as thread, mock.patch.object(rt, 'save_state'):
+            stub._on_discovery_row_activated(item, rebuild=False)  # which the Monitor button and a left click both call
+        entry = stub.media['watch']['imdb:tt456']
+        self.assertEqual((entry['title'], entry['type'], entry['source'], 'monitoring' in entry), ('New Series', 'series', None, False))
+        self.assertEqual(stub.state['media_discovery_seen'], ['imdb:tt456'])  # never shown in Discover again
+        thread.assert_called_once()  # the first search starts now, not at the next media check
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_the_track_tab_lists_what_is_looked_for_then_what_is_followed_and_not_a_film_that_was_found(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
         stub.media['watch'] = {
-            'imdb:tt1': {'title': 'Monitoring', 'type': 'series', 'monitoring': True, 'source': None},
-            'imdb:tt2': {'title': 'Searching', 'type': 'series', 'monitoring': False, 'source': None},
-            'imdb:tt3': {'title': 'Found', 'type': 'movie', 'monitoring': False, 'source': 'some:source'},
+            'imdb:tt1': {'title': 'Followed Show', 'type': 'series', 'source': 'fsonline_one:https://f/serial/x', 'added': 1},
+            'imdb:tt2': {'title': 'Looked For', 'type': 'movie', 'source': None, 'added': 2},
+            'imdb:tt3': {'title': 'Found Film', 'type': 'movie', 'source': 'some:source', 'added': 3},
         }
-        # Use the actual method from MediaMixin
-        count = rt.FluxTray.track_item_count(stub)
-        self.assertEqual(count, 2)  # monitoring + searching
+        accordion.track_listbox.add = mock.Mock()
+        accordion._refresh_track_tab()
+        rows = [c.args[0] for c in accordion.track_listbox.add.call_args_list]
+        self.assertEqual([(r.track_key, r.track_type) for r in rows], [('imdb:tt2', 'searching'), ('imdb:tt1', 'following')])
+
+    def test_the_track_count_is_what_is_looked_for_plus_what_is_followed(self):
+        stub = self.make_stub()
+        stub.media['watch'] = {
+            'imdb:tt1': {'title': 'Followed', 'type': 'series', 'source': 'p:u'},
+            'imdb:tt2': {'title': 'Looked for', 'type': 'series', 'source': None},
+            'imdb:tt3': {'title': 'Found film', 'type': 'movie', 'source': 'p:u'},
+        }
+        self.assertEqual(stub.track_item_count(), 2)
+
+    def test_stopping_a_title_still_looked_for_drops_it_and_it_never_comes_back_to_discover(self):
+        stub = self.make_stub()
+        stub.media['watch'] = {'imdb:tt2': {'title': 'Looked for', 'type': 'movie', 'source': None, 'added': 1}}
+        with mock.patch.object(rt, 'save_state'), mock.patch.object(rt.threading, 'Thread') as thread:
+            stub._stop_tracking('imdb:tt2')
+        self.assertEqual(stub.media['watch'], {})
+        self.assertEqual(stub.state['media_discovery_seen'], ['imdb:tt2'])
+        thread.assert_not_called()  # no source, no download to cancel
+
+    def test_stopping_a_followed_series_pauses_its_source_cancels_its_downloads_and_keeps_what_was_downloaded(self):
+        stub = self.make_stub()
+        source = 'fsonline_one:https://f/serial/x'
+        stub.media['sources'][source] = entry_with(ep('a', 1), ep('b', 2), files={'a': {'video': '/v/a.mkv', 'subs': []}})
+        stub.media['watch'] = {'imdb:tt1': {'title': 'Followed', 'type': 'series', 'source': source, 'added': 1}}
+        with mock.patch.object(rt, 'save_state'), mock.patch.object(rt.threading, 'Thread') as thread:
+            stub._stop_tracking('imdb:tt1')
+        self.assertEqual(stub.media['watch'], {})
+        entry = stub.media['sources'][source]
+        self.assertTrue(entry['paused'])
+        self.assertEqual(list(entry['files']), ['a'])  # nothing was deleted
+        self.assertEqual(thread.call_args.kwargs['target'], stub._cancel_source_downloads)
+        self.assertEqual(thread.call_args.kwargs['args'], (source,))
+
+    def discover_rows(self, accordion, *titles):
+        rows = []
+        for n, title in enumerate(titles, start=1):
+            row = rt.Gtk.ListBoxRow()
+            row.discovery_item = {'title': title, '_cache_key': f'imdb:tt{n}', 'type': 'movie', 'imdb_id': f'tt{n}'}
+            accordion.discover_listbox.add(row)
+            rows.append(row)
+        return rows
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_choosing_a_title_takes_its_row_away_shows_it_in_track_and_rebuilds_nothing_else(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        first, second = self.discover_rows(accordion, 'First', 'Second')
+        stub._on_discovery_row_activated = mock.Mock()
+        accordion._refresh_track_tab = mock.Mock()
+        accordion._on_discover_row_activated(None, first)
+        stub._on_discovery_row_activated.assert_called_once_with(first.discovery_item, rebuild=False)
+        self.assertEqual(accordion.discover_listbox.get_children(), [second])
+        accordion._refresh_track_tab.assert_called_once()
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_the_monitor_button_takes_the_row_away_too(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        first, second = self.discover_rows(accordion, 'First', 'Second')
+        stub._on_discovery_row_activated = mock.Mock()
+        accordion._on_monitor_clicked(None, second.discovery_item)
+        self.assertEqual(accordion.discover_listbox.get_children(), [first])
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_a_right_click_dismisses_the_title_and_takes_just_its_row_away(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        first, second = self.discover_rows(accordion, 'First', 'Second')
+        stub._on_discovery_dismiss = mock.Mock()
+        accordion.refresh = mock.Mock()  # a rebuild of the tabs is what must not happen
+        accordion.discover_listbox.get_row_at_y = mock.Mock(return_value=second)
+        event = mock.Mock(button=3, y=40)
+        self.assertTrue(accordion._on_discover_button_press(None, event))
+        stub._on_discovery_dismiss.assert_called_once_with(None, second.discovery_item, rebuild=False)
+        self.assertEqual(accordion.discover_listbox.get_children(), [first])
+        accordion.refresh.assert_not_called()
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_a_click_that_is_not_a_right_click_or_not_on_a_row_does_nothing(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        self.discover_rows(accordion, 'First')
+        stub._on_discovery_dismiss = mock.Mock()
+        accordion.discover_listbox.get_row_at_y = mock.Mock(return_value=None)
+        self.assertFalse(accordion._on_discover_button_press(None, mock.Mock(button=3, y=999)))
+        self.assertFalse(accordion._on_discover_button_press(None, mock.Mock(button=1, y=5)))
+        stub._on_discovery_dismiss.assert_not_called()
 
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
     def test_expand_and_collapse_methods(self):
@@ -3026,3 +3156,107 @@ class TestMediaAccordion(TmpConfigCase):
 
         accordion.collapse()
         self.assertFalse(accordion.revealer.get_reveal_child())
+
+
+class TestRemovingDoesNotHoldUpTheMainLoop(MediaCase):
+    """Cancelling a download waits up to five seconds for it to notice, and a film's file goes to the Trash:
+    choosing Remove only hands that to a thread."""
+
+    def check(self, call, target):
+        stub = Stub()
+        stub._cancel_source_downloads = mock.Mock()
+        stub.remove_consumed_media = mock.Mock()
+        stub._trash_source_files = mock.Mock()
+        popover = mock.Mock()
+        with mock.patch.object(rt.threading, 'Thread') as thread:
+            call(stub, popover)
+        popover.popdown.assert_called_once()
+        thread.assert_called_once()
+        self.assertEqual(thread.call_args.kwargs['target'], getattr(stub, target))
+        thread.return_value.start.assert_called_once()
+        for name in ('_cancel_source_downloads', 'remove_consumed_media', '_trash_source_files'):
+            getattr(stub, name).assert_not_called()  # none of it ran here
+
+    def test_removing_sources_from_the_menu(self):
+        self.check(lambda stub, popover: stub._media_menu_remove(None, popover, [URL, POD]), '_remove_sources')
+
+    def test_removing_a_source_added_by_a_click(self):
+        self.check(lambda stub, popover: stub._media_menu_remove_dynamic(None, popover, 'p:u'), '_remove_dynamic_source')
+
+    def test_what_the_thread_does_is_to_cancel_then_remove(self):
+        stub = Stub()
+        order = []
+        stub._cancel_source_downloads = mock.Mock(side_effect=lambda url: order.append(('cancel', url)))
+        stub.remove_consumed_media = mock.Mock(side_effect=lambda urls: order.append(('remove', tuple(urls))))
+        stub._remove_sources([URL, POD])
+        self.assertEqual(order, [('cancel', URL), ('cancel', POD), ('remove', (URL, POD))])
+
+
+class TestTheMediaRowsStayCurrent(MediaCase):
+    """A download reports its progress many times a second: the rows have to follow it where they are."""
+
+    def test_the_rows_of_the_watch_tab_are_updated_in_place_as_well_as_those_of_the_news_list(self):
+        stub = Stub()
+        news_row, watch_row, other = (mock.Mock(media_source=URL), mock.Mock(media_source=POD), mock.Mock(spec=[]))
+        stub.listbox = mock.Mock(**{'get_children.return_value': [news_row, other]})
+        stub._media_accordion = mock.Mock(watch_listbox=mock.Mock(**{'get_children.return_value': [watch_row, other]}))
+        stub._update_media_row = mock.Mock()
+        stub._refresh_media_rows()
+        self.assertEqual([c.args[0] for c in stub._update_media_row.call_args_list], [news_row, watch_row])
+
+    def test_without_an_accordion_the_news_list_alone_is_updated(self):
+        stub = Stub()
+        row = mock.Mock(media_source=URL)
+        stub.listbox = mock.Mock(**{'get_children.return_value': [row]})
+        stub._update_media_row = mock.Mock()
+        stub._refresh_media_rows()
+        stub._update_media_row.assert_called_once()
+
+
+class TestTheDiscoveryListIsBuiltOnce(unittest.TestCase):
+    """The Discover tab asks for the list once per row, and each time used to ask for the metadata of every
+    title: with 200 titles that was 40000 lookups and a popup that took seconds to open."""
+
+    def setUp(self):
+        isolate_media_caches(self)
+        rt.update_media_cache(lambda c: [rt.get_or_create_entry(c, {'title': f'Film {i}', 'imdb_id': f'tt{i}', 'type': 'movie', '_plugin': 'p', 'url': f'u{i}', 'rank': i})
+                                         for i in range(1, 201)])
+        self.stub = Stub()
+        self.stub._discovery_items_cache = None
+        patcher = mock.patch.object(rt, 'get_cached_metadata', return_value=None)
+        self.lookups = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_metadata_of_each_title_is_asked_for_once_however_many_rows_ask(self):
+        for _ in range(250):
+            items, by_key, metadata = self.stub._get_discovery_items_cached()
+        self.assertEqual((len(items), len(by_key), len(metadata)), (200, 200, 200))
+        self.assertEqual(self.lookups.call_count, 200)
+
+    def test_what_is_built_is_kept_until_it_is_dropped_and_then_built_again(self):
+        first = self.stub._get_discovery_items_cached()
+        self.assertIs(self.stub._get_discovery_items_cached()[0], first[0])
+        self.stub._invalidate_discovery_cache()
+        self.assertIsNot(self.stub._get_discovery_items_cached()[0], first[0])
+
+    def test_a_title_being_looked_for_comes_first_shadows_its_twin_and_is_not_kept(self):
+        self.stub.media['watch'] = {'imdb:tt7': rt.new_watch_entry({'title': 'Film 7', 'imdb_id': 'tt7'}, 1000)}
+        items, by_key, _meta = self.stub._get_discovery_items_cached()
+        self.assertEqual((items[0]['title'], bool(items[0].get('watching')), len(items)), ('Film 7', True, 200))
+        self.assertEqual(sum(1 for i in items if i['_cache_key'] == 'imdb:tt7'), 1)
+        self.assertNotIn('watching', by_key['imdb:tt7'])  # the cached one is untouched
+        self.stub.media['watch'].clear()
+        again = self.stub._get_discovery_items_cached()[0]
+        self.assertEqual(len(again), 200)
+        self.assertFalse(any(i.get('watching') for i in again))
+
+    def test_dropping_it_from_another_thread_while_it_is_read_cannot_break_the_reader(self):
+        self.stub._get_discovery_items_cached()
+        original = self.stub._watching_items
+
+        def drop_then_watch():
+            self.stub._invalidate_discovery_cache()  # what a thread that finished a check does
+            return original()
+        self.stub._watching_items = drop_then_watch
+        items, _by, _meta = self.stub._get_discovery_items_cached()
+        self.assertEqual(len(items), 200)

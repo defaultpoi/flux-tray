@@ -14,6 +14,9 @@ from bs4 import BeautifulSoup
 
 NAME = 'sitefilme_com'
 ORDER = 'newest'
+# find(): asked in the order of FIND_PRIORITY (lowest first) and only for what FIND_KINDS names
+FIND_PRIORITY = 10
+FIND_KINDS = ('movie',)  # it has films only
 
 BASE_URL = 'https://sitefilme.com'
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'

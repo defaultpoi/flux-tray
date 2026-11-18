@@ -442,6 +442,7 @@
                   "activatable": true,
                   "attrs": {
                    "entry_id": "n1",
+                   "feed_url": "https://news.example/rss",
                    "link": "https://news.example/1"
                   },
                   "children": [
@@ -498,6 +499,7 @@
                   "activatable": true,
                   "attrs": {
                    "entry_id": "n2",
+                   "feed_url": "https://news.example/rss",
                    "link": "https://news.example/2"
                   },
                   "children": [
@@ -606,6 +608,7 @@
                   "activatable": true,
                   "attrs": {
                    "entry_id": "b1",
+                   "feed_url": "https://blog.example/atom",
                    "link": "https://blog.example/1"
                   },
                   "children": [

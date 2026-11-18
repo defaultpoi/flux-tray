@@ -189,7 +189,10 @@ class MediaSources:
     drivers handle), then archive.org, yt-dlp for YouTube, and RSS feeds last."""
 
     def __init__(self, plugin_dir):
-        self.plugin_dir = plugin_dir
+        """`plugin_dir` is a folder or a list of folders. When two have a file of one name, the later
+        one's is the plugin: the built-in plugins first, then the person's own, who can so replace one."""
+        self.plugin_dirs = [plugin_dir] if isinstance(plugin_dir, (str, os.PathLike)) else list(plugin_dir)
+        self.plugin_dir = self.plugin_dirs[0]
         self.errors = {}  # plugin file -> why it could not be loaded
         self._plugins = {}  # file name -> (mtime, Driver or None)
         self._builtins = [Driver(m.NAME, m) for m in _builtin_drivers()]
@@ -200,18 +203,22 @@ class MediaSources:
     def refresh(self):
         """Loads new plugin files and reloads changed ones; forgets removed ones."""
         with self._lock:
-            try:
-                names = sorted(n for n in os.listdir(self.plugin_dir) if n.endswith('.py') and not n.startswith(('_', '.'))
-                               and os.path.isfile(os.path.join(self.plugin_dir, n)))
-            except OSError:
-                names = []
-            for gone in set(self._plugins) - set(names):
+            found = {}  # file name -> path; a later folder's file of the same name replaces an earlier one's
+            for folder in self.plugin_dirs:
+                try:
+                    for name in sorted(os.listdir(folder)):
+                        path = os.path.join(folder, name)
+                        if name.endswith('.py') and not name.startswith(('_', '.')) and os.path.isfile(path):
+                            found[name] = path
+                except OSError:
+                    continue
+            for gone in set(self._plugins) - set(found):
                 del self._plugins[gone]
                 self.errors.pop(gone, None)
-            for name in names:
-                path = os.path.join(self.plugin_dir, name)
+            for name in sorted(found):
+                path = found[name]
                 try:
-                    stamp = os.stat(path).st_mtime_ns
+                    stamp = (path, os.stat(path).st_mtime_ns)
                 except OSError:
                     continue
                 if name in self._plugins and self._plugins[name][0] == stamp:

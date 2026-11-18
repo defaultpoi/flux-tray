@@ -17,7 +17,6 @@ from ..links import open_link
 from ..log import _log
 from ..playback import open_twitch_stream, open_youtube_stream
 from ..rules import group_unread_by_feed, item_detail_text, item_is_highlighted
-from ..state import save_state
 from ..updates import format_change
 from .timer import TIMER_RESERVED_HEIGHT_PX, format_timer_countdown
 from .media import MediaAccordion
@@ -852,6 +851,7 @@ class PopupMixin:
             row.readlater_id = entry['id']
         else:
             row.entry_id = entry['id']
+            row.feed_url = entry.get('feed_url')  # so that its header can go with the last of its items
         row.link = entry['link']
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
@@ -925,19 +925,21 @@ class PopupMixin:
         return False
 
     def _remove_unread_row(self, row, item_id):
-        """Fast path: remove a single unread row from the listbox and state without full rebuild."""
-        with self.lock:
-            self.state['unread'] = [e for e in self.state.get('unread', []) if e['id'] != item_id]
-            save_state(self.state)
-        # Remove the row from the listbox directly
+        """Fast path: removes a single unread row (and its feed's header when it was the feed's last item)
+        from the listbox and the state, without a full rebuild."""
+        self._remove_unread(item_id)
+        feed_url = getattr(row, 'feed_url', None)
         self.listbox.remove(row)
-        # If list is now empty and popup should collapse, handle it
+        if feed_url is not None:
+            rows = self.listbox.get_children()
+            if not any(getattr(r, 'feed_url', None) == feed_url for r in rows if hasattr(r, 'entry_id')):
+                for header in rows:
+                    if getattr(header, 'header_feed_url', None) == feed_url:
+                        self.listbox.remove(header)  # a header with nothing under it says nothing
+                        break
+        self.update_icon()
         if not self.listbox.get_children() and self.popup and self.popup.get_visible():
-            # Need to check if there are other sections (live, read_later, etc.)
-            self.update_icon()
-            self.refresh_list(keep_open=True)
-        else:
-            self.update_icon()
+            self.refresh_list(keep_open=True)  # nothing left here: the rest of the popup (live, read later...) says so
 
     def on_row_activated(self, _listbox, row):
         if getattr(row, 'summary_header', False):

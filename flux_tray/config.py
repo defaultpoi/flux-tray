@@ -110,7 +110,7 @@ def ensure_config():
             "#   url: an archive.org collection or item (https://archive.org/details/...),\n"
             "#        a YouTube channel, playlist or video, or any podcast / video RSS or Atom feed.\n"
             "#        yt-dlp:<url> reads any other site yt-dlp supports, and a plugin in\n"
-            "#        ~/.config/flux-tray/media-plugins can add more (see the README)\n"
+            "#        ~/.config/flux-tray/media-plugins can add more or replace a built-in one (see the README)\n"
             "#   order: oldest (a series, from its first episode; the default for archive.org)\n"
             "#          or newest (a podcast, from the latest; the default for feeds)\n"
             "# https://archive.org/details/some-collection|Some Series\n"

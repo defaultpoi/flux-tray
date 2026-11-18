@@ -8,7 +8,7 @@ the tests' place.
 | What | How | Result |
 |------|-----|--------|
 | The 1233 tests the code had at baseline commit `eb73c7d` | real GTK under Xvfb, and GTK stubbed | pass, before any change |
-| Everything now | the same two modes, on Python 3.14.6 with PyGObject 3.50.2, GTK 3.24 (1742 tests); `pyflakes` clean | pass |
+| Everything now | the same two modes, on Python 3.14.6 with PyGObject 3.50.2, GTK 3.24 (1783 tests); `pyflakes` clean | pass |
 | Popup look and click hooks | `test_golden_popup`, two scenarios; identical on three runs and in the dark and default theme; a changed header and a changed colour digit both fail it | pass |
 | Each hardening change | its new tests run against the old code | fail there, pass now |
 | yt-dlp and ffmpeg | the real binaries in the tests that use them (ffmpeg 6.1) | pass |
@@ -120,7 +120,7 @@ Not taken, deliberately:
 - Added `fetch_new_episodes(since_timestamp, watch_titles)` and `fetch_new_movies(since_timestamp, watch_titles)` to `fsonline_one` plugin
 - Scans episodes/movies sitemaps (newest-first with `lastmod` timestamps), stops when items are older than `since_timestamp`
 - Caches sitemap pages for 5 minutes (`SITEMAP_CACHE_SECONDS = 300`)
-- `_search_fsonline_sitemap()` in `MediaMixin` runs at media check interval, checks watch list entries still searching, triggers targeted media checks only for series/movies with new episodes
+- `_search_fsonline_sitemap()` in `MediaMixin` was meant to run at the media check interval. It was never called by anything, would not have matched (a slug with its year against a title without) and did not save what it changed: removed on 2026-11-12. The plugin functions stay, unused by the app
 - Shared `_norm_title()` in `watch.py` for title normalization (no accents, lowercase, dash-joined)
 - 17 new tests in `test_fsonline.py` covering: empty cache, no matching titles, matching titles, pagination, stopping at older items, cache behavior, title extraction, title normalization
 - All 1742 tests pass (Xvfb + stubbed), pyflakes clean; 4 mutations caught by tests (reversed comparison, wrong suffix check, disabled new-item detection, numbers stripped from title)
@@ -183,3 +183,7 @@ No run on a real desktop yet.
 - Bug: MediaAccordion's three tab listboxes (Watch, Discover, Track) had no motion/leave event handlers connected, so hovering a row didn't show the metadata popover with title, year, type, IMDb/TMDb IDs, and overview.
 - Fix: Added `_setup_listbox_hover_events()` method that connects `motion-notify-event` and `leave-notify-event` to all three tab listboxes, calling parent's `_on_media_row_enter()` and `_on_media_row_leave()` for metadata popover display.
 - Verified: All 1762 tests pass (Xvfb + stubbed), pyflakes clean. Metadata popovers now appear on hover in all three tabs.
+
+2026-11-12: a right-click was slow, measured with a popup of realistic size under Xvfb (60 news items, 4000 seen entries, 8 media sources of 150 episodes, 600 cached titles = 1200 cache entries, 200 titles in the discovery list). A full rebuild of the popup took **5.6 s** (the first opening too). Two causes, both mine and the commit before it: `_load_metadata_cache` went over every cache entry at every call (the file was only parsed once), and `_get_discovery_items_cached` asked for the metadata of all 200 titles at every call, which the Discover tab makes once per row: about 40000 lookups of 1200 entries each. Now the pruned cache is the same dict until the file changes or an entry expires, and the discovery list is built once per change: the same rebuild takes **0.25 s**, the Discover tab's refresh 0.09 s. Also off the main loop now: Remove (cancelling a download waits up to 5 s; a film's file goes to the Trash).
+- Fixed on the same day: download progress no longer reached the media rows (`_refresh_media_rows` only looked in the news list, and the rows are in the Watch tab); the Monitor button, the left click and Stop tracking now agree (the Monitor button did not dismiss the title or start a search, and Stop tracking sent the title straight back to Discover: its dismissal list was written and never read; the `monitoring` flag changed a label and nothing else, and is gone); Stop tracking of a followed series pauses its source (nothing more read or downloaded, files kept; its row says so); a feed's header went with its last item only after a rebuild; the sites that `find` asks are no longer named in `watch.py`: a plugin declares `FIND_PRIORITY` and `FIND_KINDS`; the plugin folder: the app reads `addons/media-plugins` and `~/.config/flux-tray/media-plugins` (a file there replaces a built-in one), `install.sh` copies nothing; CI now installs `requests` and `beautifulsoup4` and the plugin tests skip without them (three pushes went red on it); `suggestions.md` removed.
+- Not changed, on purpose: the browser User-Agent for every request of `metadata.py` (its comment said it was for posters only), and TMDb stays off unless `tmdb=on`.

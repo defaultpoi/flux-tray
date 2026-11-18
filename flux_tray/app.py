@@ -12,7 +12,7 @@ from .config import (
     load_weather_refresh_interval,
     load_youtube_check_interval,
 )
-from .constants import DEFAULT_HIGHLIGHT_WORDS, MEDIA_PLUGIN_DIR
+from .constants import DEFAULT_HIGHLIGHT_WORDS, MEDIA_PLUGIN_DIRS
 from .state import load_media, load_state
 from .ui.connectivity import ConnectivityMixin
 from .ui.feeds import FeedsMixin
@@ -39,7 +39,7 @@ class FluxTray(ConnectivityMixin, FeedsMixin, IconMixin, LiveMixin, MediaMixin, 
         self.media_status = {}  # (source url, episode id) -> download progress, in memory only
         self.media_errors = {}  # source -> why its last check failed, in memory only
         self._media_header_row = None  # the 'Media' heading in the list, while there is one
-        self.media_registry = MediaSources(MEDIA_PLUGIN_DIR)  # built-in drivers and the plugins
+        self.media_registry = MediaSources(MEDIA_PLUGIN_DIRS)  # built-in drivers, the built-in plugins and the person's own
         self._media_playlist_episodes = {}  # source_url -> list of episode_ids in playlist order
         self._media_request_lock = threading.Lock()  # guards the four fields below
         self._media_checking = False  # a media-check thread is running

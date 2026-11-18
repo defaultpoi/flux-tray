@@ -82,9 +82,6 @@ def load_state():
                                      if isinstance(seen_discovery, list) else [])
     # the track items the person explicitly stopped tracking (removed from Track tab);
     # these are kept so they don't reappear in Discover tab
-    track_dismissed = state.get('media_track_dismissed')
-    state['media_track_dismissed'] = ([k for k in track_dismissed if isinstance(k, str)]
-                                      if isinstance(track_dismissed, list) else [])
     # the running countdown's end as a wall-clock timestamp; anything else is dropped
     end = state.get('timer_end')
     if isinstance(end, bool) or not isinstance(end, (int, float)) or not math.isfinite(end):
@@ -133,6 +130,8 @@ def _clean_media_entry(entry):
         'baselined': entry.get('baselined') is True,
         # a source the person added by a click that is a film (the config marks its own with `movie`)
         'movie': entry.get('movie') is True,
+        # a series that is no longer followed: nothing more is read or downloaded for it, what was downloaded stays
+        'paused': entry.get('paused') is True,
     }
 
 
