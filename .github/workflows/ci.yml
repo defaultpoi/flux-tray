@@ -20,6 +20,21 @@ jobs:
           .venv/bin/python -m pyflakes flux_tray tests flux-tray
           sh -n install.sh && sh -n uninstall.sh
       - name: Tests (real GTK)
-        run: xvfb-run -a .venv/bin/python -m unittest discover -s tests -v
+        run: |
+          set +e
+          xvfb-run -a .venv/bin/python -m unittest discover -s tests -v 2>&1 | tee tests-real.log
+          status=${PIPESTATUS[0]}
+          # the log of a job cannot be read from outside: say which tests failed where the API shows it
+          grep -E "^(FAIL|ERROR): " tests-real.log | while read -r line; do echo "::error title=Test failed::$line"; done
+          first=$(grep -m1 -A25 -E "^(FAIL|ERROR): " tests-real.log | sed ':a;N;$!ba;s/\n/%0A/g')
+          [ -n "$first" ] && echo "::error title=First failure in full::$first"
+          exit $status
       - name: Tests (GTK stubbed)
-        run: .venv/bin/python tests/run_stubbed.py
+        run: |
+          set +e
+          .venv/bin/python tests/run_stubbed.py 2>&1 | tee tests-stubbed.log
+          status=${PIPESTATUS[0]}
+          grep -E "^(FAIL|ERROR): " tests-stubbed.log | while read -r line; do echo "::error title=Stubbed test failed::$line"; done
+          first=$(grep -m1 -A25 -E "^(FAIL|ERROR): " tests-stubbed.log | sed ':a;N;$!ba;s/\n/%0A/g')
+          [ -n "$first" ] && echo "::error title=First stubbed failure in full::$first"
+          exit $status

@@ -25,6 +25,7 @@ import os
 import pathlib
 import sys
 import tempfile
+import threading
 import time
 
 NOW = 1_793_000_000  # a fixed 'now' (late October 2026) so elapsed times read the same every run
@@ -210,11 +211,15 @@ def media_scenario(tray):
         return {'menus': {url: describe(tray._media_menu_content(url, Gtk.Popover())) for url in MEDIA['sources']}}
     menu = tray._media_menu_content(series, Gtk.Popover())
     button = next(w for w in walk(menu) if isinstance(w, Gtk.Button) and (w.get_label() or '').startswith('Remove all'))
+    before = set(threading.enumerate())
     button.clicked()
-    for _ in range(100):  # the removal runs in a thread (it can wait for a download): wait until it is through
+    # The removal runs in a thread (it can wait for a download). It queues the redrawing for the main loop as
+    # its last act, so once it has ended the redrawing can be run: waiting for the file to change is not
+    # enough, the redrawing may not have been queued yet.
+    for _ in range(200):
         time.sleep(0.05)
         pump()
-        if series not in json.loads((config_dir / 'media.json').read_text())['sources']:
+        if not [t for t in threading.enumerate() if t not in before and t.is_alive()]:
             break
     pump()
     trash = pathlib.Path(HOME, '.local', 'share', 'Trash', 'files')
