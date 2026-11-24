@@ -461,6 +461,10 @@ class PopupMixin:
             return
         if self.popup is not None:
             self._launcher_open = False  # its Launch list (if open) dies with the window
+            for name in ('_media_accordion', '_podcast_accordion'):
+                accordion = getattr(self, name, None)
+                if accordion is not None:
+                    accordion.dispose()  # destroying the window alone leaves their rows alive (a leak of megabytes per rebuild)
             self.popup.destroy()
             self.popup = None
             self.timer_scale = None

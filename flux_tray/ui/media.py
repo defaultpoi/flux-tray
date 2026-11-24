@@ -2050,6 +2050,13 @@ class MediaMixin:
         return False
 
 
+def _destroy_rows(listbox):
+    """Destroys the rows of a list, so that nothing of them outlives it (see MediaAccordion.dispose)."""
+    if listbox is not None:
+        for row in listbox.get_children():
+            row.destroy()
+
+
 # ===== MediaAccordion: slide-up accordion with three tabs =====================
 
 class MediaAccordion:
@@ -2212,6 +2219,15 @@ class MediaAccordion:
         """Toggle the revealer."""
         expanded = not self.revealer.get_reveal_child()
         self.revealer.set_reveal_child(expanded)
+
+    def dispose(self):
+        """Called before the popup that holds this accordion is destroyed. Destroying the popup does not
+        destroy the rows of these lists (the lists hold them and this object holds the lists, and the
+        buttons' handlers hold this object), so every rebuild of the popup left its rows, the accordion and
+        their widgets behind: about 30 kB for each title of the Discover tab, per rebuild."""
+        for listbox in (self.watch_listbox, self.discover_listbox, self.track_listbox):
+            _destroy_rows(listbox)
+        self._hovered_row = None
 
     def refresh(self):
         """Rebuild all three tabs with current data and update header counts."""
@@ -2590,6 +2606,11 @@ class PodcastAccordion:
     _on_header_clicked = MediaAccordion._on_header_clicked
     _on_listbox_motion = MediaAccordion._on_listbox_motion
     _on_listbox_leave = MediaAccordion._on_listbox_leave
+
+    def dispose(self):
+        """As MediaAccordion.dispose."""
+        _destroy_rows(self.listbox)
+        self._hovered_row = None
 
     def refresh(self):
         """Rebuilds the rows. With no podcast to show the header and the list are hidden."""

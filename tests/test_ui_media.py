@@ -1,8 +1,10 @@
+import gc
 import os
 import shutil
 import tempfile
 import threading
 import unittest
+import weakref
 from unittest import mock
 
 from facade import rt
@@ -2971,6 +2973,64 @@ class TestMediaAccordion(TmpConfigCase):
         self.assertEqual(accordion._tab_labels[2].get_text(), 'Track')
         # Revealer starts collapsed
         self.assertFalse(revealer.get_reveal_child())
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_rebuilding_the_popup_frees_the_rows_and_the_accordions_of_the_old_one(self):
+        """Destroying the popup alone left the rows of the Discover, Watch, Track and Podcasts lists, and the
+        accordions that the buttons' handlers hold, alive: about 30 kB per title in the Discover tab at every
+        rebuild (the popup is rebuilt for each new item and each click on the icon), 1 GB in eight hours."""
+        Gtk = rt.Gtk
+
+        class Rebuilt:
+            show_popup = rt.FluxTray.show_popup
+
+            def __init__(self):
+                self.popup = None
+                self._launcher_open = False
+                self.weather_view = 'today'
+                self.orphans_expanded = False
+                self.probe_connectivity = mock.Mock()
+                self.check_orphans_if_due = mock.Mock()
+                self._update_scroller_max_height = mock.Mock()
+                self.refresh_list = mock.Mock()
+                self._fit_popup_width = mock.Mock()
+                self.position_popup = mock.Mock()
+
+            def build_popup_window(self):
+                self.popup = Gtk.Window(type=Gtk.WindowType.POPUP)
+                outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+                self._media_accordion = rt.MediaAccordion(self)
+                self._podcast_accordion = rt.PodcastAccordion(self)
+                for accordion in (self._media_accordion, self._podcast_accordion):
+                    header, revealer = accordion.build()
+                    outer.pack_end(revealer, False, False, 0)
+                    outer.pack_end(header, False, False, 0)
+                for listbox in (self._media_accordion.watch_listbox, self._media_accordion.discover_listbox,
+                                self._media_accordion.track_listbox, self._podcast_accordion.listbox):
+                    for n in range(5):
+                        row = Gtk.ListBoxRow()
+                        row.discovery_item = {'n': n}  # as the rows of the Discover tab
+                        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+                        box.popover_data = {'type': 'discovery', 'title': f'Title {n}'}
+                        button = Gtk.Button(label='Monitor')
+                        button.connect('clicked', self._media_accordion._on_monitor_clicked, row.discovery_item)
+                        box.pack_start(button, False, False, 0)
+                        row.add(box)
+                        listbox.add(row)
+                self.popup.add(outer)
+
+        holder = Rebuilt()
+        holder.show_popup()
+        first = holder._media_accordion
+        refs = [weakref.ref(first), weakref.ref(holder._podcast_accordion),
+                weakref.ref(first.discover_listbox.get_children()[0]),
+                weakref.ref(first.watch_listbox.get_children()[0]),
+                weakref.ref(holder._podcast_accordion.listbox.get_children()[0])]
+        del first
+        holder.show_popup()  # destroys the first window, builds a second
+        gc.collect()
+        self.assertEqual([ref() for ref in refs], [None] * 5)
+        holder.popup.destroy()
 
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
     def test_header_button_has_centered_text_no_icon_no_chevron(self):
