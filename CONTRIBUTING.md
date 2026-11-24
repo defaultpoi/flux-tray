@@ -8,3 +8,4 @@
 - If the popup is meant to look different, run the golden test, read the diff, then `FLUX_TRAY_UPDATE_GOLDEN=1 xvfb-run -a python3 -m unittest test_golden_popup` from `tests/`, and commit the new files with the change.
 - Do not change `config.conf` syntax, the media plugin contract or the files under `~/.config/flux-tray` without a migration and a test for it.
 - Say what was not checked. Real-desktop results go in [docs/STATUS.md](docs/STATUS.md) under Evidence.
+- Working with an assistant (a session, CI from outside, what the sandbox cannot reach, gotchas): [docs/WORKFLOW.md](docs/WORKFLOW.md).
