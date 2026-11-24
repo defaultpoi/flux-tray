@@ -120,6 +120,11 @@ Design diagnostics for that so they mask URLs and tokens.
   waiting (an early release made one test fail one run in eight). Use a generous
   `threading.Timer` or a sequential test, and make poll intervals patchable so tests
   stay fast.
+- A memory leak of a rebuilt popup shows only with a full list: with an empty Discover tab it was
+  8 KB per rebuild, with 250 titles 8 MB. Measure with real rows and the real `show_popup`, under
+  `xvfb-run`, and compare RSS and the number of live accordions (`gc.get_objects()`) after 20
+  rebuilds. `Gtk.Window.destroy()` leaves the rows alive when Python objects hold the widgets;
+  see the design notes in README.md.
 - Mock-heavy UI tests are brittle, and most failures after feature work are stub
   fixtures (stubs borrow real methods: `class Stub: method = rt.FluxTray.method`).
   New logic gets pure tests; UI gets a few behaviour tests plus a real-GTK run.

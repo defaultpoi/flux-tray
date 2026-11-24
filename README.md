@@ -390,6 +390,7 @@ To run every topgrade step interactively, put it in the Launch list, for example
 ## Design notes
 
 - The popup is a borderless `Gtk.Window` that is destroyed and rebuilt on every manual open (an auto-open while it is already showing just refreshes the list). This avoids stuck-size bugs; do not make it persistent or call `resize()` on it.
+- Destroying the popup does not destroy the rows of the accordions (Watch, Discover, Track, Podcasts): the lists hold the rows, the accordion holds the lists and the buttons' handlers hold the accordion. `show_popup` therefore calls `dispose()` on each accordion before it destroys the window; a new list of rows that an object of its own owns needs the same. Without it every rebuild kept its rows, about 8 MB with 250 Discover titles.
 - Package updates are system-wide rather than feed-based, because GitHub's atom feed is a sliding window and version bumps get missed.
 - Threading: `lock` guards state, `_check_lock` RSS cycles, `_xbps_lock` xbps scans and installs, `_twitch_lock`/`_youtube_lock` their respective live-channel checks. All GTK mutations from threads go through `GLib.idle_add`.
 - A failed xbps scan or Twitch request keeps the previous state; failed scans back off exponentially up to the normal update interval.
