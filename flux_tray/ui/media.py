@@ -10,7 +10,7 @@ import time as time_module
 from ..gi_env import GLib, Gdk, GdkPixbuf, Gio, Gtk, Pango
 from ..config import load_media_movies, load_media_settings, load_media_sources, remove_media_sources
 from ..constants import CONFIG_FILE
-from ..desktop import move_to_trash, primary_monitor_size
+from ..desktop import move_to_trash, play_notification_sound, primary_monitor_size
 from ..fileutil import remove_empty_dirs
 from ..hls import DownloadCancelled, is_hls
 from ..media import (
@@ -564,7 +564,7 @@ class MediaMixin:
 
     def _discovery_refresh(self):
         if self.popup and self.popup.get_visible():
-            self.refresh_list()
+            self.refresh_list(keep_open=True)  # nobody asked for it: the popup stays
         return False
 
     def _on_discovery_dismiss(self, _btn, item, rebuild=True):
@@ -674,6 +674,24 @@ class MediaMixin:
         entry = self.media['sources'].get(url)
         return url in load_media_movies() or bool(entry and entry.get('movie'))
 
+    def _podcast_set(self, urls):
+        """Which of `urls` are podcasts: a line of [media] (never a title added from the watch or discovery
+        lists) that is not a film, that a driver understands, and whose order is `newest`, which is the
+        order that starts at the latest episode. Takes the media lock: call it without."""
+        orders = {u: o for u, _n, o in load_media_sources()}
+        movies = self._movie_sources()
+        found = set()
+        for url in urls:
+            if url not in orders or url in movies:
+                continue
+            try:
+                self.media_registry.driver_for(url)
+            except NoDriver:
+                continue  # not understood: it stays in Media, where its error is shown
+            if self._effective_order(url, orders[url]) == 'newest':
+                found.add(url)
+        return found
+
     def _movie_sources(self):
         """Every source that is a film (a set). Takes the media lock: call it without."""
         with self._media_data_lock:
@@ -715,13 +733,14 @@ class MediaMixin:
         """Reads every configured source and every source added by a click (or those in `only`),
         remembers what is new, then queues the downloads. A source that cannot be read keeps what is
         known of it. A full check also looks for the titles on the watch list."""
-        new_total = 0
+        new_total = new_podcasts = 0
         self.media_registry.refresh()  # picks up plugins that were added or edited
         sources = [(url, configured) for url, _name, configured in load_media_sources()]
         configured_urls = {url for url, _configured in sources}
         with self._media_data_lock:
             sources += [(url, None) for url, entry in self.media['sources'].items()
                         if url not in configured_urls and not url.startswith('discovery:') and not entry.get('paused')]
+        podcasts = self._podcast_set([url for url, _configured in sources])  # outside the media lock: it takes it
         if only is None:
             self._search_watched()  # a title found now is read below, with the rest
         for url, configured in sources:
@@ -738,10 +757,14 @@ class MediaMixin:
             self.media_errors.pop(url, None)
             with self._media_data_lock:
                 entry = self.media['sources'].setdefault(url, new_media_entry())
-                new_total += len(merge_episodes(entry, title, episodes, configured or driver.order))
+                new_count = len(merge_episodes(entry, title, episodes, configured or driver.order))
+                if url in podcasts:
+                    new_podcasts += new_count  # a podcast's new episode only sounds; a series' or a film's also opens the popup
+                else:
+                    new_total += new_count
                 save_media(self.media)
 
-        GLib.idle_add(self._on_media_new if new_total else self._refresh_media_rows)
+        GLib.idle_add(self._on_media_new if new_total else (self._on_podcasts_new if new_podcasts else self._refresh_media_rows))
         self._plan_media_downloads()
         # Trigger background metadata cache refresh only when new episodes found
         if new_total > 0:
@@ -784,6 +807,12 @@ class MediaMixin:
             self.start_media_check(only=new)
         else:  # a name, an order or `ahead` may have changed: show it and keep the right ones downloaded
             self._plan_media_downloads()
+            self._refresh_media_rows()
+        return False
+
+    def _on_podcasts_new(self):
+        play_notification_sound()  # only the sound: a podcast never opens the popup by itself
+        if self.popup and self.popup.get_visible():
             self._refresh_media_rows()
         return False
 
@@ -1311,9 +1340,7 @@ class MediaMixin:
         if others:
             self.refresh_list(keep_open=True)  # which rebuilds the accordion too
             return False
-        accordion = getattr(self, '_media_accordion', None)
-        if accordion is not None:
-            accordion.refresh()  # the media rows are in its Watch tab
+        self._refresh_media_accordions()  # the media rows are in the accordions, not in the news list
         for row in self.listbox.get_children():
             if getattr(row, 'media_source', None) in gone:
                 self.listbox.remove(row)
@@ -1488,8 +1515,25 @@ class MediaMixin:
         return url.startswith('discovery:')
 
     def media_source_urls(self):
+        """The rows of the Media accordion's Watch tab: every source `_shown_media_urls` lists except the
+        podcasts, which have their own accordion."""
+        urls = self._shown_media_urls()
+        podcasts = self._podcast_set(urls)
+        return [u for u in urls if u not in podcasts]
+
+    def podcast_source_urls(self):
+        """The rows of the Podcasts accordion: the podcasts with an episode to watch or one being
+        downloaded and, once there is one, those that cannot be read (so a failure can be retried).
+        Empty when nothing is new: the accordion is then not shown at all."""
+        shown = self._shown_media_urls()
+        podcasts = self._podcast_set(shown)
+        if not any(u in podcasts for u in self._shown_media_urls(errors=False)):
+            return []
+        return [u for u in shown if u in podcasts]
+
+    def _shown_media_urls(self, errors=True):
         """The configured sources that have been read at least once, or that could not
-        be, in config order. Fully watched series (unwatched_count == 0) with no active
+        be (unless `errors` is False), in config order. Fully watched series (unwatched_count == 0) with no active
         downloads are hidden; they reappear when a new episode appears or download starts.
         Also includes dynamically added sources (from discovery clicks)."""
         with self._media_data_lock:
@@ -1500,7 +1544,7 @@ class MediaMixin:
             # Config sources in config order
             for url, _name, _order in load_media_sources():
                 # Sources with errors are always shown (so user can retry)
-                if url in self.media_errors:
+                if errors and url in self.media_errors:
                     urls.append(url)
                     continue
                 entry = sources.get(url)
@@ -1980,6 +2024,13 @@ class MediaMixin:
             self.listbox.set_events(self.listbox.get_events() | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
             self._hovered_row = None
 
+    def _refresh_media_accordions(self):
+        """Rebuilds the rows of the Media and Podcasts accordions (the Podcasts one appears or goes away)."""
+        for name in ('_media_accordion', '_podcast_accordion'):
+            accordion = getattr(self, name, None)
+            if accordion is not None:
+                accordion.refresh()
+
     def _refresh_media_rows(self):
         """Updates the rows in place: rebuilding the list would collapse a popup
         that has only media to show."""
@@ -1989,6 +2040,9 @@ class MediaMixin:
             accordion = getattr(self, '_media_accordion', None)
             if accordion is not None and getattr(accordion, 'watch_listbox', None) is not None:
                 lists.append(accordion.watch_listbox)  # the media rows live in the Watch tab, not in the news list
+            podcasts = getattr(self, '_podcast_accordion', None)
+            if podcasts is not None and getattr(podcasts, 'listbox', None) is not None:
+                lists.append(podcasts.listbox)
             for listbox in lists:
                 for row in listbox.get_children():
                     if hasattr(row, 'media_source'):
@@ -2462,3 +2516,108 @@ class MediaAccordion:
     def collapse(self):
         if self.revealer.get_reveal_child():
             self.revealer.set_reveal_child(False)
+
+
+# ===== PodcastAccordion: the podcasts with something to watch ================
+
+class PodcastAccordion:
+    """A slide-up accordion like MediaAccordion, with one list: the podcasts that have episodes to
+    watch. It is not shown at all while there are none, so it appears only when something is new."""
+
+    def __init__(self, parent):
+        self.parent = parent  # The PopupMixin instance
+        self.revealer = None
+        self.header_button = None
+        self.header_label = None
+        self.scroller = None
+        self.listbox = None
+        self._hovered_row = None
+
+    def build(self):
+        """The header button and the revealer under it; both hidden until `refresh` finds a podcast."""
+        self.header_button = Gtk.Button()
+        self.header_button.set_relief(Gtk.ReliefStyle.NONE)
+        self.header_button.get_style_context().add_class('media-accordion-header')
+        self.header_button.connect('clicked', self._on_header_clicked)
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header_box.set_margin_start(6)
+        header_box.set_margin_end(6)
+        header_box.set_margin_top(4)
+        header_box.set_margin_bottom(4)
+        header_box.set_halign(Gtk.Align.CENTER)
+        header_box.set_hexpand(True)
+        self.header_label = Gtk.Label(label='Podcasts')
+        self.header_label.set_xalign(0.5)
+        self.header_label.set_hexpand(True)
+        header_box.pack_start(self.header_label, True, True, 0)
+        self.header_button.add(header_box)
+
+        self.revealer = Gtk.Revealer()
+        self.revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
+        self.revealer.set_transition_duration(200)
+        self.revealer.set_reveal_child(False)  # collapsed by default
+
+        self.listbox = Gtk.ListBox()
+        self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.listbox.connect('row-activated', self._on_row_activated)
+        self.listbox.connect('button-press-event', self._on_button_press)
+        self.listbox.connect('motion-notify-event', self._on_listbox_motion)
+        self.listbox.connect('leave-notify-event', self._on_listbox_leave)
+        self.listbox.set_events(self.listbox.get_events() | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        self.scroller = Gtk.ScrolledWindow()
+        self.scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.scroller.set_propagate_natural_height(True)  # as tall as its rows, up to...
+        try:
+            display = Gdk.Display.get_default()
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
+            screen_height = monitor.get_geometry().height
+        except Exception:
+            screen_height = 1080
+        self.scroller.set_max_content_height(int(screen_height * 0.3))  # ...a third of the screen, then it scrolls
+        self.scroller.add(self.listbox)
+        self.revealer.add(self.scroller)
+
+        # show_all() on the popup must not reveal them: they show only while there is a podcast. The children
+        # are shown one by one first, because no_show_all also stops show_all() on the widget that has it.
+        header_box.show_all()
+        self.scroller.show_all()
+        for widget in (self.header_button, self.revealer):
+            widget.set_no_show_all(True)
+            widget.hide()
+        return self.header_button, self.revealer
+
+    # the same behaviour as in MediaAccordion: toggling, and the metadata popover under the pointer
+    _on_header_clicked = MediaAccordion._on_header_clicked
+    _on_listbox_motion = MediaAccordion._on_listbox_motion
+    _on_listbox_leave = MediaAccordion._on_listbox_leave
+
+    def refresh(self):
+        """Rebuilds the rows. With no podcast to show the header and the list are hidden."""
+        for child in self.listbox.get_children():
+            self.listbox.remove(child)
+        for url in self.parent.podcast_source_urls():
+            row = self.parent.build_media_row(url)
+            if row:
+                self.listbox.add(row)
+        count = len(self.listbox.get_children())
+        if count:
+            self.header_label.set_markup(f'<b>Podcasts</b> <span size="small">({count})</span>')
+            self.listbox.show_all()
+            self.header_button.show()
+            self.revealer.show()
+        else:
+            self.revealer.set_reveal_child(False)
+            self.header_button.hide()
+            self.revealer.hide()
+
+    def _on_row_activated(self, _listbox, row):
+        if hasattr(row, 'media_source'):
+            self.parent.on_media_row_clicked(row.media_source)
+
+    def _on_button_press(self, _listbox, event):
+        if event.button == 3:  # right-click
+            row = self.listbox.get_row_at_y(int(event.y))
+            if row and hasattr(row, 'media_source'):
+                self.parent._show_media_menu(row, event)
+                return True
+        return False

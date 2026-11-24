@@ -847,7 +847,70 @@
           "hexpand": true,
           "markup": false,
           "sensitive": true,
-          "text": "Media",
+          "text": "Podcasts",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "hexpand": true,
+        "margins": [
+         6,
+         6,
+         4,
+         4
+        ],
+        "sensitive": true,
+        "type": "Box",
+        "visible": true
+       }
+      ],
+      "classes": [
+       "flat",
+       "media-accordion-header"
+      ],
+      "sensitive": true,
+      "text": null,
+      "type": "Button",
+      "visible": false
+     },
+     {
+      "children": [
+       {
+        "children": [
+         {
+          "children": [
+           {
+            "sensitive": true,
+            "type": "ListBox",
+            "visible": true
+           }
+          ],
+          "sensitive": true,
+          "type": "Viewport",
+          "visible": true
+         }
+        ],
+        "sensitive": true,
+        "type": "ScrolledWindow",
+        "visible": true
+       }
+      ],
+      "sensitive": true,
+      "type": "Revealer",
+      "visible": false
+     },
+     {
+      "children": [
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "hexpand": true,
+          "markup": true,
+          "sensitive": true,
+          "text": "<b>Media</b>",
           "type": "Label",
           "visible": true,
           "wrap": false,

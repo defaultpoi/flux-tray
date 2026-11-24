@@ -805,7 +805,7 @@
           "hexpand": true,
           "markup": true,
           "sensitive": true,
-          "text": "<b>Media</b> <span size=\"small\">(1)</span>",
+          "text": "<b>Podcasts</b> <span size=\"small\">(1)</span>",
           "type": "Label",
           "visible": true,
           "wrap": false,
@@ -842,70 +842,133 @@
            {
             "children": [
              {
+              "activatable": true,
+              "attrs": {
+               "media_source": "https://media.example/feed.xml"
+              },
               "children": [
                {
-                "activatable": true,
-                "attrs": {
-                 "media_source": "https://media.example/feed.xml"
-                },
                 "children": [
                  {
-                  "children": [
-                   {
-                    "ellipsize": "none",
-                    "markup": true,
-                    "sensitive": true,
-                    "text": "<span foreground=\"#808080\">●</span>",
-                    "type": "Label",
-                    "visible": true,
-                    "wrap": false,
-                    "xalign": 0.5
-                   },
-                   {
-                    "ellipsize": "end",
-                    "markup": true,
-                    "sensitive": true,
-                    "text": "<span foreground=\"#000000\"><b>Example Podcast</b> - S01E02 Second</span>",
-                    "type": "Label",
-                    "visible": true,
-                    "wrap": false,
-                    "xalign": 0.0
-                   },
-                   {
-                    "ellipsize": "none",
-                    "markup": true,
-                    "sensitive": true,
-                    "text": "<span foreground=\"#000000\">- not downloaded - 1 new</span>",
-                    "type": "Label",
-                    "visible": true,
-                    "wrap": false,
-                    "xalign": 0.5
-                   },
-                   {
-                    "hexpand": true,
-                    "sensitive": true,
-                    "type": "Box",
-                    "visible": true
-                   }
-                  ],
-                  "margins": [
-                   3,
-                   3,
-                   0,
-                   0
-                  ],
+                  "ellipsize": "none",
+                  "markup": true,
+                  "sensitive": true,
+                  "text": "<span foreground=\"#808080\">●</span>",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.5
+                 },
+                 {
+                  "ellipsize": "end",
+                  "markup": true,
+                  "sensitive": true,
+                  "text": "<span foreground=\"#000000\"><b>Example Podcast</b> - S01E02 Second</span>",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.0
+                 },
+                 {
+                  "ellipsize": "none",
+                  "markup": true,
+                  "sensitive": true,
+                  "text": "<span foreground=\"#000000\">- not downloaded - 1 new</span>",
+                  "type": "Label",
+                  "visible": true,
+                  "wrap": false,
+                  "xalign": 0.5
+                 },
+                 {
+                  "hexpand": true,
                   "sensitive": true,
                   "type": "Box",
                   "visible": true
                  }
                 ],
-                "selectable": false,
+                "margins": [
+                 3,
+                 3,
+                 0,
+                 0
+                ],
                 "sensitive": true,
-                "tooltip": "S01E02 Second\nClick to download\n1 unwatched",
-                "type": "ListBoxRow",
+                "type": "Box",
                 "visible": true
                }
               ],
+              "selectable": false,
+              "sensitive": true,
+              "tooltip": "S01E02 Second\nClick to download\n1 unwatched",
+              "type": "ListBoxRow",
+              "visible": true
+             }
+            ],
+            "sensitive": true,
+            "type": "ListBox",
+            "visible": true
+           }
+          ],
+          "sensitive": true,
+          "type": "Viewport",
+          "visible": true
+         }
+        ],
+        "sensitive": true,
+        "type": "ScrolledWindow",
+        "visible": true
+       }
+      ],
+      "sensitive": true,
+      "type": "Revealer",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "children": [
+         {
+          "ellipsize": "none",
+          "hexpand": true,
+          "markup": true,
+          "sensitive": true,
+          "text": "<b>Media</b>",
+          "type": "Label",
+          "visible": true,
+          "wrap": false,
+          "xalign": 0.5
+         }
+        ],
+        "hexpand": true,
+        "margins": [
+         6,
+         6,
+         4,
+         4
+        ],
+        "sensitive": true,
+        "type": "Box",
+        "visible": true
+       }
+      ],
+      "classes": [
+       "flat",
+       "media-accordion-header"
+      ],
+      "sensitive": true,
+      "text": null,
+      "type": "Button",
+      "visible": true
+     },
+     {
+      "children": [
+       {
+        "children": [
+         {
+          "children": [
+           {
+            "children": [
+             {
               "sensitive": true,
               "type": "ListBox",
               "visible": true

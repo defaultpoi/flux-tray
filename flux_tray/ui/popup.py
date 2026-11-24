@@ -19,7 +19,7 @@ from ..playback import open_twitch_stream, open_youtube_stream
 from ..rules import group_unread_by_feed, item_detail_text, item_is_highlighted
 from ..updates import format_change
 from .timer import TIMER_RESERVED_HEIGHT_PX, format_timer_countdown
-from .media import MediaAccordion
+from .media import MediaAccordion, PodcastAccordion
 
 
 MAX_LIST_ITEMS = 40
@@ -213,6 +213,11 @@ class PopupMixin:
         outer.pack_end(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 2)
         outer.pack_end(self.media_accordion_revealer, False, False, 0)
         outer.pack_end(self.media_accordion_header, False, False, 0)
+        # Podcasts: above Media, and not there at all until a podcast has something new
+        self._podcast_accordion = PodcastAccordion(self)
+        self.podcast_accordion_header, self.podcast_accordion_revealer = self._podcast_accordion.build()
+        outer.pack_end(self.podcast_accordion_revealer, False, False, 0)
+        outer.pack_end(self.podcast_accordion_header, False, False, 0)
 
         win.add(outer)
         self.popup = win
@@ -571,14 +576,19 @@ class PopupMixin:
 
         any_live = bool(live_channels or live_youtube_channels)
         media_urls = self.media_source_urls()
+        podcast_urls = self.podcast_source_urls()
         discovery_urls = self.discovery_source_urls()
         track_count = self.track_item_count()
-        # Discovery items and Track items keep the popup open like unread items; regular media sources behave like live channels
-        truly_empty = not unread and not available and not any_live and not discovery_urls and not media_urls and track_count == 0
-        # Only live channels or downloadable media (not discovery) collapse the popup when already visible
-        only_live_or_downloadable = (not unread and not available and not discovery_urls) and (any_live or bool(media_urls))
+        # Only news and package updates keep a popup open. Live channels, media, podcasts and the Discover and Track
+        # lists fill a popup that was opened by hand, but with nothing else left an open popup closes.
+        others = bool(any_live or media_urls or podcast_urls or discovery_urls or track_count)
+        truly_empty = not unread and not available and not others
+        only_others = not unread and not available and others
         popup_already_visible = bool(self.popup and self.popup.get_visible())
-        should_hide = truly_empty or (only_live_or_downloadable and popup_already_visible)
+        should_hide = truly_empty or (only_others and popup_already_visible)
+        # The accordions are refreshed whether or not the list collapses: a popup kept open by a click in one
+        # of them (or by a status) must show their rows.
+        self._refresh_media_accordions()
         close_popup = should_hide and not keep_open and not self.orphan_status and not self.update_summary
 
         if should_hide:
@@ -611,10 +621,7 @@ class PopupMixin:
                 for entry in live_youtube_channels:
                     self.listbox.add(self.build_youtube_row(entry))
 
-            # Media items are now in the accordion, not in the main list
-            # Refresh the accordion
-            if hasattr(self, '_media_accordion'):
-                self._media_accordion.refresh()
+            # Media and podcasts are in their accordions (refreshed above), not in the main list
 
             if unread:
                 shown = unread[:MAX_LIST_ITEMS]
@@ -938,8 +945,10 @@ class PopupMixin:
                         self.listbox.remove(header)  # a header with nothing under it says nothing
                         break
         self.update_icon()
-        if not self.listbox.get_children() and self.popup and self.popup.get_visible():
-            self.refresh_list(keep_open=True)  # nothing left here: the rest of the popup (live, read later...) says so
+        with self.lock:
+            nothing_unread = not self.state.get('unread')
+        if nothing_unread and self.popup and self.popup.get_visible():
+            self.refresh_list()  # the last news item: as after reading one, the popup closes unless updates or a status need it
 
     def on_row_activated(self, _listbox, row):
         if getattr(row, 'summary_header', False):

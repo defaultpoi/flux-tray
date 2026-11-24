@@ -306,6 +306,7 @@ class TestOrphansHeader(unittest.TestCase):
 class TestRefreshListOrphans(unittest.TestCase):
     class Stub:
         refresh_list = rt.FluxTray.refresh_list
+        _refresh_media_accordions = rt.FluxTray._refresh_media_accordions
         build_orphans_header = rt.FluxTray.build_orphans_header
         add_orphan_rows = rt.FluxTray.add_orphan_rows
         add_update_summary_rows = rt.FluxTray.add_update_summary_rows
@@ -335,6 +336,8 @@ class TestRefreshListOrphans(unittest.TestCase):
             self.build_twitch_row = self.build_youtube_row = mock.Mock(return_value=mock.MagicMock())
             self.media_urls = []
             self.media_source_urls = lambda: list(self.media_urls)
+            self.podcast_urls = []
+            self.podcast_source_urls = lambda: list(self.podcast_urls)
             self.media_discovery_urls = []
             self.discovery_source_urls = lambda: list(self.media_discovery_urls)
             self.build_media_row = mock.Mock(return_value=mock.MagicMock())
@@ -343,6 +346,7 @@ class TestRefreshListOrphans(unittest.TestCase):
             # Mock the media accordion
             self._media_accordion = mock.MagicMock()
             self._media_accordion.refresh = mock.Mock()
+            self._podcast_accordion = mock.MagicMock()
             # build_popup_window creates the accordion; we'll mock the outer pack_start
             self._outer_packed = []
             def pack_start(widget, expand, fill, padding):
@@ -393,6 +397,50 @@ class TestRefreshListOrphans(unittest.TestCase):
         self.assertEqual(stub.headers, [])  # "No unread items" in main list
         stub.build_media_row.assert_not_called()
         stub.popup.hide.assert_called()
+
+    def test_the_discover_list_never_holds_an_open_popup(self):
+        stub = self.Stub({}, popup_visible=True)
+        stub.media_discovery_urls = ['https://example.com/title']
+        self.refresh(stub)
+        stub.popup.hide.assert_called()
+
+    def test_the_track_list_never_holds_an_open_popup(self):
+        stub = self.Stub({}, popup_visible=True)
+        stub.track_item_count.return_value = 2
+        self.refresh(stub)
+        stub.popup.hide.assert_called()
+
+    def test_podcasts_never_hold_an_open_popup(self):
+        stub = self.Stub({}, popup_visible=True)
+        stub.podcast_urls = ['https://example.com/pod.xml']
+        self.refresh(stub)
+        stub.popup.hide.assert_called()
+
+    def test_unread_news_still_holds_the_popup_whatever_else_is_ready(self):
+        stub = self.Stub({'unread': self.unread()}, popup_visible=True)
+        stub.podcast_urls = ['https://example.com/pod.xml']
+        stub.media_urls = ['https://example.com/feed.xml']
+        stub.media_discovery_urls = ['https://example.com/title']
+        stub.track_item_count.return_value = 1
+        self.refresh(stub)
+        stub.popup.hide.assert_not_called()
+
+    def test_a_popup_opened_by_hand_shows_what_is_ready_to_watch(self):
+        stub = self.Stub({})  # not showing yet: the hand-opened case
+        stub.podcast_urls = ['https://example.com/pod.xml']
+        stub.media_discovery_urls = ['https://example.com/title']
+        self.refresh(stub)
+        stub.popup.hide.assert_not_called()
+        stub._media_accordion.refresh.assert_called()
+        stub._podcast_accordion.refresh.assert_called()
+
+    def test_both_accordions_are_refreshed_even_when_the_popup_closes(self):
+        stub = self.Stub({}, popup_visible=True)
+        stub.podcast_urls = ['https://example.com/pod.xml']
+        self.refresh(stub)
+        stub.popup.hide.assert_called()
+        stub._media_accordion.refresh.assert_called()
+        stub._podcast_accordion.refresh.assert_called()
 
     def test_without_media_there_is_no_section(self):
         stub = self.Stub({'unread': self.unread()})
@@ -1227,12 +1275,28 @@ class TestRemovingAnUnreadRow(unittest.TestCase):
         self.stub._remove_unread_row(self.a2, 'a2')
         self.assertEqual(self.stub.listbox.rows, [self.b_header, self.b1])
 
-    def test_the_whole_list_is_rebuilt_only_when_nothing_is_left_in_it(self):
+    def test_the_list_is_refreshed_only_when_no_unread_item_is_left(self):
         self.stub._remove_unread_row(self.a1, 'a1')
         self.stub._remove_unread_row(self.a2, 'a2')
+        self.stub.refresh_list.assert_not_called()  # the other feed still has an item
         self.stub._remove_unread_row(self.b1, 'b1')
         self.assertEqual(self.stub.listbox.rows, [])
-        self.stub.refresh_list.assert_called_once_with(keep_open=True)
+        self.assertEqual(self.stub.state['unread'], [])
+        # not keep_open: the refresh closes the popup when nothing but live channels, media, podcasts... is left
+        self.stub.refresh_list.assert_called_once_with()
+
+    def test_the_last_item_leaves_a_popup_that_is_not_showing_alone(self):
+        self.stub.popup.get_visible.return_value = False
+        for row, item_id in ((self.a1, 'a1'), (self.a2, 'a2'), (self.b1, 'b1')):
+            self.stub._remove_unread_row(row, item_id)
+        self.stub.refresh_list.assert_not_called()
+
+    def test_the_last_item_refreshes_the_popup_even_when_other_rows_are_still_listed(self):
+        live = SimpleNamespace(twitch_channel='c')  # a live channel does not hold a popup open either
+        self.stub.listbox.rows.append(live)
+        for row, item_id in ((self.a1, 'a1'), (self.a2, 'a2'), (self.b1, 'b1')):
+            self.stub._remove_unread_row(row, item_id)
+        self.stub.refresh_list.assert_called_once_with()
 
     def test_a_row_that_does_not_know_its_feed_leaves_the_headers_alone(self):
         odd = SimpleNamespace(entry_id='x')

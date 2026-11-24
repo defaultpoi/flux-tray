@@ -11,6 +11,7 @@ from helpers import isolate_media_caches, TmpConfigCase
 
 URL = 'https://archive.org/details/show'
 POD = 'https://example.com/pod.xml'
+POD2 = 'https://example.com/pod2.xml'
 
 
 def ep(episode_id, number=None, date='', title=None):
@@ -92,6 +93,11 @@ class Stub:
     _on_media_played = rt.FluxTray._on_media_played
     mark_media_watched = rt.FluxTray.mark_media_watched
     media_source_urls = rt.FluxTray.media_source_urls
+    podcast_source_urls = rt.FluxTray.podcast_source_urls
+    _shown_media_urls = rt.FluxTray._shown_media_urls
+    _podcast_set = rt.FluxTray._podcast_set
+    _on_podcasts_new = rt.FluxTray._on_podcasts_new
+    _refresh_media_accordions = rt.FluxTray._refresh_media_accordions
     build_media_row = rt.FluxTray.build_media_row
     _update_media_row = rt.FluxTray._update_media_row
     _refresh_media_rows = rt.FluxTray._refresh_media_rows
@@ -376,6 +382,30 @@ class TestChecking(MediaCase):
         self.assertEqual(len(self.queued(stub, '_on_media_new')), 1)
         self.assertEqual(stub.media['sources'][URL]['new'], ['b'])
 
+    def test_a_new_podcast_episode_is_announced_by_a_sound_alone(self):
+        self.sources = [(POD, 'Pod', None)]
+        stub = Stub()
+        stub._plan_media_downloads = mock.Mock()
+        stub.media['sources'][POD] = entry_with(ep('a', 1))
+        stub.media_registry.listing(POD, ('Pod', [ep('a', 1), ep('b', 2)]))
+        stub._check_media()
+        self.assertEqual(stub.media['sources'][POD]['new'], ['b'])
+        self.assertEqual(len(self.queued(stub, '_on_podcasts_new')), 1)
+        self.assertEqual(self.queued(stub, '_on_media_new'), [])  # which would open the popup
+        self.assertEqual(self.queued(stub, '_refresh_media_rows'), [])
+
+    def test_a_new_episode_of_a_series_still_opens_the_popup_when_a_podcast_has_one_too(self):
+        self.sources = [(URL, None, None), (POD, 'Pod', None)]
+        stub = Stub()
+        stub._plan_media_downloads = mock.Mock()
+        stub.media['sources'][URL] = entry_with(ep('a', 1))
+        stub.media['sources'][POD] = entry_with(ep('a', 1))
+        stub.media_registry.listing(URL, ('Show', [ep('a', 1), ep('b', 2)]))
+        stub.media_registry.listing(POD, ('Pod', [ep('a', 1), ep('b', 2)]))
+        stub._check_media()
+        self.assertEqual(len(self.queued(stub, '_on_media_new')), 1)
+        self.assertEqual(self.queued(stub, '_on_podcasts_new'), [])
+
     ADDED = 'fsonline_one:https://fsonline.one/film/show-2024'
 
     def with_added_source(self):
@@ -610,6 +640,25 @@ class TestChecking(MediaCase):
         stub.popup.get_visible.return_value = True
         stub._refresh_media_rows = mock.Mock()
         stub._on_media_new()
+        stub._refresh_media_rows.assert_called_once_with()
+        stub.on_new_items.assert_not_called()
+
+    def test_a_new_podcast_episode_plays_the_sound_and_does_not_open_a_closed_popup(self):
+        stub = Stub()
+        stub._refresh_media_rows = mock.Mock()
+        with mock.patch.object(rt, 'play_notification_sound') as sound:
+            self.assertFalse(stub._on_podcasts_new())
+        sound.assert_called_once_with()
+        stub.on_new_items.assert_not_called()
+        stub._refresh_media_rows.assert_not_called()
+
+    def test_with_the_popup_open_a_podcast_episode_sounds_and_the_rows_update(self):
+        stub = Stub()
+        stub.popup.get_visible.return_value = True
+        stub._refresh_media_rows = mock.Mock()
+        with mock.patch.object(rt, 'play_notification_sound') as sound:
+            stub._on_podcasts_new()
+        sound.assert_called_once_with()
         stub._refresh_media_rows.assert_called_once_with()
         stub.on_new_items.assert_not_called()
 
@@ -1499,14 +1548,63 @@ class TestRows(MediaCase):
         stub.media['sources'][URL] = entry_with(ep('a', 1))
         stub.media['sources']['https://c.example/x'] = entry_with()  # read, but nothing in it yet
         stub.media['sources']['https://removed.example/'] = entry_with(ep('a', 1))
-        # Dynamic sources (from discovery clicks) prepended, then config sources in config order
-        self.assertEqual(stub.media_source_urls(), ['https://removed.example/', URL, POD])
+        # Dynamic sources (from discovery clicks) prepended, then config sources in config order; the podcast has its own list
+        self.assertEqual(stub.media_source_urls(), ['https://removed.example/', URL])
+        self.assertEqual(stub.podcast_source_urls(), [POD])
 
     def test_a_source_that_could_not_be_read_is_listed_too(self):
         self.sources = [(URL, None, None), (POD, None, None)]
         stub = Stub()
-        stub.media_errors[POD] = 'no source handler for x'
-        self.assertEqual(stub.media_source_urls(), [POD])
+        stub.media_errors[URL] = 'no source handler for x'
+        self.assertEqual(stub.media_source_urls(), [URL])
+
+    def test_a_podcast_is_a_source_of_the_config_in_newest_order(self):
+        self.sources = [(URL, None, 'newest'), (POD, None, 'oldest')]  # the configured order wins over the driver's
+        self.assertEqual(Stub()._podcast_set([URL, POD]), {URL})
+
+    def test_a_film_is_never_a_podcast(self):
+        self.sources = [(POD, None, None)]
+        self.movies = {POD}
+        self.assertEqual(Stub()._podcast_set([POD]), set())
+
+    def test_a_title_added_by_a_click_is_never_a_podcast(self):
+        stub = Stub()
+        added = 'fsonline_one:https://fsonline.one/film/show-2024'
+        stub.media_registry.by_source[added] = FakeDriver('fsonline_one', 'newest')
+        stub.media['sources'][added] = entry_with(ep('x', 1), title='Added')
+        self.assertEqual(stub._podcast_set([added]), set())
+
+    def test_a_source_nobody_handles_is_not_a_podcast_so_its_error_stays_in_media(self):
+        nobody = 'https://nobody.example/feed.xml'
+        self.sources = [(nobody, None, None)]
+        stub = Stub()
+        stub.media_errors[nobody] = 'no source handler for x'
+        self.assertEqual(stub._podcast_set([nobody]), set())
+        self.assertEqual(stub.media_source_urls(), [nobody])
+        self.assertEqual(stub.podcast_source_urls(), [])
+
+    def test_the_podcasts_list_has_the_podcasts_with_something_to_watch_only(self):
+        self.sources = [(POD, None, None)]
+        stub = Stub()
+        stub.media['sources'][POD] = entry_with(ep('a', 1), watched=['a'])
+        self.assertEqual(stub.podcast_source_urls(), [])  # all watched: no Podcasts accordion
+        stub.media['sources'][POD] = entry_with(ep('a', 1), ep('b', 2), watched=['a'])
+        self.assertEqual(stub.podcast_source_urls(), [POD])
+        self.assertEqual(stub.media_source_urls(), [])  # and nothing of it is left in Media
+
+    def test_a_podcast_that_cannot_be_read_does_not_show_the_accordion_by_itself(self):
+        self.sources = [(POD, None, None)]
+        stub = Stub()
+        stub.media_errors[POD] = 'timed out'
+        self.assertEqual(stub.podcast_source_urls(), [])
+
+    def test_a_podcast_that_cannot_be_read_is_listed_with_one_that_has_something_new(self):
+        self.sources = [(POD, None, None), (POD2, None, None)]
+        stub = Stub()
+        stub.media_registry.by_source[POD2] = FakeDriver('feed', 'newest')
+        stub.media_errors[POD] = 'timed out'
+        stub.media['sources'][POD2] = entry_with(ep('a', 1), ep('b', 2), watched=['a'])
+        self.assertEqual(stub.podcast_source_urls(), [POD, POD2])  # so the failure can be retried
 
     def test_a_row_for_a_source_that_never_read_shows_its_error(self):
         stub = Stub()
@@ -2237,7 +2335,7 @@ class TestDiscoveryCheck(unittest.TestCase):
                 mock.patch.object(rt, 'update_media_cache', side_effect=AssertionError('disk on the main loop')):
             self.assertFalse(self.stub._discovery_news())
         self.stub.on_new_items.assert_called_once_with()
-        self.stub.refresh_list.assert_called_once_with()
+        self.stub.refresh_list.assert_called_once_with(keep_open=True)  # nobody asked for it: the popup stays
 
     def test_dismissing_saves_a_sorted_list_under_the_lock(self):
         self.stub._dismiss_discovery([self.FILM, self.OTHER])
