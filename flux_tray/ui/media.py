@@ -14,6 +14,7 @@ from ..desktop import move_to_trash, play_notification_sound, primary_monitor_si
 from ..fileutil import remove_empty_dirs
 from ..hls import DownloadCancelled, is_hls
 from ..media import (
+    apply_start,
     clean_title,
     download_episode,
     episode_basepath,
@@ -35,7 +36,9 @@ from ..media_cache import (
     load_media_cache, update_media_cache, get_new_items, mark_listing, mark_seen, is_seen,
     get_all_cached_items, sync_metadata_ids, title_with_year,
 )
-from ..watch import find_source, is_following, is_searching, is_tracked, new_watch_entry, search_due, source_line
+from ..watch import (
+    clean_start, find_source, is_following, is_searching, is_tracked, new_watch_entry, search_due, source_line, start_text,
+)
 from ..log import _log
 
 
@@ -628,6 +631,38 @@ class MediaMixin:
             save_media(self.media)
         threading.Thread(target=self._search_watched, daemon=True).start()
 
+    def _set_series_start(self, key, start):
+        """The episode a series on the watch list is to be watched from (`start`: {'season', 'episode'}, or
+        None for from the beginning). It is kept on the record, so that a title still being looked for has
+        it when a site is found, and, once there is a source, put on it with the episodes before the start
+        marked watched. Downloads of those are cancelled and the rest planned again, in a thread (a
+        cancelled download is waited for). False when there is no such series on the list."""
+        start = clean_start(start)
+        with self._media_data_lock:
+            record = self.media.setdefault('watch', {}).get(key)
+            if record is None or record.get('type') != 'series':
+                return False
+            record['start'] = start
+            source = record.get('source')
+            entry = self.media['sources'].get(source) if source else None
+            skipped = []
+            if entry is not None:
+                entry['start'] = start
+                skipped = apply_start(entry)
+            save_media(self.media)
+        if entry is not None:
+            threading.Thread(target=self._replan_after_start, args=(source, bool(skipped)), daemon=True).start()
+        return True
+
+    def _replan_after_start(self, source, cancel):
+        """After the start of a series moved: what was being downloaded of the episodes that are skipped
+        now stops (all of the source's downloads do, and the ones still wanted are queued again), then the
+        episodes that are wanted are queued."""
+        if cancel:
+            self._cancel_source_downloads(source)
+        self._plan_media_downloads()
+        GLib.idle_add(self._refresh_media_accordions)
+
     def _stop_watching(self, key):
         with self._media_data_lock:
             self.media.setdefault('watch', {}).pop(key, None)
@@ -666,6 +701,7 @@ class MediaMixin:
                         source_entry = self.media['sources'].setdefault(source, new_media_entry())
                         source_entry['title'] = entry['title']
                         source_entry['movie'] = entry['type'] == 'movie'
+                        source_entry['start'] = record.get('start')  # as it is now: it may have been set while the sites were asked
                         found_sources.append(source)
                         _log(f"watch: {entry['title']} found at {source}")
                     save_media(self.media)
@@ -2497,6 +2533,16 @@ class MediaAccordion:
         text_box.pack_start(status_label, False, False, 0)
         box.pack_start(text_box, True, True, 0)
 
+        if entry.get('type') == 'series':
+            start = start_text(entry.get('start'))
+            start_btn = Gtk.Button(label=f'From {start}' if start else 'Start from…')
+            start_btn.set_relief(Gtk.ReliefStyle.NONE)
+            start_btn.get_style_context().add_class('menu-text')
+            start_btn.set_tooltip_text('Skips the episodes before the one you choose: they are not downloaded '
+                                       'and not counted as new.')
+            start_btn.connect('clicked', self._on_start_from_clicked, key, entry)
+            box.pack_start(start_btn, False, False, 0)
+
         stop_btn = Gtk.Button(label='Stop tracking')
         stop_btn.set_relief(Gtk.ReliefStyle.NONE)
         stop_btn.get_style_context().add_class('menu-text')
@@ -2505,6 +2551,67 @@ class MediaAccordion:
 
         row.add(box)
         return row
+
+    def _on_start_from_clicked(self, button, key, entry):
+        """A popover on the button to choose the season and episode a series is to be watched from."""
+        popover = Gtk.Popover.new(button)
+        popover.add(self._start_from_content(key, entry, popover))
+        popover.connect('closed', self.parent.on_launcher_closed)
+        self.parent._launcher_open = True  # the guard the media menu uses: the popup stays under it
+        popover.show_all()
+        popover.popup()
+
+    def _start_from_content(self, key, entry, popover):
+        current = clean_start(entry.get('start'))
+        start = current or {'season': 1, 'episode': 1}
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        for margin in ('start', 'end', 'top', 'bottom'):
+            getattr(box, f'set_margin_{margin}')(8)
+        heading = Gtk.Label()
+        heading.set_markup(f'<b>{GLib.markup_escape_text(entry["title"])}</b>')
+        heading.set_xalign(0)
+        heading.set_ellipsize(Pango.EllipsizeMode.END)
+        heading.set_max_width_chars(36)
+        heading.get_style_context().add_class('menu-text')
+        box.pack_start(heading, False, False, 0)
+
+        fields = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        spins = {}
+        for name, top in (('season', 99), ('episode', 999)):
+            spin = Gtk.SpinButton.new_with_range(0, top, 1)
+            spin.set_numeric(True)
+            spin.set_width_chars(3)
+            spin.set_value(start[name])
+            spins[name] = spin
+            label = Gtk.Label(label=name.title())
+            label.get_style_context().add_class('menu-text')
+            fields.pack_start(label, False, False, 0)
+            fields.pack_start(spin, False, False, 0)
+        box.pack_start(fields, False, False, 0)
+
+        here = Gtk.Button(label='Start here')
+        here.set_tooltip_text('The episodes before this one are not downloaded and not counted as new.')
+        here.connect('clicked', self._on_start_chosen, key, popover, spins['season'], spins['episode'])
+        box.pack_start(here, False, False, 0)
+        beginning = Gtk.Button(label='From the beginning')
+        beginning.set_sensitive(current is not None)
+        beginning.connect('clicked', self._on_start_cleared, key, popover)
+        box.pack_start(beginning, False, False, 0)
+        return box
+
+    def _on_start_chosen(self, _btn, key, popover, season, episode):
+        season.update()  # a number that was typed and not yet taken
+        episode.update()
+        popover.popdown()
+        self._start_changed(key, {'season': season.get_value_as_int(), 'episode': episode.get_value_as_int()})
+
+    def _on_start_cleared(self, _btn, key, popover):
+        popover.popdown()
+        self._start_changed(key, None)
+
+    def _start_changed(self, key, start):
+        self.parent._set_series_start(key, start)
+        GLib.idle_add(self.refresh)
 
     def _on_track_row_activated(self, _listbox, row):
         # Left-click on track row - could trigger a manual search

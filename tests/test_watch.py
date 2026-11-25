@@ -15,7 +15,7 @@ class TestAWatchRecord(unittest.TestCase):
         item = {'title': 'Dune: Part Two', 'type': 'movie', 'imdb_id': 'tt15239678', 'url': 'https://www.imdb.com/title/tt15239678/'}
         self.assertEqual(rt.new_watch_entry(item, 1000, year='2024'), {
             'title': 'Dune: Part Two', 'year': '2024', 'type': 'movie', 'imdb_id': 'tt15239678',
-            'added': 1000.0, 'checked': None, 'source': None})
+            'added': 1000.0, 'checked': None, 'source': None, 'start': None})
 
     def test_a_series_stays_one_and_anything_else_is_a_movie(self):
         self.assertEqual(rt.new_watch_entry({'title': 'S', 'type': 'series'}, 1)['type'], 'series')
@@ -36,8 +36,29 @@ class TestAWatchRecord(unittest.TestCase):
 
 
 
+class TestAStartPoint(unittest.TestCase):
+    def test_a_start_is_a_season_and_an_episode_of_whole_numbers(self):
+        self.assertEqual(rt.clean_start({'season': 2, 'episode': 3, 'x': 1}), {'season': 2, 'episode': 3})
+        self.assertEqual(rt.clean_start({'season': 0, 'episode': 0}), {'season': 0, 'episode': 0})
+
+    def test_anything_else_is_no_start(self):
+        for bad in (None, 5, 'S02E03', [2, 3], {}, {'season': 2}, {'season': '2', 'episode': 3}, {'season': 2.5, 'episode': 3},
+                    {'season': True, 'episode': 1}, {'season': -1, 'episode': 1}):
+            self.assertIsNone(rt.clean_start(bad), bad)
+
+    def test_it_is_written_as_the_episode_label_is(self):
+        self.assertEqual(rt.start_text({'season': 3, 'episode': 5}), 'S03E05')
+        self.assertEqual(rt.start_text({'season': 12, 'episode': 104}), 'S12E104')
+        self.assertEqual(rt.start_text(None), '')
+
+    def test_a_record_that_was_stored_without_one_has_none(self):
+        self.assertIsNone(rt.clean_watch({'k': {'title': 'X'}})['k']['start'])
+        self.assertIsNone(rt.clean_watch({'k': {'title': 'X', 'start': 'S01E01'}})['k']['start'])
+
+
 class TestWhatIsStored(unittest.TestCase):
-    GOOD = {'title': 'X', 'year': '2024', 'type': 'series', 'imdb_id': 'tt1', 'added': 5, 'checked': 6.5, 'source': 'p:u'}
+    GOOD = {'title': 'X', 'year': '2024', 'type': 'series', 'imdb_id': 'tt1', 'added': 5, 'checked': 6.5, 'source': 'p:u',
+            'start': {'season': 2, 'episode': 3}}
 
     def test_a_good_record_comes_back_the_same(self):
         self.assertEqual(rt.clean_watch({'imdb:tt1': dict(self.GOOD)}),
@@ -47,7 +68,7 @@ class TestWhatIsStored(unittest.TestCase):
         clean = rt.clean_watch({'k': {'title': 'X', 'year': 2024, 'type': 'tv', 'imdb_id': 5, 'added': 'now',
                                       'checked': float('nan'), 'source': ''}})
         self.assertEqual(clean, {'k': {'title': 'X', 'year': '', 'type': 'movie', 'imdb_id': None,
-                                       'added': 0.0, 'checked': None, 'source': None}})
+                                       'added': 0.0, 'checked': None, 'source': None, 'start': None}})
 
 
     def test_what_is_not_a_record_is_dropped(self):

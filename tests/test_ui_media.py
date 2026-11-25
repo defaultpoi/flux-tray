@@ -137,6 +137,8 @@ class Stub:
     _enrich_discovery = rt.FluxTray._enrich_discovery
     _watch_title = rt.FluxTray._watch_title
     _stop_watching = rt.FluxTray._stop_watching
+    _set_series_start = rt.FluxTray._set_series_start
+    _replan_after_start = rt.FluxTray._replan_after_start
     _stop_tracking = rt.FluxTray._stop_tracking
     track_item_count = rt.FluxTray.track_item_count
     _cancel_source_downloads = rt.FluxTray._cancel_source_downloads
@@ -2658,6 +2660,68 @@ class TestWatchingATitle(unittest.TestCase):
         self.assertEqual([k for k, w in self.stub.media['watch'].items() if rt.is_tracked(w)], ['imdb:tt9'])
         self.assertTrue(rt.is_following(self.stub.media['watch']['imdb:tt9']))
 
+    # --- the episode a series is to be watched from
+
+    START = {'season': 2, 'episode': 3}
+
+    def test_the_start_of_a_series_still_looked_for_is_kept_and_goes_to_its_source_when_a_site_has_it(self):
+        self.watch_entry(type='series')
+        with mock.patch.object(rt.threading, 'Thread') as thread:
+            self.assertTrue(self.stub._set_series_start('imdb:tt15239678', self.START))
+        thread.assert_not_called()  # no source, nothing to download or cancel
+        self.assertEqual(self.stub.media['watch']['imdb:tt15239678']['start'], self.START)
+        self.stub._search_watched()
+        source = 'fsonline_one:https://fsonline.one/film/dune-part-two-2024'
+        self.assertEqual(self.stub.media['sources'][source]['start'], self.START)
+
+    def test_a_start_set_while_the_sites_were_asked_is_not_lost(self):
+        self.watch_entry(type='series')
+        self.site.module.find.side_effect = lambda **kw: (
+            self.stub._set_series_start('imdb:tt15239678', self.START), 'https://fsonline.one/film/x')[1]
+        with mock.patch.object(rt.threading, 'Thread'):
+            self.stub._search_watched()
+        self.assertEqual(self.stub.media['sources']['fsonline_one:https://fsonline.one/film/x']['start'], self.START)
+
+    def test_a_start_set_once_the_source_was_read_marks_the_earlier_episodes_watched_and_plans_again(self):
+        source = 'fsonline_one:https://f/serial/x'
+        self.stub.media['sources'][source] = entry_with(ep('a', 1), dict(ep('b', 2), season=2), dict(ep('c', 3), season=2))
+        self.watch_entry(type='series', source=source)
+        with mock.patch.object(rt.threading, 'Thread') as thread:
+            self.stub._set_series_start('imdb:tt15239678', self.START)
+        self.assertEqual(self.stub.media['sources'][source]['watched'], ['a', 'b'])
+        self.assertEqual(thread.call_args.kwargs['target'], self.stub._replan_after_start)
+        self.assertEqual(thread.call_args.kwargs['args'], (source, True))
+        order = []
+        self.stub._cancel_source_downloads = mock.Mock(side_effect=lambda url: order.append(('cancel', url)))
+        self.stub._plan_media_downloads = mock.Mock(side_effect=lambda: order.append('plan'))
+        self.stub._replan_after_start(source, True)
+        self.assertEqual(order, [('cancel', source), 'plan'])
+        self.assertIn((self.stub._refresh_media_accordions, ()), self.idle)
+
+    def test_a_start_that_skips_nothing_new_cancels_nothing(self):
+        source = 'fsonline_one:https://f/serial/x'
+        self.stub.media['sources'][source] = entry_with(dict(ep('a', 1), season=2, episode=3))
+        self.watch_entry(type='series', source=source)
+        with mock.patch.object(rt.threading, 'Thread') as thread:
+            self.stub._set_series_start('imdb:tt15239678', self.START)
+        self.assertEqual(thread.call_args.kwargs['args'], (source, False))
+
+    def test_the_start_can_be_taken_away(self):
+        self.watch_entry(type='series', start=self.START)
+        self.stub._set_series_start('imdb:tt15239678', None)
+        self.assertIsNone(self.stub.media['watch']['imdb:tt15239678']['start'])
+
+    def test_only_a_series_on_the_list_has_a_start(self):
+        self.watch_entry()  # a film
+        self.assertFalse(self.stub._set_series_start('imdb:tt15239678', self.START))
+        self.assertFalse(self.stub._set_series_start('imdb:nobody', self.START))
+        self.assertIsNone(self.stub.media['watch']['imdb:tt15239678']['start'])
+
+    def test_what_is_not_a_start_is_no_start(self):
+        self.watch_entry(type='series', start=self.START)
+        self.stub._set_series_start('imdb:tt15239678', {'season': 'two', 'episode': 3})
+        self.assertIsNone(self.stub.media['watch']['imdb:tt15239678']['start'])
+
     # --- the search
 
     def test_a_title_a_site_has_becomes_a_film_source_that_is_read_at_once(self):
@@ -3257,6 +3321,79 @@ class TestMediaAccordion(TmpConfigCase):
         accordion._refresh_track_tab()
         rows = [c.args[0] for c in accordion.track_listbox.add.call_args_list]
         self.assertEqual([(r.track_key, r.track_type) for r in rows], [('imdb:tt2', 'searching'), ('imdb:tt1', 'following')])
+
+    def widgets(self, widget, kind):
+        found = [widget] if isinstance(widget, kind) else []
+        for child in (widget.get_children() if isinstance(widget, rt.Gtk.Container) else ()):
+            found += self.widgets(child, kind)
+        return found
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_a_track_row_of_a_series_has_a_start_button_that_says_where_it_starts_and_a_film_has_none(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        labels = lambda entry: [b.get_label() for b in self.widgets(accordion._build_track_row('k', entry), rt.Gtk.Button)]
+        series = {'title': 'Show', 'type': 'series', 'source': None, 'added': 1, 'start': None}
+        self.assertEqual(labels(series), ['Start from…', 'Stop tracking'])
+        self.assertEqual(labels(dict(series, start={'season': 2, 'episode': 3})), ['From S02E03', 'Stop tracking'])
+        self.assertEqual(labels(dict(series, source='p:u')), ['Start from…', 'Stop tracking'])  # while it is followed too
+        self.assertEqual(labels(dict(series, type='movie')), ['Stop tracking'])
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_the_start_popover_offers_the_start_or_season_one_episode_one_and_sets_what_is_chosen(self):
+        stub = self.make_stub()
+        stub._set_series_start = mock.Mock()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        entry = {'title': 'Show', 'type': 'series', 'source': None, 'added': 1, 'start': None}
+        popover = mock.Mock()
+        with mock.patch.object(rt.GLib, 'idle_add'):
+            content = accordion._start_from_content('k', entry, popover)
+            season, episode = self.widgets(content, rt.Gtk.SpinButton)
+            self.assertEqual((season.get_value_as_int(), episode.get_value_as_int()), (1, 1))
+            season.set_value(2)
+            episode.set_value(4)
+            here, beginning = self.widgets(content, rt.Gtk.Button)
+            self.assertFalse(beginning.get_sensitive())  # nothing to take away
+            here.clicked()
+        stub._set_series_start.assert_called_once_with('k', {'season': 2, 'episode': 4})
+        popover.popdown.assert_called_once()
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_the_start_popover_shows_the_start_there_is_and_can_take_it_away(self):
+        stub = self.make_stub()
+        stub._set_series_start = mock.Mock()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        entry = {'title': 'Show', 'type': 'series', 'source': 'p:u', 'added': 1, 'start': {'season': 3, 'episode': 5}}
+        with mock.patch.object(rt.GLib, 'idle_add'):
+            content = accordion._start_from_content('k', entry, mock.Mock())
+            season, episode = self.widgets(content, rt.Gtk.SpinButton)
+            self.assertEqual((season.get_value_as_int(), episode.get_value_as_int()), (3, 5))
+            _here, beginning = self.widgets(content, rt.Gtk.Button)
+            self.assertTrue(beginning.get_sensitive())
+            beginning.clicked()
+        stub._set_series_start.assert_called_once_with('k', None)
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_the_start_popover_keeps_the_popup_open_while_it_is_up_and_the_tab_is_redrawn_after_a_choice(self):
+        stub = self.make_stub()
+        stub.on_launcher_closed = mock.Mock()
+        stub._launcher_open = False
+        stub._set_series_start = mock.Mock()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        entry = {'title': 'Show', 'type': 'series', 'source': None, 'added': 1, 'start': None}
+        with mock.patch.object(rt.Gtk, 'Popover') as popover_class:
+            accordion._on_start_from_clicked(mock.Mock(), 'k', entry)
+        popover = popover_class.new.return_value
+        self.assertTrue(stub._launcher_open)
+        popover.connect.assert_called_once_with('closed', stub.on_launcher_closed)
+        popover.popup.assert_called_once()
+        with mock.patch.object(rt.GLib, 'idle_add') as idle_add:
+            accordion._start_changed('k', None)
+        idle_add.assert_called_once_with(accordion.refresh)
 
     def test_the_track_count_is_what_is_looked_for_plus_what_is_followed(self):
         stub = self.make_stub()

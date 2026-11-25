@@ -111,6 +111,32 @@ def upcoming(episodes, watched, order, count=1):
     return [e for e in order_episodes(episodes, order) if e['id'] not in watched][:count]
 
 
+def _is_before(episode, start):
+    """True when the episode is numbered and comes before `start`. One that carries no season and episode
+    cannot be placed, so it is never before."""
+    place = (episode.get('season'), episode.get('episode'))
+    if not all(isinstance(n, int) and not isinstance(n, bool) for n in place):
+        return False
+    return place < (start['season'], start['episode'])
+
+
+def apply_start(entry):
+    """Brings the episodes that the start point of a source skips in line with `entry['start']`: those
+    numbered before it are marked watched (so none is downloaded, announced or counted as waiting), and
+    the ones that an earlier start had skipped and this one does not are given back. An episode that was
+    really watched stays watched. Returns the ids newly marked, in watching order."""
+    start = entry.get('start')
+    episodes = entry.get('episodes', [])
+    wanted = {e['id'] for e in episodes if start and _is_before(e, start)}
+    skipped = set(entry.get('skipped', []))
+    given_back = skipped - wanted
+    watched = [i for i in entry.get('watched', []) if i not in given_back]
+    fresh = [e['id'] for e in order_episodes(episodes, 'oldest') if e['id'] in wanted and e['id'] not in set(watched)]
+    entry['watched'] = watched + fresh
+    entry['skipped'] = sorted((skipped & wanted) | set(fresh))
+    return fresh
+
+
 def merge_episodes(entry, title, episodes, order):
     """Folds a fresh episode list into a source's stored entry and returns the
     episodes that are new since the last check. The first check only sets the
@@ -128,11 +154,14 @@ def merge_episodes(entry, title, episodes, order):
         entry['known'] = ids
         if order == 'newest':  # skip the backlog: only the latest episode is waiting
             entry['watched'] = [e['id'] for e in order_episodes(episodes, order)[1:]]
+        apply_start(entry)
         return []
     new = [e for e in episodes if e['id'] not in known]
     entry['known'] = sorted(known | set(ids))
     entry['new'] = [i for i in entry.get('new', []) if i in set(ids)] + [e['id'] for e in new]
-    return new
+    apply_start(entry)
+    skipped = set(entry['skipped'])
+    return [e for e in new if e['id'] not in skipped]  # an episode before the start is no news
 
 
 def new_unwatched(entry):

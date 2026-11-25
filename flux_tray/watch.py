@@ -22,6 +22,22 @@ def _norm_title(text):
     return '-'.join(re.findall(r'[a-z0-9]+', text))
 
 
+def clean_start(value):
+    """{'season': n, 'episode': n} from what was stored or given, else None: both whole numbers (not
+    booleans) of 0 or more. The first episode a series is to be watched from."""
+    def number(n):
+        return isinstance(n, int) and not isinstance(n, bool) and n >= 0
+    if isinstance(value, dict) and number(value.get('season')) and number(value.get('episode')):
+        return {'season': value['season'], 'episode': value['episode']}
+    return None
+
+
+def start_text(start):
+    """'S03E05' for a start point, '' for none."""
+    start = clean_start(start)
+    return f"S{start['season']:02d}E{start['episode']:02d}" if start else ''
+
+
 def new_watch_entry(item, now, year=''):
     """The record of a discovery item that was asked for. `year` is the release year when it
     is known (the item's own, or the metadata's), else ''."""
@@ -34,6 +50,7 @@ def new_watch_entry(item, now, year=''):
         'added': float(now),
         'checked': None,
         'source': None,
+        'start': None,
     }
 
 
@@ -54,6 +71,7 @@ def clean_watch(raw):
             'added': float(entry['added']) if number(entry.get('added')) else 0.0,
             'checked': float(entry['checked']) if number(entry.get('checked')) else None,
             'source': entry['source'] if isinstance(entry.get('source'), str) and entry['source'] else None,
+            'start': clean_start(entry.get('start')),
         }
     return clean
 

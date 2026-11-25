@@ -350,7 +350,18 @@ class TestMediaState(TmpConfigCase):
     def test_a_new_entry_has_every_field_the_code_reads(self):
         self.assertEqual(rt.new_media_entry(), {'title': '', 'episodes': [], 'known': [], 'new': [], 'watched': [],
                                                 'files': {}, 'last_watched': None, 'resume': {}, 'remove_at': None,
-                                                'baselined': False, 'movie': False, 'paused': False})
+                                                'baselined': False, 'movie': False, 'paused': False,
+                                                'start': None, 'skipped': []})
+
+    def test_a_start_and_what_it_skipped_are_kept_and_a_file_without_them_still_loads(self):
+        self.write({'sources': {'https://x.example/a': {'title': 'A', 'start': {'season': 2, 'episode': 3}, 'skipped': ['e1', 5, 'e2']},
+                                'https://x.example/b': {'title': 'B', 'start': 'S02E03', 'skipped': 'e1'},
+                                'https://x.example/c': {'title': 'C'}}})
+        sources = rt.load_media()['sources']
+        self.assertEqual((sources['https://x.example/a']['start'], sources['https://x.example/a']['skipped']),
+                         ({'season': 2, 'episode': 3}, ['e1', 'e2']))
+        for url in ('b', 'c'):
+            self.assertEqual((sources[f'https://x.example/{url}']['start'], sources[f'https://x.example/{url}']['skipped']), (None, []))
 
     def test_fields_of_the_wrong_type_are_repaired(self):
         self.write({'sources': {'https://x.example/f': {

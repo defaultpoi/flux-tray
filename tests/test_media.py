@@ -161,6 +161,87 @@ class TestTitlesAndOrder(unittest.TestCase):
         self.assertEqual(rt.upcoming([], [], 'oldest'), [])
 
 
+class TestAStartPoint(unittest.TestCase):
+    """A series that is to be watched from an episode: the ones before it count as watched."""
+
+    def listing(self):
+        return [{'id': i, 'title': f'Show {i}', 'date': '', 'season': s, 'episode': e}
+                for i, s, e in (('s1e1', 1, 1), ('s1e2', 1, 2), ('s1e3', 1, 3), ('s2e1', 2, 1), ('s2e2', 2, 2))]
+
+    def entry(self, start):
+        entry = rt.new_media_entry()
+        entry['start'] = start
+        return entry
+
+    def test_the_first_read_marks_the_episodes_before_the_start_watched_and_downloads_start_at_it(self):
+        entry = self.entry({'season': 2, 'episode': 1})
+        self.assertEqual(rt.merge_episodes(entry, 'Show', self.listing(), 'oldest'), [])
+        self.assertEqual(entry['watched'], ['s1e1', 's1e2', 's1e3'])
+        self.assertEqual([e['id'] for e in rt.upcoming(entry['episodes'], entry['watched'], 'oldest', 5)], ['s2e1', 's2e2'])
+        self.assertEqual(rt.unwatched_count(entry), 2)
+
+    def test_the_start_itself_is_not_skipped(self):
+        entry = self.entry({'season': 1, 'episode': 2})
+        rt.merge_episodes(entry, 'Show', self.listing(), 'oldest')
+        self.assertEqual(entry['watched'], ['s1e1'])
+
+    def test_without_a_start_nothing_is_skipped(self):
+        entry = self.entry(None)
+        rt.merge_episodes(entry, 'Show', self.listing(), 'oldest')
+        self.assertEqual((entry['watched'], entry['skipped']), ([], []))
+
+    def test_an_episode_before_the_start_that_turns_up_later_is_no_news_and_one_after_it_is(self):
+        entry = self.entry({'season': 1, 'episode': 3})
+        rt.merge_episodes(entry, 'Show', self.listing()[2:], 'oldest')
+        later = self.listing() + [{'id': 's3e1', 'title': 'Show s3e1', 'date': '', 'season': 3, 'episode': 1}]
+        new = rt.merge_episodes(entry, 'Show', later, 'oldest')
+        self.assertEqual([e['id'] for e in new], ['s3e1'])
+        self.assertEqual(rt.new_unwatched(entry), 1)
+        self.assertEqual(sorted(entry['watched']), ['s1e1', 's1e2'])
+
+    def test_episodes_that_carry_no_numbers_are_not_skipped(self):
+        entry = self.entry({'season': 5, 'episode': 1})
+        dated = [{'id': 'd1', 'title': 'Recap', 'date': '2020-01-01'}, {'id': 'd2', 'title': 'Extra', 'date': '2020-01-02'}]
+        rt.merge_episodes(entry, 'Show', dated + self.listing()[:1], 'oldest')
+        self.assertEqual(entry['watched'], ['s1e1'])
+
+    def test_a_start_beyond_the_latest_episode_skips_all_and_the_episode_is_waiting_when_it_comes(self):
+        entry = self.entry({'season': 3, 'episode': 1})
+        rt.merge_episodes(entry, 'Show', self.listing(), 'oldest')
+        self.assertEqual(rt.unwatched_count(entry), 0)
+        new = rt.merge_episodes(entry, 'Show', self.listing() + [{'id': 's3e1', 'title': 'x', 'date': '', 'season': 3, 'episode': 1}], 'oldest')
+        self.assertEqual([e['id'] for e in new], ['s3e1'])
+        self.assertEqual([e['id'] for e in rt.upcoming(entry['episodes'], entry['watched'], 'oldest')], ['s3e1'])
+
+    def test_moving_the_start_earlier_gives_back_what_it_skipped_and_nothing_that_was_watched(self):
+        entry = self.entry({'season': 2, 'episode': 1})
+        rt.merge_episodes(entry, 'Show', self.listing(), 'oldest')
+        entry['watched'].append('s2e1')  # really watched
+        entry['start'] = {'season': 1, 'episode': 3}
+        self.assertEqual(rt.apply_start(entry), [])
+        self.assertEqual(sorted(entry['watched']), ['s1e1', 's1e2', 's2e1'])
+        self.assertEqual(entry['skipped'], ['s1e1', 's1e2'])
+
+    def test_clearing_the_start_gives_everything_back_but_what_was_watched(self):
+        entry = self.entry({'season': 2, 'episode': 1})
+        rt.merge_episodes(entry, 'Show', self.listing(), 'oldest')
+        entry['watched'].append('s2e1')
+        entry['start'] = None
+        rt.apply_start(entry)
+        self.assertEqual((entry['watched'], entry['skipped']), (['s2e1'], []))
+
+    def test_an_episode_really_watched_before_the_start_is_not_taken_for_one_it_skipped(self):
+        entry = self.entry(None)
+        rt.merge_episodes(entry, 'Show', self.listing(), 'oldest')
+        entry['watched'] = ['s1e1']
+        entry['start'] = {'season': 1, 'episode': 3}
+        self.assertEqual(rt.apply_start(entry), ['s1e2'])  # the ones newly marked
+        self.assertEqual(entry['skipped'], ['s1e2'])
+        entry['start'] = None
+        rt.apply_start(entry)
+        self.assertEqual(entry['watched'], ['s1e1'])
+
+
 class TestMergeEpisodes(unittest.TestCase):
     def listing(self, *ids):
         return [{'id': i, 'title': f'Show S01E0{n} {i}', 'date': f'2020-01-0{n}'} for n, i in enumerate(ids, 1)]

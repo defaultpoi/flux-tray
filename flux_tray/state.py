@@ -7,7 +7,7 @@ import os
 from .constants import CONFIG_DIR
 from .fileutil import write_atomic
 from .log import _log
-from .watch import clean_watch
+from .watch import clean_start, clean_watch
 
 
 STATE_FILE = os.path.join(CONFIG_DIR, 'state.json')
@@ -132,6 +132,10 @@ def _clean_media_entry(entry):
         'movie': entry.get('movie') is True,
         # a series that is no longer followed: nothing more is read or downloaded for it, what was downloaded stays
         'paused': entry.get('paused') is True,
+        # the episode a series is to be watched from (see watch.clean_start), and the episodes that it
+        # marked as watched (so that moving it earlier gives back those and no others)
+        'start': clean_start(entry.get('start')),
+        'skipped': strings(entry.get('skipped')),
     }
 
 
