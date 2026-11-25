@@ -225,5 +225,101 @@ class TestNormTitleWatchModule(unittest.TestCase):
         self.assertEqual(_norm_title('Show@#$%^&*()'), 'show')
 
 
+@unittest.skipUnless(HAVE_PLUGIN_DEPENDENCIES, 'the site plugins need requests and beautifulsoup4 (CI installs them)')
+class TestFsonlineResolve(unittest.TestCase):
+    """resolve(): the site lists several servers for a title, and one may not have it."""
+
+    PAGE = 'https://fsonline.example/film/dune-2024-online-subtitrat/'
+    OTHER = {'link': 'https://other.example/e/abc?token=SECRET'}
+    KAEMBED = {'link': 'https://kaembed.example/embed-xyz.html?sub.info=https://subs.example/k.json'}
+
+    def setUp(self):
+        plugin_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'addons', 'media-plugins')
+        if plugin_path not in sys.path:
+            sys.path.insert(0, plugin_path)
+        import requests
+        import fsonline_one
+        self.plugin = fsonline_one
+        self.requests = requests
+        self.streams = {}  # embed address -> a stream, an exception to raise, or None for a page without one
+        self.asked = []
+
+        def extract(embed_url):
+            self.asked.append(embed_url)
+            result = self.streams[embed_url]
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        for name, value in (('_get_soup', mock.Mock()), ('_extract_token', mock.Mock(return_value='t' * 60)),
+                            ('_extract_vidmoly_m3u8', mock.Mock(side_effect=extract)),
+                            ('_fetch_subtitles', mock.Mock(return_value=[{'url': 'https://subs.example/k.vtt', 'lang': 'ro', 'ext': '.vtt'}]))):
+            patcher = mock.patch.object(fsonline_one, name, value)
+            setattr(self, name.strip('_'), patcher.start())
+            self.addCleanup(patcher.stop)
+
+    def serve(self, *servers):
+        patcher = mock.patch.object(self.plugin, '_get_servers', return_value=list(servers))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def http_error(self, code):
+        return self.requests.HTTPError(f'{code} Client Error: Not Found for url: https://x.example/y?token=SECRET',
+                                       response=mock.Mock(status_code=code))
+
+    def resolve(self):
+        return self.plugin.resolve({'ref': self.PAGE})
+
+    def test_the_server_the_plugin_knows_is_tried_first_whatever_the_order_on_the_site(self):
+        self.serve(self.OTHER, self.KAEMBED)
+        self.streams = {self.KAEMBED['link']: 'https://cdn.example/a.m3u8', self.OTHER['link']: 'https://cdn.example/b.m3u8'}
+        got = self.resolve()
+        self.assertEqual(got['video']['url'], 'https://cdn.example/a.m3u8')
+        self.assertEqual(got['video']['headers']['Referer'], self.KAEMBED['link'])
+        self.assertEqual(self.asked, [self.KAEMBED['link']])  # the other was not needed
+        self.fetch_subtitles.assert_called_once_with('https://subs.example/k.json')
+
+    def test_when_that_server_does_not_have_the_title_the_next_one_is_tried(self):
+        self.serve(self.OTHER, self.KAEMBED)
+        self.streams = {self.KAEMBED['link']: self.http_error(404), self.OTHER['link']: 'https://cdn.example/b.m3u8'}
+        got = self.resolve()
+        self.assertEqual(got['video']['url'], 'https://cdn.example/b.m3u8')
+        self.assertEqual(got['video']['headers']['Referer'], self.OTHER['link'])  # the stream is asked for as the server that has it
+        self.assertEqual(self.asked, [self.KAEMBED['link'], self.OTHER['link']])
+        self.assertEqual(got['subs'], [])  # this server names no subtitles, so none are asked for
+        self.fetch_subtitles.assert_not_called()
+
+    def test_a_server_whose_page_has_no_stream_is_passed_over_too(self):
+        self.serve(self.KAEMBED, self.OTHER)
+        self.streams = {self.KAEMBED['link']: None, self.OTHER['link']: 'https://cdn.example/b.m3u8'}
+        self.assertEqual(self.resolve()['video']['url'], 'https://cdn.example/b.m3u8')
+
+    def test_when_none_has_it_the_message_says_what_each_said_and_shows_no_address_or_token(self):
+        self.serve(self.OTHER, self.KAEMBED)
+        self.streams = {self.KAEMBED['link']: self.http_error(404), self.OTHER['link']: None}
+        with self.assertRaises(ValueError) as caught:
+            self.resolve()
+        message = str(caught.exception)
+        self.assertIn('kaembed.example: HTTP 404', message)
+        self.assertIn('other.example: no stream in its page', message)
+        self.assertNotIn('SECRET', message)
+        self.assertNotIn('https://', message)
+
+    def test_an_error_that_is_not_an_answer_of_the_site_is_named_by_its_kind(self):
+        self.serve(self.KAEMBED)
+        self.streams = {self.KAEMBED['link']: self.requests.ConnectionError('boom')}
+        with self.assertRaises(ValueError) as caught:
+            self.resolve()
+        self.assertIn('kaembed.example: ConnectionError', str(caught.exception))
+
+    def test_a_server_without_a_link_is_skipped_and_no_servers_is_said_so(self):
+        self.serve({'name': 'broken'}, self.KAEMBED)
+        self.streams = {self.KAEMBED['link']: 'https://cdn.example/a.m3u8'}
+        self.assertEqual(self.resolve()['video']['url'], 'https://cdn.example/a.m3u8')
+        self.serve()
+        with self.assertRaisesRegex(ValueError, 'No vidmoly server found'):
+            self.resolve()
+
+
 if __name__ == '__main__':
     unittest.main()

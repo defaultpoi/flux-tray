@@ -373,6 +373,20 @@ def _pick_vidmoly(servers: list) -> dict | None:
     return servers[0] if servers else None
 
 
+def _servers_to_try(servers: list) -> list:
+    """The servers that have a link: those this plugin knows how to read (vidmoly, kaembed) first, then
+    the others, each group in the site's order. A title may be on one of them only."""
+    def known(server):
+        return 'vidmoly' in server['link'] or 'kaembed' in server['link']
+    return sorted((s for s in servers if isinstance(s, dict) and s.get('link')), key=lambda s: not known(s))
+
+
+def _why_it_failed(error: Exception) -> str:
+    """'HTTP 404' for an answer of the site, else the kind of error: nothing of the address."""
+    code = getattr(getattr(error, 'response', None), 'status_code', None)
+    return f'HTTP {code}' if code else type(error).__name__
+
+
 def _extract_subtitle_url(server: dict) -> str | None:
     """Extract subtitle API URL from server link."""
     link = server.get('link', '')
@@ -533,20 +547,25 @@ def resolve(episode: dict):
 
     token = _extract_token(soup)
     servers = _get_servers(token, 'movie' if '/film/' in url else 'episode')
-    server = _pick_vidmoly(servers)
-    if not server:
+    candidates = _servers_to_try(servers)
+    if not candidates:
         raise ValueError('No vidmoly server found')
 
-    embed_url = server.get('link')
-    if not embed_url:
-        raise ValueError('No embed URL in server')
-
-    m3u8 = _extract_vidmoly_m3u8(embed_url)
-    if not m3u8:
-        raise ValueError('Could not extract m3u8 from vidmoly embed')
-
-    sub_api = _extract_subtitle_url(server)
-    return {
-        'video': {'url': m3u8, 'ext': '.ts', 'headers': {'Referer': embed_url, 'User-Agent': STREAM_USER_AGENT}},
-        'subs': _fetch_subtitles(sub_api) if sub_api else [],
-    }
+    failed = []  # what each server said, for the message when none has the stream (hosts only, no addresses)
+    for server in candidates:
+        embed_url = server['link']
+        host = urllib.parse.urlparse(embed_url).netloc or 'a server'
+        try:
+            m3u8 = _extract_vidmoly_m3u8(embed_url)
+        except Exception as error:  # down, or without this title: another server may have it
+            failed.append(f'{host}: {_why_it_failed(error)}')
+            continue
+        if not m3u8:
+            failed.append(f'{host}: no stream in its page')
+            continue
+        sub_api = _extract_subtitle_url(server)
+        return {
+            'video': {'url': m3u8, 'ext': '.ts', 'headers': {'Referer': embed_url, 'User-Agent': STREAM_USER_AGENT}},
+            'subs': _fetch_subtitles(sub_api) if sub_api else [],
+        }
+    raise ValueError('No server gave a stream (' + '; '.join(failed) + ')')
