@@ -598,10 +598,20 @@ class MediaMixin:
             _log(f'discovery row activated but no URL: {item}')
             return
         source = source_line(plugin_name, source_url)
+        now = time_module.time()
         with self._media_data_lock:
             entry = self.media['sources'].setdefault(source, new_media_entry())
             entry['title'] = item['title']
             entry['movie'] = item.get('type') == 'movie'
+            if item.get('_cache_key'):
+                # On the watch list as well, with its source already known, as a title that a search
+                # found: a series is then followed in the Track tab until it is removed from Watch, and a
+                # film (not tracked once it has a source) is in Watch as soon as it is read.
+                year = str(item.get('year') or '')
+                record = self.media.setdefault('watch', {}).setdefault(
+                    item['_cache_key'], new_watch_entry(item, now, year if year.isdigit() else ''))
+                record['source'] = source
+                record['checked'] = now
             save_media(self.media)
         self.start_media_check(only=[source])
 
@@ -2290,7 +2300,8 @@ class MediaAccordion:
     # ---- Discover tab --------------------------------------------------------
 
     def _refresh_discover_tab(self):
-        """Show discovery items (unseen items from unified cache) with a Monitor button."""
+        """Show discovery items (unseen items from unified cache). A left click chooses one, a right click
+        dismisses it."""
         self._clear_listbox(self.discover_listbox)
         discovery_urls = self.parent.discovery_source_urls()
         for url in discovery_urls:
@@ -2302,7 +2313,7 @@ class MediaAccordion:
         self._update_tab_counts()
 
     def _build_discover_row(self, url):
-        """Build a discovery row with a Monitor button."""
+        """Build a discovery row: the title, its rating and genre, the sites that have it, its quality."""
         # Parse the virtual URL: discovery:<cache_key>
         prefix, _, cache_key = url.partition(':')
         # Use cached items and metadata (O(1) lookup instead of O(n) search)
@@ -2391,13 +2402,6 @@ class MediaAccordion:
                 quality_label.get_style_context().add_class('quality-low')
             box.pack_start(quality_label, False, False, 0)
 
-        # Monitor button - the same as a left click: onto the watch list
-        monitor_btn = Gtk.Button(label='Monitor')
-        monitor_btn.set_relief(Gtk.ReliefStyle.NONE)
-        monitor_btn.get_style_context().add_class('menu-text')
-        monitor_btn.connect('clicked', self._on_monitor_clicked, item)
-        box.pack_start(monitor_btn, False, False, 0)
-
         # Add custom metadata tooltip with poster (TMDb/OMDB) - using Popover on left of popup
         box.popover_data = {
             'type': 'discovery',
@@ -2410,11 +2414,6 @@ class MediaAccordion:
 
         row.add(box)
         return row
-
-    def _on_monitor_clicked(self, _btn, item):
-        """The Monitor button does what a left click on the row does: puts the title on the watch list
-        (looked for at once), and it leaves the Discover tab."""
-        self._chosen(item)
 
     def _on_discover_row_activated(self, _listbox, row):
         if hasattr(row, 'discovery_item'):

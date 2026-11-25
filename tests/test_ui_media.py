@@ -2608,15 +2608,55 @@ class TestWatchingATitle(unittest.TestCase):
         thread.assert_not_called()
         self.assertEqual(self.stub.media['watch'], {})
 
-    def test_without_a_plugin_that_can_find_titles_a_click_adds_the_page_as_a_source_as_before(self):
-        self.stub.media_registry.finding = []
-        item = dict(self.ITEM, imdb_id=None, _plugin='fsonline_one', id='https://fsonline.one/film/x', type='movie',
+    def direct_item(self, kind):
+        """A title of a site's own list: it is the page of the site already, there is nothing to look for."""
+        item = dict(self.ITEM, imdb_id=None, _plugin='fsonline_one', id='https://fsonline.one/film/x', type=kind,
                     urls={'fsonline_one': 'https://fsonline.one/film/x'})
+        item['_cache_key'] = rt._cache_key(item)  # 'fallback:...': the title has no IMDb id
+        return item
+
+    def test_without_a_plugin_that_can_find_titles_a_click_adds_the_page_as_a_source_and_a_film_is_not_tracked(self):
+        self.stub.media_registry.finding = []
+        item = self.direct_item('movie')
         self.stub._on_discovery_row_activated(item)
         source = 'fsonline_one:https://fsonline.one/film/x'
-        self.assertEqual(self.stub.media['watch'], {})
         self.assertEqual((self.stub.media['sources'][source]['title'], self.stub.media['sources'][source]['movie']), ('Dune: Part Two', True))
+        self.assertEqual(self.stub.media['watch'][item['_cache_key']]['source'], source)  # on the list, with its site known
+        self.assertEqual(self.stub.track_item_count(), 0)  # a film that a site has is in Watch, not in Track
+        self.assertEqual(self.stub.state['media_discovery_seen'], [item['_cache_key']])
         self.stub.start_media_check.assert_called_once_with(only=[source])
+
+    def test_a_click_on_a_series_that_is_a_page_of_a_site_puts_it_in_track_as_followed(self):
+        item = self.direct_item('series')
+        self.stub._on_discovery_row_activated(item)
+        source = 'fsonline_one:https://fsonline.one/film/x'
+        record = self.stub.media['watch'][item['_cache_key']]
+        self.assertEqual((record['type'], record['source'], rt.is_following(record)), ('series', source, True))  # old code: no record, so not in Track
+        self.assertEqual(self.stub.track_item_count(), 1)
+        self.assertFalse(self.stub.media['sources'][source]['movie'])
+        self.stub.start_media_check.assert_called_once_with(only=[source])
+
+    def test_a_series_stays_in_track_until_it_is_removed_from_watch_and_then_never_comes_back_to_discover(self):
+        item = self.direct_item('series')
+        self.stub._on_discovery_row_activated(item)
+        self.stub._media_rows_removed = mock.Mock()  # the main loop's, which idle_add does not run here
+        source = 'fsonline_one:https://fsonline.one/film/x'
+        self.stub.media['sources'][source]['episodes'] = [ep('a', 1)]
+        self.stub.media['sources'][source]['watched'] = ['a']  # all watched: hidden from Watch, still followed
+        self.assertEqual((self.stub.track_item_count(), self.stub.media_source_urls()), (1, []))
+        self.stub._remove_dynamic_source(source)  # removed from the Watch tab's menu
+        self.assertEqual((self.stub.track_item_count(), self.stub.media['watch']), (0, {}))
+        self.assertEqual(self.stub.state['media_discovery_seen'], [item['_cache_key']])
+
+    def test_a_film_leaves_track_for_watch_when_a_site_has_it_and_a_series_found_by_a_search_stays(self):
+        self.watch_entry()
+        series = rt.new_watch_entry(dict(self.ITEM, title='A Show', type='series'), 1000)
+        self.stub.media['watch']['imdb:tt9'] = series
+        self.assertEqual(self.stub.track_item_count(), 2)  # both are looked for
+        self.stub._search_watched()
+        self.assertEqual(self.stub.track_item_count(), 1)  # the film has a source: it is in the media list, not in Track
+        self.assertEqual([k for k, w in self.stub.media['watch'].items() if rt.is_tracked(w)], ['imdb:tt9'])
+        self.assertTrue(rt.is_following(self.stub.media['watch']['imdb:tt9']))
 
     # --- the search
 
@@ -3012,8 +3052,8 @@ class TestMediaAccordion(TmpConfigCase):
                         row.discovery_item = {'n': n}  # as the rows of the Discover tab
                         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
                         box.popover_data = {'type': 'discovery', 'title': f'Title {n}'}
-                        button = Gtk.Button(label='Monitor')
-                        button.connect('clicked', self._media_accordion._on_monitor_clicked, row.discovery_item)
+                        button = Gtk.Button(label='Stop tracking')
+                        button.connect('clicked', self._media_accordion._on_stop_tracking_clicked, 'imdb:tt1', {})
                         box.pack_start(button, False, False, 0)
                         row.add(box)
                         listbox.add(row)
@@ -3172,23 +3212,32 @@ class TestMediaAccordion(TmpConfigCase):
 
 
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
-    def test_the_monitor_button_does_what_a_left_click_does(self):
+    def test_a_row_of_the_discover_tab_has_no_button_a_left_click_chooses_the_title(self):
         stub = self.make_stub()
         accordion = rt.MediaAccordion(stub)
         accordion.build()
-        stub._on_discovery_row_activated = mock.Mock()
-        item = {'title': 'New Series', 'type': 'series', '_cache_key': 'imdb:tt456'}
-        accordion._on_monitor_clicked(None, item)
-        stub._on_discovery_row_activated.assert_called_once_with(item, rebuild=False)
+        item = {'title': 'New Series', 'type': 'series', 'imdb_id': 'tt456', '_cache_key': 'imdb:tt456', 'genre': [],
+                'urls': {'fsonline_one': 'https://fsonline.one/serial/x'}, 'quality': None}
+        stub._get_discovery_items_cached = mock.Mock(return_value=([item], {'imdb:tt456': item}, {'imdb:tt456': None}))
+        row = accordion._build_discover_row('discovery:imdb:tt456')
 
-    def test_monitoring_a_title_puts_it_on_the_watch_list_dismisses_it_from_discover_and_looks_for_it_at_once(self):
+        def buttons(widget):
+            found = [widget.get_label()] if isinstance(widget, rt.Gtk.Button) else []
+            for child in (widget.get_children() if isinstance(widget, rt.Gtk.Container) else ()):
+                found += buttons(child)
+            return found
+        self.assertEqual(buttons(row), [])  # it used to have a Monitor button, which did what the click does
+        self.assertTrue(row.get_activatable())
+        self.assertIs(row.discovery_item, item)
+
+    def test_a_left_click_on_a_title_puts_it_on_the_watch_list_dismisses_it_from_discover_and_looks_for_it_at_once(self):
         stub = self.make_stub()
         stub.media_registry.finding = [FakeFinder('fsonline_one', None)]
         item = {'title': 'New Series', 'type': 'series', 'year': '2023', 'imdb_id': 'tt456', 'genre': [], '_cache_key': 'imdb:tt456',
                 'urls': {'imdb-charts': 'https://www.imdb.com/title/tt456/'}, '_plugin': 'imdb-charts'}
         stub.save_state = mock.Mock()
         with mock.patch.object(rt.threading, 'Thread') as thread, mock.patch.object(rt, 'save_state'):
-            stub._on_discovery_row_activated(item, rebuild=False)  # which the Monitor button and a left click both call
+            stub._on_discovery_row_activated(item, rebuild=False)
         entry = stub.media['watch']['imdb:tt456']
         self.assertEqual((entry['title'], entry['type'], entry['source'], 'monitoring' in entry), ('New Series', 'series', None, False))
         self.assertEqual(stub.state['media_discovery_seen'], ['imdb:tt456'])  # never shown in Discover again
@@ -3262,16 +3311,6 @@ class TestMediaAccordion(TmpConfigCase):
         stub._on_discovery_row_activated.assert_called_once_with(first.discovery_item, rebuild=False)
         self.assertEqual(accordion.discover_listbox.get_children(), [second])
         accordion._refresh_track_tab.assert_called_once()
-
-    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
-    def test_the_monitor_button_takes_the_row_away_too(self):
-        stub = self.make_stub()
-        accordion = rt.MediaAccordion(stub)
-        accordion.build()
-        first, second = self.discover_rows(accordion, 'First', 'Second')
-        stub._on_discovery_row_activated = mock.Mock()
-        accordion._on_monitor_clicked(None, second.discovery_item)
-        self.assertEqual(accordion.discover_listbox.get_children(), [first])
 
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
     def test_a_right_click_dismisses_the_title_and_takes_just_its_row_away(self):
