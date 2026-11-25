@@ -196,12 +196,32 @@ class TestFindingATitle(unittest.TestCase):
         import os
         folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'addons', 'media-plugins')
         declared = {}
-        for name in ('sitefilme_com.py', 'fsonline_one.py'):
+        for name in ('_sitefilme_com.py', 'fsonline_one.py'):  # the first is parked: it must be right when it is brought back
             tree = ast.parse(open(os.path.join(folder, name), encoding='utf-8').read())
             declared[name] = {t.id: ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
                               for t in n.targets if isinstance(t, ast.Name) and t.id in ('FIND_PRIORITY', 'FIND_KINDS')}
-        self.assertEqual(declared['sitefilme_com.py'], {'FIND_PRIORITY': 10, 'FIND_KINDS': ('movie',)})
+        self.assertEqual(declared['_sitefilme_com.py'], {'FIND_PRIORITY': 10, 'FIND_KINDS': ('movie',)})
         self.assertEqual(declared['fsonline_one.py'], {'FIND_PRIORITY': 20})
+
+
+class TestASourceThatHoldsNothing(unittest.TestCase):
+    """What may be given up for another site's source: nothing on disk and nothing watched."""
+
+    def test_a_source_with_no_file_and_nothing_watched_holds_nothing(self):
+        self.assertTrue(rt.holds_nothing({'episodes': [{'id': 'a'}], 'watched': [], 'skipped': []}, set()))
+        self.assertTrue(rt.holds_nothing({}, set()))
+
+    def test_an_episode_on_disk_is_something(self):
+        self.assertFalse(rt.holds_nothing({'watched': []}, {'a'}))
+
+    def test_a_watched_episode_is_something(self):
+        self.assertFalse(rt.holds_nothing({'watched': ['a'], 'skipped': []}, set()))
+
+    def test_an_episode_that_a_start_point_skipped_is_not_something_watched(self):
+        self.assertTrue(rt.holds_nothing({'watched': ['a', 'b'], 'skipped': ['b', 'a']}, set()))
+
+    def test_one_really_watched_among_the_skipped_is(self):
+        self.assertFalse(rt.holds_nothing({'watched': ['a', 'b'], 'skipped': ['a']}, set()))
 
 
 if __name__ == '__main__':

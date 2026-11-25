@@ -3,6 +3,9 @@
 flux-tray media plugin for sitefilme.com
 Media source: supports movies only (/online/{id}/) with direct m3u8 + VTT from stf*.vip CDN.
 Provides find() to locate titles via site search.
+
+Parked: the leading underscore keeps the app from loading it, so fsonline.one is the only site
+asked for a title. To use it again, rename this file to sitefilme_com.py.
 """
 
 import re

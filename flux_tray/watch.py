@@ -92,6 +92,14 @@ def is_tracked(entry):
     return is_searching(entry) or is_following(entry)
 
 
+def holds_nothing(entry, on_disk):
+    """True for a source with nothing of the person's in it: none of its episodes is on disk (`on_disk`
+    holds the ids of those that are) and none was really watched (an episode that a start point skipped
+    was not). Such a source can be given up for another site's without losing anything."""
+    skipped = set(entry.get('skipped') or ())
+    return not on_disk and not any(episode not in skipped for episode in entry.get('watched') or ())
+
+
 def search_due(entry, now, wait):
     """True when a title that is still being looked for was last looked for `wait` seconds ago
     or never."""

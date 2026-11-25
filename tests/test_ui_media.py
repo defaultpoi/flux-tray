@@ -44,6 +44,7 @@ class FakeRegistry:
         self.refreshed = 0
         self.discovery = []
         self.finding = []
+        self.errors = {}
 
     def refresh(self):
         self.refreshed += 1
@@ -144,6 +145,7 @@ class Stub:
     _cancel_source_downloads = rt.FluxTray._cancel_source_downloads
     _forget_watch_of = rt.FluxTray._forget_watch_of
     _search_watched = rt.FluxTray._search_watched
+    _release_lost_sources = rt.FluxTray._release_lost_sources
     _watching_items = rt.FluxTray._watching_items
     discovery_source_urls = rt.FluxTray.discovery_source_urls
     _is_movie = rt.FluxTray._is_movie
@@ -2864,6 +2866,162 @@ class FakeFinder:
         self.name = name
         self.module = mock.Mock()
         self.module.find = mock.Mock(return_value=url)
+
+
+class TestATitleWhosePluginIsGone(MediaCase):
+    """A title that a site was found to have is looked for again by the plugins that are loaded when the
+    plugin of that site is not (removed, or parked by an underscore in its file name)."""
+
+    GONE = 'sitefilme_com:https://sitefilme.example/online/1/'
+    KEY = 'imdb:tt15239678'
+    FOUND = 'https://fsonline.example/film/dune-part-two-2024'
+    NEW = 'fsonline_one:' + FOUND
+
+    def setUp(self):
+        super().setUp()
+        self.sources = []  # [media] holds nothing: only the watch list has sources
+        self.stub = Stub()
+        self.stub.start_media_check = mock.Mock()
+        self.stub._plan_media_downloads = mock.Mock()
+        self.stub._media_rows_removed = mock.Mock()  # the main loop's, which idle_add does not run here
+        self.site = FakeFinder('fsonline_one', self.FOUND)
+        self.stub.media_registry.finding = [self.site]
+
+    def on_the_list(self, entry=None, source=None, kind='movie'):
+        """A title on the watch list that `source` has, with what is known of that source."""
+        source = source or self.GONE
+        record = rt.new_watch_entry({'title': 'Dune: Part Two', 'type': kind, 'imdb_id': 'tt15239678'}, 1000, year='2024')
+        record.update(source=source, checked=2000.0)
+        self.stub.media['watch'][self.KEY] = record
+        self.stub.media['sources'][source] = entry or entry_with(ep('m'), title='Dune: Part Two')
+        return record
+
+    def test_a_title_waiting_on_a_plugin_that_is_gone_is_found_again_by_the_one_that_is_loaded(self):
+        record = self.on_the_list()
+        self.stub._check_media()
+        self.assertEqual(record['source'], self.NEW)
+        self.assertNotIn(self.GONE, self.stub.media['sources'])
+        self.assertIn(self.NEW, self.stub.media['sources'])
+        self.assertNotIn(self.GONE, self.stub.media_errors)  # not read: no "no source handler" on its row
+        self.site.module.find.assert_called_once()
+        self.stub.start_media_check.assert_called_once_with(only=[self.NEW])
+        self.assertEqual(self.queued(self.stub, '_media_rows_removed'), [([self.GONE],)])
+
+    def test_when_no_plugin_has_it_the_title_is_looked_for_at_every_check_again(self):
+        self.site.module.find.return_value = None
+        record = self.on_the_list()
+        self.stub._check_media()
+        self.assertIsNone(record['source'])
+        self.assertTrue(rt.is_searching(record))  # in Track as "Looking for a source..."
+        self.assertNotIn(self.GONE, self.stub.media['sources'])
+        self.assertIsNotNone(record['checked'])  # asked now, and again after the interval
+
+    def test_its_queued_downloads_and_statuses_go(self):
+        self.on_the_list()
+        self.stub._media_queue = [(self.GONE, 'm'), (URL, 'a')]
+        self.stub.media_status[(self.GONE, 'm')] = ('queued', 0)
+        self.stub._check_media()
+        self.assertEqual(self.stub._media_queue, [(URL, 'a')])
+        self.assertNotIn((self.GONE, 'm'), self.stub.media_status)
+
+    def test_a_download_in_flight_is_stopped_before_the_source_goes(self):
+        self.on_the_list()
+        order = []
+        self.stub._cancel_source_downloads = lambda url: order.append(('cancel', url, self.GONE in self.stub.media['sources']))
+        self.stub._check_media()
+        self.assertEqual(order, [('cancel', self.GONE, True)])
+
+    def test_the_start_of_a_series_is_kept_for_the_new_source(self):
+        record = self.on_the_list(kind='series')
+        record['start'] = {'season': 2, 'episode': 3}
+        self.stub._check_media()
+        self.assertEqual(self.stub.media['sources'][self.NEW]['start'], {'season': 2, 'episode': 3})
+
+    def test_an_episode_on_disk_keeps_the_source_to_be_watched(self):
+        entry = entry_with(ep('m'), title='Dune: Part Two', files={'m': {'video': self.touch('m.ts'), 'subs': []}})
+        record = self.on_the_list(entry)
+        self.stub._check_media()
+        self.assertEqual(record['source'], self.GONE)
+        self.assertIn(self.GONE, self.stub.media['sources'])
+        self.site.module.find.assert_not_called()
+        self.assertIn(self.GONE, self.stub.media_errors)  # as for any source no plugin understands
+
+    def test_a_file_that_is_recorded_but_gone_from_the_disk_is_not_something(self):
+        entry = entry_with(ep('m'), title='Dune: Part Two', files={'m': {'video': os.path.join(self.dir, 'gone.ts'), 'subs': []}})
+        record = self.on_the_list(entry)
+        self.stub._check_media()
+        self.assertEqual(record['source'], self.NEW)
+
+    def test_a_watched_episode_keeps_the_source(self):
+        record = self.on_the_list(entry_with(ep('a', 1), ep('b', 2), watched=['a']), kind='series')
+        self.stub._check_media()
+        self.assertEqual(record['source'], self.GONE)
+        self.site.module.find.assert_not_called()
+
+    def test_an_episode_that_a_start_point_skipped_does_not(self):
+        entry = entry_with(ep('a', 1), ep('b', 2), watched=['a'])
+        entry['skipped'] = ['a']
+        record = self.on_the_list(entry, kind='series')
+        self.stub._check_media()
+        self.assertEqual(record['source'], self.NEW)
+
+    def test_nothing_is_done_while_a_plugin_failed_to_load_since_it_may_be_that_one(self):
+        self.stub.media_registry.errors = {'sitefilme_com.py': 'SyntaxError: invalid syntax'}
+        record = self.on_the_list()
+        self.stub._check_media()
+        self.assertEqual(record['source'], self.GONE)
+        self.assertIn(self.GONE, self.stub.media['sources'])
+        self.site.module.find.assert_not_called()
+
+    def test_a_title_whose_plugin_is_loaded_is_left_alone(self):
+        source = 'fsonline_one:https://fsonline.example/film/x'
+        self.stub.media_registry.by_source[source] = FakeDriver('fsonline_one', 'oldest')
+        record = self.on_the_list(source=source)
+        self.stub._check_media()
+        self.assertEqual(record['source'], source)
+        self.assertIn(source, self.stub.media['sources'])
+        self.site.module.find.assert_not_called()
+
+    def test_a_check_of_particular_sources_leaves_it_to_the_next_full_one(self):
+        record = self.on_the_list()
+        self.stub._check_media(only=[URL])
+        self.assertEqual(record['source'], self.GONE)
+
+    # --- with the real registry: a file with a leading underscore is not a plugin
+
+    def registry_with(self, **files):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        for name, text in files.items():
+            with open(os.path.join(folder, name + '.py'), 'w') as f:
+                f.write(text)
+        return rt.MediaSources(folder)
+
+    SITE_A = """NAME = 'sitea'
+def list_episodes(source):
+    return 'Dune', []
+"""
+    SITE_B = """NAME = 'siteb'
+def find(title, year=None, imdb_id=None, kind='movie'):
+    return 'https://siteb.example/dune'
+def list_episodes(source):
+    return 'Dune', []
+"""
+
+    def test_a_plugin_parked_by_an_underscore_is_gone_for_the_titles_it_found(self):
+        self.stub.media_registry = self.registry_with(_sitea=self.SITE_A, siteb=self.SITE_B)
+        record = self.on_the_list(source='sitea:https://sitea.example/1')
+        self.stub._check_media()
+        self.assertEqual(record['source'], 'siteb:https://siteb.example/dune')
+        self.assertNotIn('sitea:https://sitea.example/1', self.stub.media['sources'])
+
+    def test_the_same_plugin_with_its_own_name_is_not(self):
+        self.stub.media_registry = self.registry_with(sitea=self.SITE_A, siteb=self.SITE_B)
+        record = self.on_the_list(source='sitea:https://sitea.example/1')
+        self.stub._check_media()
+        self.assertEqual(record['source'], 'sitea:https://sitea.example/1')
+        self.assertIn('sitea:https://sitea.example/1', self.stub.media['sources'])
+        self.assertEqual(self.stub.media_registry.errors, {})
 
 
 class TestTheOrderOfAddedSources(MediaCase):

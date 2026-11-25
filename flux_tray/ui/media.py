@@ -37,7 +37,8 @@ from ..media_cache import (
     get_all_cached_items, sync_metadata_ids, title_with_year,
 )
 from ..watch import (
-    clean_start, find_source, is_following, is_searching, is_tracked, new_watch_entry, search_due, source_line, start_text,
+    clean_start, find_source, holds_nothing, is_following, is_searching, is_tracked, new_watch_entry, search_due, source_line,
+    start_text,
 )
 from ..log import _log
 
@@ -673,6 +674,60 @@ class MediaMixin:
         for key in [k for k, w in watch.items() if w.get('source') in sources]:
             del watch[key]
 
+    def _release_lost_sources(self):
+        """A title that a site was found to have, whose plugin is not loaded any more (its file was removed or
+        parked), is looked for again by the plugins that are: its source is dropped (its downloads stopped)
+        and the record is due at once, so the check that follows asks the others. Only a source with nothing of
+        the person's in it is given up: one with an episode on disk or watched stays, to be watched. Nothing is
+        done while a plugin failed to load, since it may be that one. Returns the sources given up. Runs in the
+        check's thread: stopping a download waits for it."""
+        registry = self.media_registry
+        if registry.errors:
+            return []
+        with self._media_data_lock:
+            sources = {w['source'] for w in self.media.get('watch', {}).values() if w.get('source')}
+        lost = set()
+        for source in sources:
+            try:
+                registry.driver_for(source)
+            except NoDriver:
+                lost.add(source)
+        if not lost:
+            return []
+
+        def giving_up(source):
+            entry = self.media['sources'].get(source)
+            return entry is None or holds_nothing(
+                entry, {e['id'] for e in entry['episodes'] if self._media_file_ready(entry, e['id'])})
+
+        with self._media_data_lock:
+            leaving = {source for source in lost if giving_up(source)}
+        for source in leaving:
+            _log(f'watch: {source} is not read by any plugin now: its title is looked for again')
+            self._cancel_source_downloads(source)
+        released = set()
+        with self._media_data_lock:
+            for key, record in self.media.get('watch', {}).items():
+                source = record.get('source')
+                if source in leaving and giving_up(source):  # looked at again: a download may have ended meanwhile
+                    record['source'], record['checked'] = None, None
+                    released.add(source)
+            for source in released:
+                self.media['sources'].pop(source, None)
+            if released:
+                save_media(self.media)
+        if not released:
+            return []
+        with self._media_queue_lock:
+            self._media_queue = [key for key in self._media_queue if key[0] not in released]
+        for source in released:
+            self.media_errors.pop(source, None)
+        for key in [k for k in self.media_status if k[0] in released]:
+            del self.media_status[key]
+        self._media_known_sources -= released
+        GLib.idle_add(self._media_rows_removed, sorted(released))
+        return sorted(released)
+
     def _search_watched(self):
         """Asks the plugins that can find a title whether they have each title being watched, those not
         asked for a media check ago. A title that is found becomes a source (a film, if it is one) and
@@ -779,6 +834,8 @@ class MediaMixin:
         known of it. A full check also looks for the titles on the watch list."""
         new_total = new_podcasts = 0
         self.media_registry.refresh()  # picks up plugins that were added or edited
+        if only is None:
+            self._release_lost_sources()  # before the sources are listed: a title whose plugin is gone is not read
         sources = [(url, configured) for url, _name, configured in load_media_sources()]
         configured_urls = {url for url, _configured in sources}
         with self._media_data_lock:

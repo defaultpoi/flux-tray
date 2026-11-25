@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import shutil
 import sys
@@ -588,6 +589,41 @@ class TestBuiltInDrivers(unittest.TestCase):
 
     def test_default_orders(self):
         self.assertEqual({d.name: d.order for d in self.registry.drivers()}, {'archive': 'oldest', 'yt-dlp': 'newest', 'feed': 'newest'})
+
+
+@unittest.skipUnless(all(importlib.util.find_spec(name) for name in ('requests', 'bs4')),
+                     'the site plugins need requests and beautifulsoup4 (CI installs them)')
+class TestTheBundledPlugins(unittest.TestCase):
+    """The plugins in the repo, loaded the way the app loads them: fsonline.one is the one site asked
+    for a title (sitefilme.com is parked by the underscore in its file name)."""
+
+    def setUp(self):
+        self.registry = rt.MediaSources(rt.MEDIA_PLUGIN_DIR)
+        self.registry.refresh()
+
+    def test_they_all_load(self):
+        self.assertEqual(self.registry.errors, {})
+        self.assertIsNotNone(self.registry.by_name('fsonline_one'))
+        self.assertIsNotNone(self.registry.by_name('imdb-charts'))
+
+    def test_a_parked_plugin_is_not_loaded(self):
+        self.assertIsNone(self.registry.by_name('sitefilme_com'))
+        self.assertTrue(os.path.exists(os.path.join(rt.MEDIA_PLUGIN_DIR, '_sitefilme_com.py')))  # brought back by renaming it
+
+    def test_fsonline_is_the_only_plugin_that_finds_a_title(self):
+        self.assertEqual([f.name for f in self.registry.finders()], ['fsonline_one'])
+
+    def test_a_movie_and_a_series_are_both_looked_for_on_fsonline(self):
+        module = self.registry.by_name('fsonline_one').module
+        with mock.patch.object(module, 'find', return_value='https://fsonline.example/x') as find:
+            for kind in ('movie', 'series'):
+                found = rt.find_source(self.registry.finders(), {'title': 'Dune', 'type': kind})
+                self.assertEqual(found, ('fsonline_one', 'https://fsonline.example/x'))
+        self.assertEqual(find.call_count, 2)
+
+    def test_a_source_of_the_parked_plugin_is_not_understood(self):
+        with self.assertRaises(rt.NoDriver):
+            self.registry.driver_for('sitefilme_com:https://sitefilme.example/online/1/')
 
 
 if __name__ == '__main__':
