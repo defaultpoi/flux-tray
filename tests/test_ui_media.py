@@ -240,16 +240,15 @@ class TestMediaRowView(unittest.TestCase):
         self.assertIn('Last watched: Tom &amp; &lt;Jerry&gt;', tooltip)
         self.assertNotIn('<Jerry>', tooltip)
 
-    def test_cached_metadata_is_part_of_the_tooltip_after_the_episode_text(self):
+    def test_the_tooltip_has_no_title_details_the_popover_with_the_poster_shows_them(self):
         entry = entry_with(ep('a', 1, title='Pilot'))
-        meta = {'title': 'Show', 'year': '2020', 'imdb_rating': 8.0, 'total_episodes': 30}
+        meta = {'title': 'Show', 'year': '2020', 'imdb_rating': 8.0, 'genre': 'Drama', 'overview': 'A plot.', 'total_episodes': 30}
         with mock.patch.object(rt, 'get_cached_metadata', return_value=meta):
             name, text, stats, tooltip, color = self.view(entry)
-        lines = tooltip.split('\n')
-        self.assertIn('Show (2020)', lines[1])
-        self.assertIn('IMDb: 8.0/10', tooltip)
-        self.assertEqual(lines[0], text)
-        self.assertEqual(text, 'S01E01/30 Pilot')  # the total comes from the metadata too
+        self.assertEqual(tooltip.split('\n'), [text, 'Click to download', '1 unwatched'])  # what the row cannot say itself
+        for detail in ('Show (2020)', 'IMDb', 'Drama', 'A plot.'):
+            self.assertNotIn(detail, tooltip)
+        self.assertEqual(text, 'S01E01/30 Pilot')  # the total of episodes still comes from the metadata
 
     def test_a_ready_episode(self):
         entry = entry_with(ep('a', 1), ep('b', 2))

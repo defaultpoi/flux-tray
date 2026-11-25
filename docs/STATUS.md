@@ -212,3 +212,8 @@ No run on a real desktop yet.
 - Not changed: `merge_episodes` of a podcast (order `newest`) is unchanged when there is no start. A source listed by hand in `[media]` has no start (it would need a fourth field in the config line, a migration, or an entry in the Watch tab's menu): not built.
 - Tests: 29 new or changed tests fail on the old code (checked with it restored). Run on Python 3.14.6 under Xvfb. Not checked: the popover on a real desktop (the new line in XFCE-VALIDATION section 2 lists what to try: arrows and typing in the spin buttons inside the popup, the popup staying open), and any real site's episode numbers.
 
+2026-11-25: Watch tab: the row's tooltip no longer repeats the title's details.
+- Hovering a Watch row showed two boxes: the preview beside the popup (poster, rating, plot) and the row's own tooltip, which began with the same details (`format_metadata_for_tooltip`). `media_row_view` no longer puts them in the tooltip; it keeps what the row cannot say (the episode, what a click does, the unwatched count, the last episode watched, and why a check or a download failed). The preview is unchanged; its text fallback for a title with no metadata is the same tooltip text.
+- Not removed: `format_metadata_for_tooltip` in metadata.py (and `test_metadata.TestTheHoverText`) has no caller in the app now.
+- Tests: the one that pinned the old tooltip now pins the new one and fails on the old code. Not checked: a real hover on a desktop.
+

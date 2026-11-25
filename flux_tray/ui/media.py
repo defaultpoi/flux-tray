@@ -31,7 +31,7 @@ from ..network import run_when_online
 from ..playback import counts_as_watched, is_media_playing, mpv_append_playlist, play_media_file, resume_point
 from ..screen import media_target_size, remember_screen_size
 from ..state import new_media_entry, save_media, save_state
-from ..metadata import format_metadata_for_tooltip, get_cached_metadata, refresh_metadata_cache
+from ..metadata import get_cached_metadata, refresh_metadata_cache
 from ..media_cache import (
     load_media_cache, update_media_cache, get_new_items, mark_listing, mark_seen, is_seen,
     get_all_cached_items, sync_metadata_ids, title_with_year,
@@ -137,11 +137,9 @@ def media_row_view(name, entry, order, downloaded, status, error=None, now=None,
     if entry.get('paused'):
         hint = f'{hint} (no longer followed: nothing new is read or downloaded)'
 
-    # The tooltip is markup: the plain parts are escaped, the metadata already is
+    # The tooltip is markup, and has what the row does not say: the title's details (poster, rating, plot)
+    # are in the popover that opens beside the popup, not here
     parts = [html.escape(p, quote=False) for p in (text, hint, f'{unwatched_count(entry)} unwatched', last_line, error_line) if p]
-    markup = format_metadata_for_tooltip(meta)
-    if markup:
-        parts.insert(1 if text else 0, markup)  # after the episode text
     return name, text, stats, '\n'.join(parts), color
 
 
