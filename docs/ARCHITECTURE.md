@@ -16,7 +16,7 @@ number of named locks, each next to the data it guards (see `FluxTray.__init__`)
 1. A file is replaced whole or not at all: `fileutil.write_atomic` writes through a temp file of its own and renames it (`state.json`, `media.json`, `config.conf`). `config.conf` has one writer (`config._edit_config_section`); edits take turns under one lock.
 2. Anything from outside is checked before use: links from feeds go through `links.open_link`, playlist addresses through `hls._fetch_text`.
 3. Package scans and installs (xbps, topgrade, sudo) run in their own process group with a timeout and are ended as a group (`proc._kill_process_group`). Downloads (`yt-dlp`, `ffmpeg`) are not yet: see STATUS.md.
-4. The file formats, `config.conf` syntax, the media plugin contract and `~/.config/flux-tray` do not change, because whatever appends lines to `config.conf` (a browser extension, say), the user's media plugins and their files depend on them.
+4. The file formats, `config.conf` syntax, the media plugin contract and the files in `~/.config/flux-tray` do not change, because whatever appends lines to `config.conf` (a browser extension, say) and the plugins in `addons/media-plugins` depend on them. (The one change made to this: the app stopped reading plugins from `~/.config/flux-tray/media-plugins`, at the owner's request, see STATUS.md.)
 
 ## Where this came from
 

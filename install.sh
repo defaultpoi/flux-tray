@@ -4,8 +4,7 @@
 #   ./install.sh                   link only
 #   ./install.sh --autostart       link and add ~/.config/autostart/flux-tray.desktop
 #   ./install.sh --no-autostart    link and remove that entry
-# The media plugins stay in addons/media-plugins/ (the app reads them there); your own go in
-# ~/.config/flux-tray/media-plugins/.
+# The media plugins stay in addons/media-plugins/ (the app reads them there, and nowhere else).
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd -P)

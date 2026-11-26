@@ -335,8 +335,8 @@ class TestLoadingPlugins(PluginCase):
 
 
 class TestTwoPluginFolders(PluginCase):
-    """The built-in plugins are in the repo, the person's own in their config folder: both are read, and
-    a file of the person's with the name of a built-in one replaces it."""
+    """A registry can read several folders, the later one replacing a file of the same name (the app now
+    gives it only the folder of the repo: TestTheAppsPluginFolder)."""
 
     def setUp(self):
         super().setUp()
@@ -399,11 +399,19 @@ class TestTwoPluginFolders(PluginCase):
         self.registry.refresh()
         self.assertIn('builtin', self.names())
 
-    def test_a_single_folder_still_works_and_the_app_reads_the_repo_and_the_config_folder(self):
+    def test_a_single_folder_still_works(self):
         self.assertEqual(rt.MediaSources(self.dir).plugin_dirs, [self.dir])
-        self.assertEqual(rt.MEDIA_PLUGIN_DIRS, [rt.MEDIA_PLUGIN_DIR, rt.USER_MEDIA_PLUGIN_DIR])
+
+
+class TestTheAppsPluginFolder(unittest.TestCase):
+    """The app reads the plugins in the repo and nothing in the person's config folder (app.py hands
+    MediaSources the one constant there is; the real run is in STATUS.md)."""
+
+    def test_there_is_one_folder_and_it_is_the_one_in_the_repo(self):
         self.assertTrue(rt.MEDIA_PLUGIN_DIR.endswith(os.path.join('addons', 'media-plugins')))
         self.assertTrue(os.path.isdir(rt.MEDIA_PLUGIN_DIR))
+        self.assertFalse(hasattr(rt, 'USER_MEDIA_PLUGIN_DIR'))
+        self.assertFalse(hasattr(rt, 'MEDIA_PLUGIN_DIRS'))
 
 
 class TestListing(PluginCase):

@@ -54,7 +54,7 @@ against the old code and watch it fail.
 Code that starts a process, opens a socket, draws, or touches time or media is also
 run for real, because mocked tests have missed real bugs in mpv, ffmpeg, yt-dlp and
 the GTK popup. The earlier harness for that: build `FluxTray()` with a temporary
-`HOME` (seeded `config.conf`, `state.json`, `media-plugins/`, an mpv config with
+`HOME` (seeded `config.conf`, `state.json`, an mpv config with
 `ao=null`), drive it from a thread with `GLib.idle_add` helpers, run under
 `xvfb-run -a -s '-screen 0 1368x768x24'` with `openbox`, screenshot with
 `import -window root`, click with `xdotool` at coordinates from

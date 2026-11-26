@@ -11,11 +11,8 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.conf')
 
 
 # Python files here add sources to the Media section (see "Media plugins" in the README).
-# The built-in media plugins are in the repo; the person's own are in their config folder, and a file there
-# replaces a built-in one of the same name.
+# They are read from the repo only: nothing in ~/.config/flux-tray/media-plugins is loaded.
 MEDIA_PLUGIN_DIR = os.path.join(REPO_DIR, 'addons', 'media-plugins')
-USER_MEDIA_PLUGIN_DIR = os.path.join(CONFIG_DIR, 'media-plugins')
-MEDIA_PLUGIN_DIRS = [MEDIA_PLUGIN_DIR, USER_MEDIA_PLUGIN_DIR]
 
 
 DEFAULT_HIGHLIGHT_WORDS = ('breaking',)

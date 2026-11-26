@@ -44,7 +44,7 @@ Flux Tray is a personal tray application for XFCE on Void Linux, written for Pyt
 
 ### Media plugins
 
-A plugin is a Python file that teaches the Media section a site. The built-in ones are in `addons/media-plugins/` of the checkout (so `git pull` updates them, and nothing is copied); your own go in `~/.config/flux-tray/media-plugins/`, and a file there with the name of a built-in one replaces it. Plugins are loaded at the next check after you save them, with no restart. A file whose name starts with `_` or `.` is not loaded, which is how a plugin is parked (and brought back by renaming it). A plugin that does not load is named on the row of any source that needed it. A plugin runs inside the app with your permissions, like the scripts in `[launcher]`, so only keep files there that you wrote or read.
+A plugin is a Python file that teaches the Media section a site. The built-in ones are in `addons/media-plugins/` of the checkout (so `git pull` updates them, and nothing is copied); a plugin of your own goes there too. Nothing in `~/.config/flux-tray/media-plugins/` is read any more. Plugins are loaded at the next check after you save them, with no restart. A file whose name starts with `_` or `.` is not loaded, which is how a plugin is parked (and brought back by renaming it). A plugin that does not load is named on the row of any source that needed it. A plugin runs inside the app with your permissions, like the scripts in `[launcher]`, so only keep files there that you wrote or read.
 
 Built-in plugins (in `addons/media-plugins/`):
 - `fsonline_one.py` — fsonline.one series and movies (with `find` for the watch list)
@@ -54,7 +54,7 @@ Built-in plugins (in `addons/media-plugins/`):
 A `[media]` line reaches a plugin in one of two ways: the plugin's `matches(line)` returns true for it (plugins are asked before the built-in drivers, so one can also take over a site they handle), or the line starts with the plugin's name and a colon, `retrotv:the-show|Retro TV`, and the plugin gets what follows the colon.
 
 ```python
-# ~/.config/flux-tray/media-plugins/retrotv.py
+# addons/media-plugins/retrotv.py
 from flux_tray.media import fetch_json      # get JSON with a timeout; see "Helpers" below
 
 NAME = 'retrotv'     # optional: the name for `retrotv:...` lines (default: the file name)
