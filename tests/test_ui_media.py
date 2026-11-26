@@ -93,6 +93,7 @@ class Stub:
     _media_source_order = rt.FluxTray._media_source_order
     on_media_row_clicked = rt.FluxTray.on_media_row_clicked
     _on_media_played = rt.FluxTray._on_media_played
+    _follow_media_playback = rt.FluxTray._follow_media_playback
     mark_media_watched = rt.FluxTray.mark_media_watched
     media_source_urls = rt.FluxTray.media_source_urls
     podcast_source_urls = rt.FluxTray.podcast_source_urls
@@ -173,7 +174,7 @@ class Stub:
         self._media_worker_running = False
         self._media_cancel = set()
         self._discovery_items_cache = None
-        self._media_playlist_episodes = {}
+        self._media_session = None
         self.popup = mock.MagicMock()
         self.popup.get_visible.return_value = False
         self.listbox = mock.MagicMock()
@@ -1345,6 +1346,75 @@ class TestPlaying(MediaCase):
         stub._on_media_played(URL, 'a', 30.0, 700.0)
         stub._on_media_played(URL, 'a', None, None)
         stub.mark_media_watched.assert_not_called()
+
+
+class TestPlayingThroughAPlaylist(MediaCase):
+    """mpv goes on to the next downloaded episode by itself. That episode is followed like the first: it is shown
+    as playing, marked watched (or remembered) when it ends, and a download that finishes meanwhile is appended."""
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(rt.clear_media_playing)
+        self.paths = {i: self.touch(i + '.mp4') for i in 'ab'}
+        self.stub = Stub()
+        self.stub.media['sources'][URL] = entry_with(ep('a', 1), ep('b', 2), ep('c', 3),
+                                                     files={i: {'video': p, 'subs': []} for i, p in self.paths.items()})
+        self.stub._plan_media_downloads = mock.Mock()
+        self.stub._enqueue_media = mock.Mock()
+
+    def click(self, stub=None):
+        """Left-clicks the row; returns the `follow` the watcher was given."""
+        with mock.patch.object(rt, 'play_media_file') as play, mock.patch.object(rt, 'mpv_append_playlist'):
+            (stub or self.stub).on_media_row_clicked(URL)
+        return play.call_args.kwargs['follow']
+
+    def test_the_next_episode_of_the_playlist_is_claimed_and_shown_as_playing(self):
+        follow = self.click()
+        self.assertEqual(rt._media_playing, (URL, 'a'))
+        claimed = follow(self.paths['b'])
+        self.assertTrue(callable(claimed['on_finished']) and callable(claimed['on_stopped']))
+        self.assertEqual(rt._media_playing, (URL, 'b'))
+        self.assertEqual(len(self.queued(self.stub, '_refresh_media_rows')), 1)
+
+    def test_what_ends_after_the_hand_over_is_the_second_episode_and_it_is_marked_watched(self):
+        follow = self.click()
+        claimed = follow(self.paths['b'])
+        claimed['on_stopped']({'position': 1316.0, 'played': 1300.0, 'duration': 1320.0})
+        claimed['on_finished'](99.0, 4.0)  # called from the watcher thread
+        (args,) = self.queued(self.stub, '_on_media_played')
+        self.assertEqual(args, (URL, 'b', 99.0, 4.0, {'position': 1316.0, 'played': 1300.0, 'duration': 1320.0}, None))
+        self.stub._on_media_played(*args)
+        entry = self.stub.media['sources'][URL]
+        self.assertEqual(entry['watched'], ['b'])
+        self.assertEqual([e['id'] for e in rt.upcoming(entry['episodes'], entry['watched'], 'oldest', 1)], ['a'])
+        self.assertFalse(rt.is_media_playing(URL))  # the last one that was followed: nothing is playing now
+
+    def test_the_first_episode_ending_does_not_clear_the_mark_of_the_one_playing_now(self):
+        follow = self.click()
+        follow(self.paths['b'])
+        self.stub._on_media_played(URL, 'a', 99.0, 4.0, {'position': 1316.0, 'played': 1300.0, 'duration': 1320.0}, None)
+        self.assertEqual(self.stub.media['sources'][URL]['watched'], ['a'])
+        self.assertTrue(rt.is_media_playing(URL))  # so a download that finishes now is appended to mpv's playlist
+        self.assertEqual(rt._media_playing, (URL, 'b'))
+
+    def test_a_file_that_is_not_an_unwatched_downloaded_episode_of_the_source_is_not_claimed(self):
+        follow = self.click()
+        self.assertIsNone(follow('/somewhere/else.mp4'))
+        self.stub.media['sources'][URL]['watched'].append('b')
+        self.assertIsNone(follow(self.paths['b']))
+        self.assertEqual(rt._media_playing, (URL, 'a'))
+
+    def test_a_click_made_afterwards_ends_the_following_of_the_one_before(self):
+        first = self.click()
+        second = self.click()
+        self.assertIsNone(first(self.paths['b']))
+        self.assertIsNotNone(second(self.paths['b']))
+
+    def test_a_film_has_no_playlist_to_follow(self):
+        self.movies = {URL}
+        with mock.patch.object(rt, 'play_media_file') as play:
+            self.stub.on_media_row_clicked(URL)
+        self.assertIsNone(play.call_args.kwargs['follow'])
 
 
 class TestRemovingWatchedSources(MediaCase):
@@ -3200,7 +3270,7 @@ class TestMediaAccordion(TmpConfigCase):
         stub._media_worker_running = False
         stub._media_cancel = set()
         stub._discovery_items_cache = None
-        stub._media_playlist_episodes = {}
+        stub._media_session = None
         stub.popup = mock.MagicMock()
         stub.popup.get_visible.return_value = False
         stub.listbox = mock.MagicMock()

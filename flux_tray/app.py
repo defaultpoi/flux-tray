@@ -40,7 +40,7 @@ class FluxTray(ConnectivityMixin, FeedsMixin, IconMixin, LiveMixin, MediaMixin, 
         self.media_errors = {}  # source -> why its last check failed, in memory only
         self._media_header_row = None  # the 'Media' heading in the list, while there is one
         self.media_registry = MediaSources(MEDIA_PLUGIN_DIR)  # built-in drivers and the plugins in the repo
-        self._media_playlist_episodes = {}  # source_url -> list of episode_ids in playlist order
+        self._media_session = None  # what the last click on a media row started (see _follow_media_playback)
         self._media_request_lock = threading.Lock()  # guards the four fields below
         self._media_checking = False  # a media-check thread is running
         self._media_pending_all = False  # a full check was asked for while one was running

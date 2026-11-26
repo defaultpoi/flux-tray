@@ -433,6 +433,38 @@ class TestWatchLocalPlayback(WatcherCase):
         other = self.at(1, 99, path='/v/b.mp4')
         self.assertEqual(self.watch([self.at(60, 40), other, self.at(99, 1)]), [(60, 40)])
 
+    def test_a_file_the_caller_claims_is_followed_to_its_own_end(self):
+        # mpv goes on to the next file of its playlist by itself: that file is watched too, with its own callbacks
+        second, claimed = [], []
+
+        def follow(path):
+            claimed.append(path)
+            return {'on_finished': lambda percent, remaining: second.append((percent, remaining))}
+        done = self.watch([self.at(60, 40), self.at(98, 2), self.at(1, 99, path='/v/b.mp4'), self.at(97, 3, path='/v/b.mp4'), None], follow=follow)
+        self.assertEqual(done, [(98, 2)])
+        self.assertEqual(claimed, ['/v/b.mp4'])
+        self.assertEqual(second, [(97, 3)])  # the first reading of the second file (1 %) is not what counts: the furthest is
+
+    def test_a_file_nobody_claims_ends_the_watch_as_before(self):
+        asked = []
+        done = self.watch([self.at(60, 40), self.at(1, 99, path='/v/b.mp4'), self.at(99, 1, path='/v/b.mp4')], follow=lambda path: asked.append(path))
+        self.assertEqual(done, [(60, 40)])
+        self.assertEqual(asked, ['/v/b.mp4'])
+
+    def test_a_file_is_followed_after_a_followed_file_too(self):
+        finished = {'/v/b.mp4': [], '/v/c.mp4': []}
+
+        def follow(path):
+            return {'on_finished': lambda percent, remaining: finished[path].append(percent)} if path in finished else None
+        self.watch([self.at(90, 10), self.at(5, 95, path='/v/b.mp4'), self.at(99, 1, path='/v/b.mp4'), self.at(2, 98, path='/v/c.mp4'),
+                    self.at(50, 50, path='/v/c.mp4'), None], follow=follow)
+        self.assertEqual(finished, {'/v/b.mp4': [99], '/v/c.mp4': [50]})
+
+    def test_mpv_quitting_ends_the_watch_without_asking_for_a_next_file(self):
+        asked = []
+        self.watch([self.at(60, 40), None], follow=lambda path: asked.append(path))
+        self.assertEqual(asked, [])
+
     def test_a_file_that_never_loads_gives_up(self):
         idle = {'path': '/v/other.mp4', 'percent-pos': 1, 'time-remaining': 9}
         ticks = iter([0.0, 1.0, rt.WATCH_LOAD_TIMEOUT_SECONDS + 1])
@@ -448,9 +480,9 @@ class TestWatchLocalPlayback(WatcherCase):
 
     def test_it_always_asks_for_the_time_and_the_length_since_it_measures_what_was_played(self):
         self.watch([None])
-        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause', 'playlist-pos', 'playlist-pos-1'])
+        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause'])
         self.watch([None], total=100)
-        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause', 'playlist-pos', 'playlist-pos-1'])
+        self.assertEqual(self.asked[0], ['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause'])
 
     def test_the_furthest_point_and_the_least_remaining_are_kept_against_a_known_length(self):
         at = lambda pos: {'path': '/v/a.mp4', 'percent-pos': 1, 'time-remaining': 1, 'time-pos': pos}
@@ -483,7 +515,7 @@ class TestPlayMediaFile(unittest.TestCase):
         load.assert_called_once_with('/v/a.mp4', 'Show \u00b7 Pilot', start=None)
         self.assertEqual(thread.call_args.kwargs['target'], rt._watch_local_playback)
         self.assertEqual(thread.call_args.kwargs['args'], ('/v/a.mp4', done))
-        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': None, 'on_stopped': None, 'sleep_seconds': 0, 'on_playlist_advance': None})
+        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': None, 'on_stopped': None, 'sleep_seconds': 0, 'follow': None})
         thread.return_value.start.assert_called_once_with()
 
     def test_the_length_of_an_unfinished_download_is_handed_to_the_watcher(self):
@@ -491,7 +523,7 @@ class TestPlayMediaFile(unittest.TestCase):
                 mock.patch.object(rt, '_load_in_mpv', return_value=True), \
                 mock.patch.object(rt.threading, 'Thread') as thread:
             rt.play_media_file('/v/a.ts.part', 'T', mock.Mock(), total_seconds=2501)
-        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': 2501, 'on_stopped': None, 'sleep_seconds': 0, 'on_playlist_advance': None})
+        self.assertEqual(thread.call_args.kwargs['kwargs'], {'total_seconds': 2501, 'on_stopped': None, 'sleep_seconds': 0, 'follow': None})
 
     def test_without_a_callback_nothing_is_watched(self):
         with mock.patch.object(rt.shutil, 'which', return_value='/usr/bin/mpv'), \

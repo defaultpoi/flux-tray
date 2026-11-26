@@ -1136,7 +1136,6 @@ class MediaMixin:
             is_movie = self._is_movie(url)
             # Build playlist for series: all downloaded unwatched episodes in watch order
             playlist = []
-            playlist_episode_ids = []  # track episode_ids in playlist order
             total_episodes = None
             if not is_movie and entry:
                 # Get total episodes from cached metadata
@@ -1152,7 +1151,6 @@ class MediaMixin:
                         ep_path = entry['files'][ep['id']]['video']
                         ep_title = clean_title(ep.get('title'), (name, entry.get('title')))
                         playlist.append((ep_path, f"{name} \u00b7 {episode_label(ep, total_episodes)} {ep_title}".strip()))
-                        playlist_episode_ids.append(ep['id'])
         length = None
         if not ready:
             status = self.media_status.get((url, episode['id']), {})
@@ -1170,20 +1168,17 @@ class MediaMixin:
         episode_id = episode['id']
         track = ready or bool(length)
         stopped = {}
-        # Store playlist episode_ids for this source to track playlist position
-        if playlist_episode_ids:
-            self._media_playlist_episodes[url] = playlist_episode_ids
-            # Set initial playing episode
+        session = self._media_session = object()  # whatever is started after this one is not followed by it
+        if playlist:
             from ..playback import set_media_playing
             set_media_playing(url, episode_id)
-        # Play first episode, then append playlist for series
+        # Play first episode, then append playlist for series; the episodes mpv goes on to by itself are followed too
         play_media_file(path, title, total_seconds=length, start=start, on_stopped=stopped.update,
                         sleep_seconds=load_media_settings()['sleep'],
                         on_finished=(lambda percent, remaining:
                                      GLib.idle_add(self._on_media_played, url, episode_id, percent, remaining,
                                                    dict(stopped), start)) if track else None,
-                        on_playlist_advance=(lambda playlist_pos:
-                                             GLib.idle_add(self._on_playlist_advanced, url, playlist_pos)) if playlist else None)
+                        follow=(lambda new_path: self._follow_media_playback(url, session, new_path)) if track and playlist else None)
         # Append remaining episodes to mpv playlist for series
         if playlist:
             from ..playback import mpv_append_playlist
@@ -1205,29 +1200,36 @@ class MediaMixin:
                 self._schedule_movie_removal(url)
         elif info.get('position') is not None:  # nothing seen means nothing to change
             self._set_media_resume(url, episode_id, resume_point(info['position'], watched=False))
-        # Clear playlist tracking and playing state when playback ends
-        self._media_playlist_episodes.pop(url, None)
         from ..playback import clear_media_playing
-        clear_media_playing()
+        clear_media_playing(url, episode_id)  # only if mpv has not gone on to another episode, which keeps its own mark
         GLib.idle_add(self._refresh_media_rows)
         return False
 
-    def _on_playlist_advanced(self, url, playlist_pos):
-        """Called when mpv advances to the next playlist item (user pressed 'next').
-        Triggers download planning to queue the next episode per the 'ahead' setting.
-        Also updates the currently playing episode tracker."""
-        # playlist_pos is 1-indexed. Position 1 is the first episode.
-        # When it advances to position 2, we should plan downloads for the next episodes.
-        self._plan_media_downloads()
-        # Update the currently playing episode tracker
-        playlist_eps = self._media_playlist_episodes.get(url)
-        if playlist_eps and playlist_pos <= len(playlist_eps):
-            new_episode_id = playlist_eps[playlist_pos - 1]  # 1-indexed to 0-indexed
-            from ..playback import set_media_playing
-            set_media_playing(url, new_episode_id)
-            # Refresh the row to show playing state
-            GLib.idle_add(self._refresh_media_rows)
-        return False
+    def _follow_media_playback(self, url, session, new_path):
+        """Called by the watcher (a thread) when mpv went on by itself, through its playlist, to
+        `new_path`. If that is a downloaded, unwatched episode of this source and nothing was
+        started after the click that made `session`, it is watched like the first: shown as
+        playing, marked watched or remembered where it stopped. Returns what the watcher needs
+        for that, or None for a file that is not ours (the watch ends)."""
+        if session is not self._media_session:
+            return None
+        found = None
+        with self._media_data_lock:
+            entry = self.media['sources'].get(url)
+            for episode in (entry['episodes'] if entry else ()):
+                files = entry['files'].get(episode['id'])
+                if files and files.get('video') == new_path and episode['id'] not in entry['watched']:
+                    found = episode['id']
+                    break
+        if found is None:
+            return None
+        from ..playback import set_media_playing
+        set_media_playing(url, found)  # a download that finishes now is appended to this playlist
+        GLib.idle_add(self._refresh_media_rows)
+        stopped = {}
+        return {'on_stopped': stopped.update,
+                'on_finished': lambda percent, remaining: GLib.idle_add(self._on_media_played, url, found, percent, remaining,
+                                                                       dict(stopped), None)}
 
     def _set_media_resume(self, url, episode_id, seconds):
         """Remembers where playback of an episode stopped; None forgets it."""

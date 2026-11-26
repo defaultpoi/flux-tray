@@ -70,11 +70,14 @@ def set_media_playing(source_url, episode_id):
         _media_playing = (source_url, episode_id)
 
 
-def clear_media_playing():
-    """Call when media playback ends or is replaced."""
+def clear_media_playing(source_url=None, episode_id=None):
+    """Call when media playback ends or is replaced. With the source and the episode, only
+    if that episode is still the one marked: playback that went on to another episode, or
+    that something else replaced, keeps its own mark."""
     global _media_playing
     with _media_playing_lock:
-        _media_playing = None
+        if source_url is None or _media_playing == (source_url, episode_id):
+            _media_playing = None
 
 
 def is_media_playing(source_url):
@@ -327,8 +330,8 @@ def counts_as_watched(percent, remaining, played_fraction=None):
     return percent >= WATCHED_PERCENT or (percent >= 50 and remaining is not None and remaining <= WATCHED_REMAINING_SECONDS)
 
 
-def _watch_local_playback(path, on_finished, poll=WATCH_POLL_SECONDS, total_seconds=None,
-                          on_stopped=None, sleep_seconds=0, idle_seconds=None, on_playlist_advance=None):
+def _watch_one_file(path, on_finished, poll=WATCH_POLL_SECONDS, total_seconds=None,
+                    on_stopped=None, sleep_seconds=0, idle_seconds=None):
     """Follows `path` in the shared mpv until it is replaced or mpv quits, then calls
     on_finished(furthest_percent, least_seconds_remaining) (None where never seen),
     after on_stopped({'position', 'played', 'duration'}) in seconds: where it stopped,
@@ -346,9 +349,8 @@ def _watch_local_playback(path, on_finished, poll=WATCH_POLL_SECONDS, total_seco
     that nobody is watching does not run to its end. idle_seconds() tells the time since
     the last input (None when unknown).
 
-    With on_playlist_advance, a callback is called when mpv advances to the next
-    playlist item (user presses 'next'). The callback receives the new playlist
-    position (1-indexed)."""
+    Returns the path of the file that took its place in mpv, None when mpv quit or
+    the file never loaded."""
     percent = remaining = None
     loaded = False
     started = time_module.monotonic()
@@ -358,10 +360,9 @@ def _watch_local_playback(path, on_finished, poll=WATCH_POLL_SECONDS, total_seco
     paused_by_us = False
     idle_seconds = idle_seconds or x_idle_seconds
     max_step = poll * WATCH_MAX_PLAY_SPEED + 1
-    last_playlist_pos = None
+    taken_by = None
     while True:
-        # Get properties including playlist position (try both 0-indexed and 1-indexed)
-        values = _mpv_get_properties(['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause', 'playlist-pos', 'playlist-pos-1'])
+        values = _mpv_get_properties(['path', 'percent-pos', 'time-remaining', 'time-pos', 'duration', 'pause'])
         if values is None:
             misses += 1
             if misses >= WATCH_MAX_MISSES:
@@ -389,25 +390,6 @@ def _watch_local_playback(path, on_finished, poll=WATCH_POLL_SECONDS, total_seco
             if isinstance(left, (int, float)) and (remaining is None or left < remaining):
                 remaining = left
 
-            # Check for playlist advancement
-            if on_playlist_advance:
-                # Try both property names (mpv has both playlist-pos (0-indexed) and playlist-pos-1 (1-indexed))
-                playlist_pos = values.get('playlist-pos-1')
-                if playlist_pos is None:
-                    playlist_pos = values.get('playlist-pos')
-                    if playlist_pos is not None:
-                        playlist_pos = int(playlist_pos) + 1  # convert to 1-indexed
-                if playlist_pos is not None:
-                    playlist_pos = int(playlist_pos)
-                    _log(f'Playlist position: {playlist_pos}, last: {last_playlist_pos}')
-                    if last_playlist_pos is None:
-                        last_playlist_pos = playlist_pos
-                    elif playlist_pos > last_playlist_pos:
-                        # Playlist advanced - call the callback
-                        _log(f'Playlist advanced from {last_playlist_pos} to {playlist_pos}')
-                        on_playlist_advance(playlist_pos)
-                        last_playlist_pos = playlist_pos
-
             if sleep_seconds:
                 idle = idle_seconds()
                 if idle is not None and idle >= sleep_seconds and not paused_by_us and not values.get('pause'):
@@ -416,11 +398,32 @@ def _watch_local_playback(path, on_finished, poll=WATCH_POLL_SECONDS, total_seco
                     _mpv_ipc([['set_property', 'pause', False]])
                     paused_by_us = False
         elif loaded or time_module.monotonic() - started > WATCH_LOAD_TIMEOUT_SECONDS:
-            break  # another file took its place, or it never loaded
+            if loaded:
+                taken_by = values.get('path')  # another file took its place (or it never loaded)
+            break
         time_module.sleep(poll)
     if on_stopped:
         on_stopped({'position': position, 'played': played, 'duration': duration})
     on_finished(percent, remaining)
+    return taken_by
+
+
+def _watch_local_playback(path, on_finished, poll=WATCH_POLL_SECONDS, total_seconds=None,
+                          on_stopped=None, sleep_seconds=0, idle_seconds=None, follow=None):
+    """Follows `path` in the shared mpv (see _watch_one_file, which says what on_finished,
+    on_stopped, total_seconds and sleep_seconds do), and goes on with the next file when
+    mpv moves to one by itself, as it does through a playlist: `follow(path)` is asked
+    about the file that took the place of the one just finished and returns None (not
+    ours: the watch ends) or {'on_finished': ..., 'on_stopped': ..., 'total_seconds': ...}
+    for watching that file in the same way. mpv quitting ends the watch."""
+    while True:
+        taken_by = _watch_one_file(path, on_finished, poll=poll, total_seconds=total_seconds, on_stopped=on_stopped,
+                                   sleep_seconds=sleep_seconds, idle_seconds=idle_seconds)
+        claimed = follow(taken_by) if follow and taken_by else None
+        if not claimed:
+            return
+        path, on_finished = taken_by, claimed['on_finished']
+        on_stopped, total_seconds = claimed.get('on_stopped'), claimed.get('total_seconds')
 
 
 def resume_point(position, watched):
@@ -432,16 +435,15 @@ def resume_point(position, watched):
     return max(0.0, position - RESUME_REWIND_SECONDS)
 
 
-def play_media_file(path, title, on_finished=None, total_seconds=None, start=None, on_stopped=None, sleep_seconds=0, on_playlist_advance=None):
+def play_media_file(path, title, on_finished=None, total_seconds=None, start=None, on_stopped=None, sleep_seconds=0, follow=None):
     """Plays a local file in the shared mpv window (replacing a stream or another
     file in it, the way one stream replaces another); subtitles saved next to it with
     the same name load on their own. True when it was handed to a player. With
     `start`, from that many seconds in. With on_finished, a thread reports how far
     playback got (see _watch_local_playback, which also says what on_stopped and
     sleep_seconds do; total_seconds is the length of a file that is still being
-    downloaded). With on_playlist_advance, a callback is called when mpv advances to
-    the next playlist item (user presses 'next'). The callback receives the new
-    playlist position (1-indexed). Without mpv the file goes to the desktop's default
+    downloaded). With follow, the file mpv goes on to by itself (the next of a
+    playlist) is watched too when follow(path) claims it. Without mpv the file goes to the desktop's default
     player, untracked."""
     if not shutil.which('mpv'):
         try:
@@ -452,10 +454,10 @@ def play_media_file(path, title, on_finished=None, total_seconds=None, start=Non
     if not _load_in_mpv(path, title, start=start):
         return False
     _retire_stream()  # a stream that was in the window has nothing left to serve
-    if on_finished or on_playlist_advance:
+    if on_finished:
         threading.Thread(target=_watch_local_playback, args=(path, on_finished),
                          kwargs={'total_seconds': total_seconds, 'on_stopped': on_stopped, 'sleep_seconds': sleep_seconds,
-                                 'on_playlist_advance': on_playlist_advance},
+                                 'follow': follow},
                          daemon=True).start()
     return True
 
