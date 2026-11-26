@@ -1,5 +1,9 @@
 """The discovery cache: the films and series that plugins' fetch_discovery found, kept
-in media_cache.json beside config.conf for MAX_CACHE_AGE after they were last seen.
+in media_cache.json beside config.conf. An entry has no age limit: it stays until the
+person dismisses it (right click), also when the app was off for months or a chart could
+not be read. One that its chart no longer lists is kept but not shown (mark_listing)
+until the chart lists it again. Only MAX_CACHE_ENTRIES bounds the file, and it drops the
+entries seen longest ago, which are the ones no chart lists any more.
 
 An item is keyed by its TMDb id, else its IMDb id, else (while neither is known) by
 its title without punctuation, accents or "(year)", its year and its type, so the
@@ -13,14 +17,13 @@ import json
 import re
 import threading
 import unicodedata
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .constants import CONFIG_DIR
 from .fileutil import write_atomic
 
 CACHE_FILE = Path(CONFIG_DIR) / 'media_cache.json'
-MAX_CACHE_AGE = timedelta(days=30)
 MAX_CACHE_ENTRIES = 5000
 
 _lock = threading.RLock()
@@ -69,7 +72,7 @@ def _cache_key(item: dict) -> str:
 
 
 def load_media_cache() -> dict:
-    """The cache without the entries not seen for MAX_CACHE_AGE ({} if there is none)."""
+    """The cache, whatever the age of its entries, without what is not an entry ({} if there is none)."""
     with _lock:
         try:
             with open(CACHE_FILE, encoding='utf-8') as f:
@@ -78,16 +81,7 @@ def load_media_cache() -> dict:
             return {}
     if not isinstance(data, dict):
         return {}
-    oldest = datetime.now(timezone.utc) - MAX_CACHE_AGE
-    cleaned = {}
-    for key, entry in data.items():
-        try:
-            seen = datetime.fromisoformat(entry['last_seen'].replace('Z', '+00:00'))
-            if seen > oldest and isinstance(entry.get('urls'), dict):
-                cleaned[key] = entry
-        except (KeyError, AttributeError, TypeError, ValueError):
-            pass
-    return cleaned
+    return {key: entry for key, entry in data.items() if isinstance(entry, dict) and isinstance(entry.get('urls'), dict)}
 
 
 def save_media_cache(cache: dict):

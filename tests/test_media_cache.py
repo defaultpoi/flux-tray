@@ -65,11 +65,17 @@ class TestTheFile(unittest.TestCase):
         (self.folder / 'media_cache.json').write_text('[1, 2]')
         self.assertEqual(rt.load_media_cache(), {})
 
-    def test_entries_not_seen_for_thirty_days_and_unusable_ones_are_dropped(self):
-        old = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+    def test_an_entry_is_kept_however_long_ago_it_was_last_seen(self):
+        # The app can be off, or a chart unreadable, for months: what is in Discover goes only when it is dismissed.
+        long_ago = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
         (self.folder / 'media_cache.json').write_text(json.dumps({
-            'fresh': self.entry(), 'old': self.entry(last_seen=old), 'nodate': {'urls': {}},
-            'garbage': 'text', 'baddate': self.entry(last_seen='yesterday'), 'nourls': {'last_seen': self.entry()['last_seen']}}))
+            'fresh': self.entry(), 'old': self.entry(last_seen=long_ago), 'baddate': self.entry(last_seen='yesterday'),
+            'nodate': {'title': 'T', 'urls': {'p': 'u'}}}))
+        self.assertEqual(sorted(rt.load_media_cache()), ['baddate', 'fresh', 'nodate', 'old'])
+
+    def test_entries_that_are_not_entries_are_dropped(self):
+        (self.folder / 'media_cache.json').write_text(json.dumps({
+            'fresh': self.entry(), 'garbage': 'text', 'nourls': {'last_seen': self.entry()['last_seen']}, 'badurls': self.entry(urls='u')}))
         self.assertEqual(list(rt.load_media_cache()), ['fresh'])
 
     def test_the_file_is_replaced_whole_with_no_temp_file_left(self):
