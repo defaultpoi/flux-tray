@@ -84,7 +84,6 @@ class Stub:
     _media_config_changed = rt.FluxTray._media_config_changed
     _file_size = staticmethod(rt.FluxTray._file_size)
     _check_media = rt.FluxTray._check_media
-    _on_media_new = rt.FluxTray._on_media_new
     _media_file_ready = staticmethod(rt.FluxTray._media_file_ready)
     _plan_media_downloads = rt.FluxTray._plan_media_downloads
     _enqueue_media = rt.FluxTray._enqueue_media
@@ -126,7 +125,6 @@ class Stub:
     _discovery_seen = rt.FluxTray._discovery_seen
     _dismiss_discovery = rt.FluxTray._dismiss_discovery
     _sync_discovery_ids = rt.FluxTray._sync_discovery_ids
-    _discovery_news = rt.FluxTray._discovery_news
     _discovery_refresh = rt.FluxTray._discovery_refresh
     _on_discovery_dismiss = rt.FluxTray._on_discovery_dismiss
     _on_discovery_row_activated = rt.FluxTray._on_discovery_row_activated
@@ -187,6 +185,16 @@ class Stub:
         self._media_header_row = None
 
 
+def run_idle(idle):
+    """Runs what was handed to GLib.idle_add (a list of (function, args)), as the main loop would; returns the
+    mock that stood for the notification sound, to be asked whether it played."""
+    queued, idle[:] = list(idle), []
+    with mock.patch.object(rt, 'play_notification_sound') as sound:
+        for f, a in queued:
+            f(*a)
+    return sound
+
+
 class MediaCase(unittest.TestCase):
     def setUp(self):
         isolate_media_caches(self)
@@ -216,6 +224,9 @@ class MediaCase(unittest.TestCase):
 
     def queued(self, stub, name):
         return [a for f, a in self.idle if f == getattr(stub, name)]
+
+    def run_idle(self):
+        return run_idle(self.idle)
 
     def touch(self, name):
         path = os.path.join(self.dir, name)
@@ -356,7 +367,6 @@ class TestChecking(MediaCase):
         entry = stub.media['sources'][URL]
         self.assertTrue(entry['baselined'])
         self.assertEqual(entry['watched'], [])  # the archive driver's default is a series: from the start
-        self.assertEqual(self.queued(stub, '_on_media_new'), [])
         self.assertEqual(len(self.queued(stub, '_refresh_media_rows')), 1)
         stub._plan_media_downloads.assert_called_once_with()
         self.save_media.assert_called_with(stub.media)
@@ -378,14 +388,16 @@ class TestChecking(MediaCase):
         stub._check_media()
         self.assertEqual(stub.media['sources'][POD]['watched'], [])
 
-    def test_a_new_episode_is_announced(self):
+    def test_a_new_episode_makes_no_sound_and_opens_no_popup(self):
         stub = Stub()
         stub._plan_media_downloads = mock.Mock()
         stub.media['sources'][URL] = entry_with(ep('a', 1))
         stub.media_registry.listing(URL, ('Show', [ep('a', 1), ep('b', 2)]))
         stub._check_media()
-        self.assertEqual(len(self.queued(stub, '_on_media_new')), 1)
         self.assertEqual(stub.media['sources'][URL]['new'], ['b'])
+        self.assertEqual(len(self.queued(stub, '_refresh_media_rows')), 1)  # its row is brought up to date, quietly
+        self.run_idle().assert_not_called()
+        stub.on_new_items.assert_not_called()  # which is what plays the sound and opens the popup
 
     def test_a_new_podcast_episode_is_announced_by_a_sound_alone(self):
         self.sources = [(POD, 'Pod', None)]
@@ -396,10 +408,11 @@ class TestChecking(MediaCase):
         stub._check_media()
         self.assertEqual(stub.media['sources'][POD]['new'], ['b'])
         self.assertEqual(len(self.queued(stub, '_on_podcasts_new')), 1)
-        self.assertEqual(self.queued(stub, '_on_media_new'), [])  # which would open the popup
         self.assertEqual(self.queued(stub, '_refresh_media_rows'), [])
+        self.run_idle().assert_called_once_with()
+        stub.on_new_items.assert_not_called()  # a podcast never opens the popup
 
-    def test_a_new_episode_of_a_series_still_opens_the_popup_when_a_podcast_has_one_too(self):
+    def test_a_series_episode_stays_silent_when_a_podcast_has_one_too(self):
         self.sources = [(URL, None, None), (POD, 'Pod', None)]
         stub = Stub()
         stub._plan_media_downloads = mock.Mock()
@@ -408,8 +421,9 @@ class TestChecking(MediaCase):
         stub.media_registry.listing(URL, ('Show', [ep('a', 1), ep('b', 2)]))
         stub.media_registry.listing(POD, ('Pod', [ep('a', 1), ep('b', 2)]))
         stub._check_media()
-        self.assertEqual(len(self.queued(stub, '_on_media_new')), 1)
-        self.assertEqual(self.queued(stub, '_on_podcasts_new'), [])
+        self.assertEqual(len(self.queued(stub, '_on_podcasts_new')), 1)
+        self.run_idle().assert_called_once_with()  # the podcast's sound, once; the series adds none
+        stub.on_new_items.assert_not_called()
 
     ADDED = 'fsonline_one:https://fsonline.one/film/show-2024'
 
@@ -440,7 +454,7 @@ class TestChecking(MediaCase):
         stub.media_registry.listing(self.ADDED, ('Added', [ep('x', 1), ep('y', 2)]))
         stub._check_media()
         self.assertEqual(stub.media['sources'][self.ADDED]['new'], ['y'])
-        self.assertEqual(len(self.queued(stub, '_on_media_new')), 1)
+        self.assertEqual(len(self.queued(stub, '_refresh_media_rows')), 1)
 
     def test_a_source_added_by_a_click_goes_by_the_drivers_order_not_a_configured_one(self):
         stub = self.with_added_source()
@@ -632,21 +646,6 @@ class TestChecking(MediaCase):
         stub.media_registry.by_source[URL].list_episodes.assert_not_called()
         self.assertEqual(list(stub.media['sources']), [POD])
         stub._plan_media_downloads.assert_called_once_with()
-
-    def test_new_episodes_open_a_closed_popup_like_a_channel_going_live(self):
-        stub = Stub()
-        stub._refresh_media_rows = mock.Mock()
-        self.assertFalse(stub._on_media_new())
-        stub.on_new_items.assert_called_once_with()
-        stub._refresh_media_rows.assert_not_called()
-
-    def test_with_the_popup_open_the_rows_just_update(self):
-        stub = Stub()
-        stub.popup.get_visible.return_value = True
-        stub._refresh_media_rows = mock.Mock()
-        stub._on_media_new()
-        stub._refresh_media_rows.assert_called_once_with()
-        stub.on_new_items.assert_not_called()
 
     def test_a_new_podcast_episode_plays_the_sound_and_does_not_open_a_closed_popup(self):
         stub = Stub()
@@ -2278,16 +2277,14 @@ class TestDiscoveryCheck(unittest.TestCase):
     def keys(self):
         return sorted(rt.load_media_cache())
 
-    def news(self):
-        return [f for f, _ in self.idle if f == self.stub._discovery_news]
-
     FILM = {'title': 'Dune Part Two (2024)', 'type': 'movie', 'url': 'https://f/dune', 'date': '2026-11-06'}
     OTHER = {'title': 'Alien (1979)', 'type': 'movie', 'url': 'https://f/alien', 'date': '2026-11-06'}
 
-    def test_what_a_plugin_finds_is_filed_and_announced_once(self):
+    def test_what_a_plugin_finds_is_filed_and_makes_no_sound_or_popup(self):
         self.check(FakePlugin('fsonline', [self.FILM, self.OTHER]))
         self.assertEqual(self.keys(), ['fallback:movie:alien:1979', 'fallback:movie:dune part two:2024'])
-        self.assertEqual(len(self.news()), 1)
+        run_idle(self.idle).assert_not_called()
+        self.stub.on_new_items.assert_not_called()
         self.assertEqual(rt.load_media_cache()['fallback:movie:alien:1979']['urls'], {'fsonline': 'https://f/alien'})
 
     def test_the_plugins_are_given_the_types_and_the_urls_already_in_the_media_list(self):
@@ -2296,18 +2293,16 @@ class TestDiscoveryCheck(unittest.TestCase):
         self.check(plugin)
         plugin.module.fetch_discovery.assert_called_once_with(types=('movies', 'series'), existing_media_urls={'https://f/have'})
 
-    def test_a_dismissed_item_is_filed_but_not_announced(self):
+    def test_a_dismissed_item_is_still_filed(self):
         seen = set()
         rt.mark_seen(seen, self.FILM)
         self.stub.state['media_discovery_seen'] = sorted(seen)
         self.check(FakePlugin('fsonline', [self.FILM]))
         self.assertEqual(len(self.keys()), 1)
-        self.assertEqual(self.news(), [])
 
     def test_a_plugin_that_fails_does_not_stop_the_others(self):
         self.check(FakePlugin('broken', error=OSError('down')), FakePlugin('fsonline', [self.FILM]))
         self.assertEqual(len(self.keys()), 1)
-        self.assertEqual(len(self.news()), 1)
 
     def test_an_item_gets_the_ids_the_metadata_cache_already_has(self):
         self.get_cached_metadata.side_effect = lambda title, *a, **k: {'tmdb_id': '693134', 'imdb_id': 'tt15239678'} if 'Dune' in title else None
@@ -2336,11 +2331,12 @@ class TestDiscoveryCheck(unittest.TestCase):
         self.assertEqual((titles, types, self.refresh_metadata_cache.call_args.kwargs), (['Dune Part Two (2024)'], ['movie'], {'imdb_ids': ['tt15239678']}))
 
     def test_the_main_loop_part_reads_and_writes_no_file(self):
+        self.stub.popup.get_visible.return_value = True
         with mock.patch.object(rt, 'load_media_cache', side_effect=AssertionError('disk on the main loop')), \
                 mock.patch.object(rt, 'update_media_cache', side_effect=AssertionError('disk on the main loop')):
-            self.assertFalse(self.stub._discovery_news())
-        self.stub.on_new_items.assert_called_once_with()
+            self.assertFalse(self.stub._discovery_refresh())
         self.stub.refresh_list.assert_called_once_with(keep_open=True)  # nobody asked for it: the popup stays
+        self.stub.on_new_items.assert_not_called()
 
     def test_dismissing_saves_a_sorted_list_under_the_lock(self):
         self.stub._dismiss_discovery([self.FILM, self.OTHER])
@@ -2475,12 +2471,11 @@ class TestDiscoveryFromCharts(unittest.TestCase):
         self.plugin.module.fetch_discovery.assert_called_once()
         self.assertEqual(self.titles(), ['Site Film (2024)'])
 
-    def test_new_titles_are_announced_once(self):
+    def test_new_titles_are_listed_without_a_sound_or_the_popup(self):
         self.stub._fetch_discovery_bg()
-        self.assertEqual([f for f, _ in self.idle if f == self.stub._discovery_news], [self.stub._discovery_news])
-        self.idle.clear()
-        self.stub._fetch_discovery_bg()
-        self.assertNotIn(self.stub._discovery_news, [f for f, _ in self.idle])
+        self.assertEqual(self.titles(), ['First Film', 'First Show', 'Second Film'])
+        run_idle(self.idle).assert_not_called()
+        self.stub.on_new_items.assert_not_called()
 
     def test_a_kind_that_is_not_in_discovery_types_is_not_read(self):
         self.settings['discovery_types'] = ('movies',)

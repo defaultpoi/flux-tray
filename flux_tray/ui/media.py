@@ -474,8 +474,7 @@ class MediaMixin:
             return fresh
         fresh = update_media_cache(file_items)
         if fresh:
-            _log(f'discovery: {len(fresh)} new items')
-            GLib.idle_add(self._discovery_news)
+            _log(f'discovery: {len(fresh)} new items')  # no sound and no popup: the list is shown when the popup is opened
         else:
             _log('discovery: no new items')
         self._invalidate_discovery_cache()
@@ -556,13 +555,6 @@ class MediaMixin:
             GLib.idle_add(self._discovery_refresh)
         else:
             self._invalidate_discovery_cache()
-
-    def _discovery_news(self):
-        """New discovery items: the same sound and popup as new feed items."""
-        self.on_new_items()
-        self._invalidate_discovery_cache()
-        self._discovery_refresh()
-        return False
 
     def _discovery_refresh(self):
         if self.popup and self.popup.get_visible():
@@ -860,12 +852,12 @@ class MediaMixin:
                 entry = self.media['sources'].setdefault(url, new_media_entry())
                 new_count = len(merge_episodes(entry, title, episodes, configured or driver.order))
                 if url in podcasts:
-                    new_podcasts += new_count  # a podcast's new episode only sounds; a series' or a film's also opens the popup
+                    new_podcasts += new_count  # a podcast's new episode only sounds; a series' or a film's makes no sound at all
                 else:
                     new_total += new_count
                 save_media(self.media)
 
-        GLib.idle_add(self._on_media_new if new_total else (self._on_podcasts_new if new_podcasts else self._refresh_media_rows))
+        GLib.idle_add(self._on_podcasts_new if new_podcasts else self._refresh_media_rows)
         self._plan_media_downloads()
         # Trigger background metadata cache refresh only when new episodes found
         if new_total > 0:
@@ -915,13 +907,6 @@ class MediaMixin:
         play_notification_sound()  # only the sound: a podcast never opens the popup by itself
         if self.popup and self.popup.get_visible():
             self._refresh_media_rows()
-        return False
-
-    def _on_media_new(self):
-        if self.popup and self.popup.get_visible():
-            self._refresh_media_rows()
-        else:
-            self.on_new_items()  # like a channel going live: sound and the popup opens
         return False
 
     # ---- downloads -----------------------------------------------------------
