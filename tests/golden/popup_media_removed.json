@@ -1020,6 +1020,25 @@
           "sensitive": true,
           "type": "ScrolledWindow",
           "visible": true
+         },
+         {
+          "children": [
+           {
+            "children": [
+             {
+              "sensitive": true,
+              "type": "ListBox",
+              "visible": true
+             }
+            ],
+            "sensitive": true,
+            "type": "Viewport",
+            "visible": true
+           }
+          ],
+          "sensitive": true,
+          "type": "ScrolledWindow",
+          "visible": true
          }
         ],
         "sensitive": true,

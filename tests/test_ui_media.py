@@ -120,6 +120,8 @@ class Stub:
     _prune_watched_files = rt.FluxTray._prune_watched_files
     _is_discovery_url = rt.FluxTray._is_discovery_url
     get_discovery_items = rt.FluxTray.get_discovery_items
+    get_dismissed_items = rt.FluxTray.get_dismissed_items
+    _on_discovery_row_activated = rt.FluxTray._on_discovery_row_activated
     start_discovery_fetch = rt.FluxTray.start_discovery_fetch
     _fetch_discovery_guarded = rt.FluxTray._fetch_discovery_guarded
     _fetch_discovery_bg = rt.FluxTray._fetch_discovery_bg
@@ -1415,6 +1417,82 @@ class TestPlayingThroughAPlaylist(MediaCase):
         with mock.patch.object(rt, 'play_media_file') as play:
             self.stub.on_media_row_clicked(URL)
         self.assertIsNone(play.call_args.kwargs['follow'])
+
+
+class TestTheDismissedTab(unittest.TestCase):
+    """What was dismissed is listed (in the Dismissed tab) until the person puts it back on the watch list."""
+
+    def setUp(self):
+        isolate_media_caches(self)
+        self.idle = []
+        self.stub = Stub()
+        self.stub.media_registry.finders = lambda: [object()]  # a site that can be looked on, so a left click watches a title
+        self.charts = {MOVIES: [chart_episode('tt1', 'First Film'), chart_episode('tt2', 'Second Film')],
+                       SERIES: [chart_episode('tt3', 'First Show')]}
+        self.driver = FakeChartDriver(self.charts)
+        self.stub.media_registry.driver_for = lambda source: (self.driver, source)
+        self.settings = {'discovery_types': ('movies', 'series'), 'interval': 3600,
+                         'discovery': [(MOVIES, 'movie'), (SERIES, 'series')]}
+        for name, value in (('load_media_settings', mock.Mock(side_effect=lambda: dict(self.settings))),
+                            ('save_state', mock.Mock()), ('save_media', mock.Mock()),
+                            ('refresh_metadata_cache', mock.Mock(return_value=0)), ('get_cached_metadata', mock.Mock(return_value=None))):
+            patcher = mock.patch.object(rt, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(rt.GLib, 'idle_add', side_effect=lambda f, *a: self.idle.append((f, a)))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.watched = []
+        self.stub._watch_title = lambda item: (self.watched.append(item['title']),
+                                               self.stub.media['watch'].__setitem__(item['_cache_key'], rt.new_watch_entry(item, 1, '')))
+        self.stub._fetch_discovery_bg()
+
+    def discover(self, title):
+        return next(i for i in self.stub.get_discovery_items() if i['title'] == title)
+
+    def dismissed(self):
+        return [i['title'] for i in self.stub.get_dismissed_items()[0]]
+
+    def test_nothing_is_dismissed_at_first(self):
+        self.assertEqual(self.dismissed(), [])
+
+    def test_a_title_dismissed_by_a_right_click_is_listed_and_leaves_discover(self):
+        self.stub._on_discovery_dismiss(None, self.discover('First Film'), rebuild=False)
+        self.assertEqual(self.dismissed(), ['First Film'])
+        self.assertNotIn('First Film', [i['title'] for i in self.stub.get_discovery_items()])
+
+    def test_what_was_dismissed_stays_listed_after_it_leaves_its_chart(self):
+        self.stub._on_discovery_dismiss(None, self.discover('Second Film'), rebuild=False)
+        self.charts[MOVIES] = [chart_episode('tt1', 'First Film')]
+        self.stub._fetch_discovery_bg()
+        self.assertEqual(self.dismissed(), ['Second Film'])
+
+    def test_a_title_that_was_chosen_is_not_listed_but_one_that_is_no_longer_tracked_is(self):
+        item = self.discover('First Show')
+        self.stub._on_discovery_row_activated(item, rebuild=False)  # a left click in Discover
+        self.assertEqual(self.watched, ['First Show'])
+        self.assertEqual(self.dismissed(), [])  # it is in Track
+        self.stub._stop_tracking(item['_cache_key'])
+        self.assertEqual(self.dismissed(), ['First Show'])
+
+    def test_a_left_click_brings_a_title_back_to_the_watch_list_and_off_the_tab(self):
+        self.stub._on_discovery_dismiss(None, self.discover('First Film'), rebuild=False)
+        (item,) = self.stub.get_dismissed_items()[0]
+        self.stub._on_discovery_row_activated(item, rebuild=False)  # what a click in the Dismissed tab calls
+        self.assertEqual(self.watched, ['First Film'])
+        self.assertIn(item['_cache_key'], self.stub.media['watch'])
+        self.assertEqual(self.dismissed(), [])
+        self.assertNotIn(f"discovery:{item['_cache_key']}", self.stub.discovery_source_urls())  # not back in the Discover tab
+
+    def test_the_list_is_read_once_until_something_changes(self):
+        self.stub._on_discovery_dismiss(None, self.discover('First Film'), rebuild=False)
+        with mock.patch.object(rt, 'load_media_cache', wraps=rt.load_media_cache) as load:
+            self.stub.get_dismissed_items()
+            self.stub.get_dismissed_items()
+            self.assertEqual(load.call_count, 1)
+            self.stub._invalidate_discovery_cache()
+            self.stub.get_dismissed_items()
+            self.assertEqual(load.call_count, 2)
 
 
 class TestRemovingWatchedSources(MediaCase):
@@ -3225,7 +3303,7 @@ class TestFromAChartToASource(unittest.TestCase):
 
 
 class TestMediaAccordion(TmpConfigCase):
-    """Tests for the MediaAccordion class: three-tab slide-up accordion for Watch/Discover/Track."""
+    """Tests for the MediaAccordion class: four-tab slide-up accordion for Watch/Discover/Dismissed/Track."""
 
     def setUp(self):
         super().setUp()
@@ -3283,7 +3361,7 @@ class TestMediaAccordion(TmpConfigCase):
         return stub
 
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
-    def test_build_creates_header_button_revealer_notebook_and_three_tabs(self):
+    def test_build_creates_header_button_revealer_notebook_and_four_tabs(self):
         stub = self.make_stub()
         accordion = rt.MediaAccordion(stub)
         header, revealer = accordion.build()
@@ -3292,11 +3370,12 @@ class TestMediaAccordion(TmpConfigCase):
         self.assertIsInstance(revealer, rt.Gtk.Revealer)
         self.assertIs(accordion.notebook, revealer.get_child())
         self.assertIsInstance(accordion.notebook, rt.Gtk.Notebook)
-        # Three tabs: Watch, Discover, Track
-        self.assertEqual(accordion.notebook.get_n_pages(), 3)
+        # Four tabs: Watch, Discover, Dismissed (after Discover), Track
+        self.assertEqual(accordion.notebook.get_n_pages(), 4)
         self.assertEqual(accordion._tab_labels[0].get_text(), 'Watch')
         self.assertEqual(accordion._tab_labels[1].get_text(), 'Discover')
-        self.assertEqual(accordion._tab_labels[2].get_text(), 'Track')
+        self.assertEqual(accordion._tab_labels[2].get_text(), 'Dismissed')
+        self.assertEqual(accordion._tab_labels[3].get_text(), 'Track')
         # Revealer starts collapsed
         self.assertFalse(revealer.get_reveal_child())
 
@@ -3332,7 +3411,8 @@ class TestMediaAccordion(TmpConfigCase):
                     outer.pack_end(revealer, False, False, 0)
                     outer.pack_end(header, False, False, 0)
                 for listbox in (self._media_accordion.watch_listbox, self._media_accordion.discover_listbox,
-                                self._media_accordion.track_listbox, self._podcast_accordion.listbox):
+                                self._media_accordion.dismissed_listbox, self._media_accordion.track_listbox,
+                                self._podcast_accordion.listbox):
                     for n in range(5):
                         row = Gtk.ListBoxRow()
                         row.discovery_item = {'n': n}  # as the rows of the Discover tab
@@ -3451,6 +3531,38 @@ class TestMediaAccordion(TmpConfigCase):
 
 
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_a_click_in_the_dismissed_tab_brings_the_title_back_to_track(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        items = [{'title': 'Old Film', 'type': 'movie', 'year': '1979', 'genre': [], 'urls': {'imdb-charts': 'u'},
+                  '_cache_key': 'imdb:tt1', 'imdb_id': 'tt1'},
+                 {'title': 'Other Film', 'type': 'movie', 'year': '1980', 'genre': [], 'urls': {'imdb-charts': 'u'},
+                  '_cache_key': 'imdb:tt2', 'imdb_id': 'tt2'}]
+        stub.get_dismissed_items = mock.Mock(return_value=(items, {}))
+        stub._on_discovery_row_activated = mock.Mock()
+        accordion._refresh_dismissed_tab()
+        rows = accordion.dismissed_listbox.get_children()
+        self.assertEqual([r.discovery_item['title'] for r in rows], ['Old Film', 'Other Film'])
+        self.assertIn('(2)', accordion._tab_labels[2].get_text() or '(2)')  # the count is in the markup
+
+        accordion._on_dismissed_row_activated(accordion.dismissed_listbox, rows[0])
+
+        stub._on_discovery_row_activated.assert_called_once_with(items[0], rebuild=False)
+        self.assertEqual([r.discovery_item['title'] for r in accordion.dismissed_listbox.get_children()], ['Other Film'])
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_the_dismissed_tab_is_refreshed_with_the_others(self):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        stub.media_source_urls = mock.Mock(return_value=[])
+        stub.discovery_source_urls = mock.Mock(return_value=[])
+        stub.get_dismissed_items = mock.Mock(return_value=([], {}))
+        accordion.refresh()
+        stub.get_dismissed_items.assert_called_once_with()
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
     def test_update_header_label_shows_watch_plus_discover_count(self):
         stub = self.make_stub()
         accordion = rt.MediaAccordion(stub)
@@ -3460,10 +3572,11 @@ class TestMediaAccordion(TmpConfigCase):
         accordion._update_header_label()
         self.assertEqual(accordion.header_label.get_text(), 'Media')
 
-        # Mock get_children to return items (watch=1, discover=1, track=2)
-        # Header should show watch + discover = 2 (not track items)
+        # Mock get_children to return items (watch=1, discover=1, dismissed=3, track=2)
+        # Header should show watch + discover = 2 (not dismissed or track items)
         accordion.watch_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()])
         accordion.discover_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()])
+        accordion.dismissed_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()] * 3)
         accordion.track_listbox.get_children = mock.Mock(return_value=[mock.MagicMock(), mock.MagicMock()])
 
         # Mock header_label.set_markup
@@ -3484,6 +3597,7 @@ class TestMediaAccordion(TmpConfigCase):
         # Mock get_children to return items
         accordion.watch_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()])
         accordion.discover_listbox.get_children = mock.Mock(return_value=[mock.MagicMock(), mock.MagicMock()])
+        accordion.dismissed_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()] * 3)
         accordion.track_listbox.get_children = mock.Mock(return_value=[])
 
         # Mock tab label set_markup
@@ -3494,7 +3608,10 @@ class TestMediaAccordion(TmpConfigCase):
 
         self.assertIn('(1)', accordion._tab_labels[0].set_markup.call_args[0][0])
         self.assertIn('(2)', accordion._tab_labels[1].set_markup.call_args[0][0])
-        self.assertNotIn('(', accordion._tab_labels[2].set_markup.call_args[0][0])
+        self.assertIn('(3)', accordion._tab_labels[2].set_markup.call_args[0][0])
+        self.assertIn('Dismissed', accordion._tab_labels[2].set_markup.call_args[0][0])
+        self.assertNotIn('(', accordion._tab_labels[3].set_markup.call_args[0][0])
+        self.assertIn('Track', accordion._tab_labels[3].set_markup.call_args[0][0])
 
 
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')

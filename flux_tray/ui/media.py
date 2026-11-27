@@ -1740,6 +1740,27 @@ class MediaMixin:
         items, _, _ = self._get_discovery_items_cached()
         return items
 
+    def get_dismissed_items(self):
+        """(items, metadata_by_key) of the Dismissed tab: the titles in the discovery cache that were dismissed
+        and are on none of the person's lists, in the order of the Discover tab (a title that dropped off its
+        chart is there too). A title that was chosen has a watch record and is in Track or Watch, so it is not
+        here; one whose film was watched and removed has none, and is. Built once and kept until
+        _invalidate_discovery_cache, like the Discover list."""
+        built = getattr(self, '_dismissed_items_cache', None)  # one read: another thread may drop it at any time
+        if built is None:
+            seen = set(self.state.get('media_discovery_seen', []))
+            with self._media_data_lock:
+                on_a_list = set(self.media.get('watch', {}))
+            items = []
+            for item in get_all_cached_items(load_media_cache(), only_listed=False):
+                if is_seen(seen, item) and item.get('_cache_key') not in on_a_list:
+                    urls = item.get('urls', {})
+                    item['_plugin'] = list(urls.keys())[0] if urls else 'unknown'
+                    items.append(item)
+            built = (items, {item['_cache_key']: self._cached_metadata_of(item) for item in items})
+            self._dismissed_items_cache = built
+        return built
+
     def track_item_count(self):
         """The number of titles the Track tab lists: those being looked for and series being followed."""
         with self._media_data_lock:
@@ -1748,6 +1769,7 @@ class MediaMixin:
     def _invalidate_discovery_cache(self):
         """Invalidate the discovery items cache (call when cache/state changes)."""
         self._discovery_items_cache = None
+        self._dismissed_items_cache = None
 
     def build_media_row(self, url):
         # Check if this is a discovery item
@@ -2145,12 +2167,12 @@ def _destroy_rows(listbox):
             row.destroy()
 
 
-# ===== MediaAccordion: slide-up accordion with three tabs =====================
+# ===== MediaAccordion: slide-up accordion with four tabs ======================
 
 class MediaAccordion:
-    """A slide-up accordion (Gtk.Revealer) containing a Gtk.Notebook with three tabs:
-    Watch (ready/downloading episodes), Discover (IMDb charts), Track (being looked for, being followed).
-    Collapsed by default, header shows item counts."""
+    """A slide-up accordion (Gtk.Revealer) containing a Gtk.Notebook with four tabs: Watch (ready/downloading
+    episodes), Discover (IMDb charts), Dismissed (what was dismissed; a click brings a title back to Track),
+    Track (being looked for, being followed). Collapsed by default, header shows item counts."""
 
     def __init__(self, parent):
         self.parent = parent  # The PopupMixin instance
@@ -2160,9 +2182,11 @@ class MediaAccordion:
         self.header_label = None
         self.watch_scroller = None
         self.discover_scroller = None
+        self.dismissed_scroller = None
         self.track_scroller = None
         self.watch_listbox = None
         self.discover_listbox = None
+        self.dismissed_listbox = None
         self.track_listbox = None
         self._tab_labels = {}  # tab index -> label widget for updating counts
 
@@ -2195,7 +2219,7 @@ class MediaAccordion:
         self.revealer.set_transition_duration(200)
         self.revealer.set_reveal_child(False)  # collapsed by default
 
-        # Notebook with three tabs
+        # Notebook with four tabs
         self.notebook = Gtk.Notebook()
         self.notebook.set_show_tabs(True)
         self.notebook.set_show_border(False)
@@ -2223,7 +2247,16 @@ class MediaAccordion:
         self.discover_scroller.add(self.discover_listbox)
         self._add_tab(self.discover_scroller, 'Discover', 1)
 
-        # Tab 2: Track - titles being looked for and series being followed
+        # Tab 2: Dismissed - titles that were dismissed; a click puts one back on the watch list (Track)
+        self.dismissed_listbox = Gtk.ListBox()
+        self.dismissed_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.dismissed_listbox.connect('row-activated', self._on_dismissed_row_activated)
+        self.dismissed_scroller = Gtk.ScrolledWindow()
+        self.dismissed_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.dismissed_scroller.add(self.dismissed_listbox)
+        self._add_tab(self.dismissed_scroller, 'Dismissed', 2)
+
+        # Tab 3: Track - titles being looked for and series being followed
         self.track_listbox = Gtk.ListBox()
         self.track_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         self.track_listbox.connect('row-activated', self._on_track_row_activated)
@@ -2231,7 +2264,7 @@ class MediaAccordion:
         self.track_scroller = Gtk.ScrolledWindow()
         self.track_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.track_scroller.add(self.track_listbox)
-        self._add_tab(self.track_scroller, 'Track', 2)
+        self._add_tab(self.track_scroller, 'Track', 3)
 
         # Constrain the notebook height so scrolled windows can scroll
         # 75% of screen height minus header/footer space (similar to main scroller)
@@ -2260,7 +2293,7 @@ class MediaAccordion:
 
     def _setup_listbox_hover_events(self):
         """Connect motion and leave events to accordion listboxes for metadata popover tracking."""
-        for listbox in (self.watch_listbox, self.discover_listbox, self.track_listbox):
+        for listbox in (self.watch_listbox, self.discover_listbox, self.dismissed_listbox, self.track_listbox):
             listbox.connect('motion-notify-event', self._on_listbox_motion)
             listbox.connect('leave-notify-event', self._on_listbox_leave)
             # Enable motion and leave events
@@ -2313,20 +2346,21 @@ class MediaAccordion:
         destroy the rows of these lists (the lists hold them and this object holds the lists, and the
         buttons' handlers hold this object), so every rebuild of the popup left its rows, the accordion and
         their widgets behind: about 30 kB for each title of the Discover tab, per rebuild."""
-        for listbox in (self.watch_listbox, self.discover_listbox, self.track_listbox):
+        for listbox in (self.watch_listbox, self.discover_listbox, self.dismissed_listbox, self.track_listbox):
             _destroy_rows(listbox)
         self._hovered_row = None
 
     def refresh(self):
-        """Rebuild all three tabs with current data and update header counts."""
+        """Rebuild all four tabs with current data and update header counts."""
         self._refresh_watch_tab()
         self._refresh_discover_tab()
+        self._refresh_dismissed_tab()
         self._refresh_track_tab()
         self._update_header_label()
 
     def _update_header_label(self):
         """Update the header button label with total counts (Watch + Discover only;
-        Track tab items are not counted in the header badge)."""
+        Dismissed and Track tab items are not counted in the header badge)."""
         watch_count = len(self.watch_listbox.get_children())
         discover_count = len(self.discover_listbox.get_children())
         total = watch_count + discover_count
@@ -2338,9 +2372,9 @@ class MediaAccordion:
     def _update_tab_counts(self):
         """Update tab labels with item counts."""
         for idx, label in self._tab_labels.items():
-            listbox = [self.watch_listbox, self.discover_listbox, self.track_listbox][idx]
+            listbox = [self.watch_listbox, self.discover_listbox, self.dismissed_listbox, self.track_listbox][idx]
             count = len(listbox.get_children())
-            base_title = ['Watch', 'Discover', 'Track'][idx]
+            base_title = ['Watch', 'Discover', 'Dismissed', 'Track'][idx]
             if count > 0:
                 label.set_markup(f'<b>{base_title}</b> <span size="small">({count})</span>')
             else:
@@ -2400,7 +2434,10 @@ class MediaAccordion:
         meta = metadata_by_key.get(cache_key)
         if not item:
             return None
+        return self._discover_row(item, meta)
 
+    def _discover_row(self, item, meta):
+        """The row of a title (Discover and Dismissed tabs): its name, rating and genre, the sites that have it."""
         row = Gtk.ListBoxRow()
         row.set_selectable(False)
         row.set_activatable(True)
@@ -2522,6 +2559,34 @@ class MediaAccordion:
                 self._update_header_label()
                 return True
         return False
+
+    # ---- Dismissed tab -------------------------------------------------------
+
+    def _refresh_dismissed_tab(self):
+        """Lists what was dismissed (see get_dismissed_items). A left click brings a title back: it goes on
+        the watch list, as a click on it in Discover does, and is then in Track."""
+        self._clear_listbox(self.dismissed_listbox)
+        items, metadata_by_key = self.parent.get_dismissed_items()
+        for item in items:
+            row = self._discover_row(item, metadata_by_key.get(item['_cache_key']))
+            if row:
+                self.dismissed_listbox.add(row)
+        self.dismissed_listbox.show_all()
+        self._update_tab_counts()
+
+    def _on_dismissed_row_activated(self, _listbox, row):
+        if hasattr(row, 'discovery_item'):
+            self._brought_back(row.discovery_item)
+
+    def _brought_back(self, item):
+        """A title of the Dismissed tab was chosen: on the watch list, off this tab, in Track. Only what
+        changed is redrawn, as for a title of Discover."""
+        self.parent._on_discovery_row_activated(item, rebuild=False)
+        for row in self.dismissed_listbox.get_children():
+            if getattr(row, 'discovery_item', {}).get('_cache_key') == item.get('_cache_key'):
+                self.dismissed_listbox.remove(row)
+        self._refresh_track_tab()  # which also brings the tab counts up to date
+        self._update_header_label()
 
     # ---- Track tab -----------------------------------------------------------
 
