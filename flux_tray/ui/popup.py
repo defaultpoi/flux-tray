@@ -59,6 +59,7 @@ def _available_icon(candidates):
 
 POPUP_CSS = """
 list row { padding: 1px 3px; min-height: 0px; }
+notebook.media-tabs tab { padding: 3px 4px; min-width: 0; }
 button { padding: 1px; }
 list, viewport, scrolledwindow, overlay, .popup-content { background: #ffffff; }
 list, list label { color: #000000; }

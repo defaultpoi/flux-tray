@@ -1041,6 +1041,9 @@
           "visible": true
          }
         ],
+        "classes": [
+         "media-tabs"
+        ],
         "sensitive": true,
         "type": "Notebook",
         "visible": true

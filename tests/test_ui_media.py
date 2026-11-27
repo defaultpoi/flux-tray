@@ -3303,7 +3303,7 @@ class TestFromAChartToASource(unittest.TestCase):
 
 
 class TestMediaAccordion(TmpConfigCase):
-    """Tests for the MediaAccordion class: four-tab slide-up accordion for Watch/Discover/Dismissed/Track."""
+    """Tests for the MediaAccordion class: four-tab slide-up accordion for Watch/Discover/Track/Seen."""
 
     def setUp(self):
         super().setUp()
@@ -3370,12 +3370,17 @@ class TestMediaAccordion(TmpConfigCase):
         self.assertIsInstance(revealer, rt.Gtk.Revealer)
         self.assertIs(accordion.notebook, revealer.get_child())
         self.assertIsInstance(accordion.notebook, rt.Gtk.Notebook)
-        # Four tabs: Watch, Discover, Dismissed (after Discover), Track
+        # Four tabs: Watch, Discover, Track, Seen (the last)
         self.assertEqual(accordion.notebook.get_n_pages(), 4)
         self.assertEqual(accordion._tab_labels[0].get_text(), 'Watch')
         self.assertEqual(accordion._tab_labels[1].get_text(), 'Discover')
-        self.assertEqual(accordion._tab_labels[2].get_text(), 'Dismissed')
-        self.assertEqual(accordion._tab_labels[3].get_text(), 'Track')
+        self.assertEqual(accordion._tab_labels[2].get_text(), 'Track')
+        self.assertEqual(accordion._tab_labels[3].get_text(), 'Seen')
+        # all on one line, without arrows: the notebook does not scroll, the tabs share its width
+        self.assertFalse(accordion.notebook.get_scrollable())
+        self.assertTrue(accordion.notebook.get_style_context().has_class('media-tabs'))  # narrow tabs, in POPUP_CSS
+        for page in range(4):
+            self.assertTrue(accordion.notebook.child_get_property(accordion.notebook.get_nth_page(page), 'tab-expand'))
         # Revealer starts collapsed
         self.assertFalse(revealer.get_reveal_child())
 
@@ -3544,7 +3549,6 @@ class TestMediaAccordion(TmpConfigCase):
         accordion._refresh_dismissed_tab()
         rows = accordion.dismissed_listbox.get_children()
         self.assertEqual([r.discovery_item['title'] for r in rows], ['Old Film', 'Other Film'])
-        self.assertIn('(2)', accordion._tab_labels[2].get_text() or '(2)')  # the count is in the markup
 
         accordion._on_dismissed_row_activated(accordion.dismissed_listbox, rows[0])
 
@@ -3572,8 +3576,8 @@ class TestMediaAccordion(TmpConfigCase):
         accordion._update_header_label()
         self.assertEqual(accordion.header_label.get_text(), 'Media')
 
-        # Mock get_children to return items (watch=1, discover=1, dismissed=3, track=2)
-        # Header should show watch + discover = 2 (not dismissed or track items)
+        # Mock get_children to return items (watch=1, discover=1, seen=3, track=2)
+        # Header should show watch + discover = 2 (not seen or track items)
         accordion.watch_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()])
         accordion.discover_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()])
         accordion.dismissed_listbox.get_children = mock.Mock(return_value=[mock.MagicMock()] * 3)
@@ -3608,10 +3612,10 @@ class TestMediaAccordion(TmpConfigCase):
 
         self.assertIn('(1)', accordion._tab_labels[0].set_markup.call_args[0][0])
         self.assertIn('(2)', accordion._tab_labels[1].set_markup.call_args[0][0])
-        self.assertIn('(3)', accordion._tab_labels[2].set_markup.call_args[0][0])
-        self.assertIn('Dismissed', accordion._tab_labels[2].set_markup.call_args[0][0])
-        self.assertNotIn('(', accordion._tab_labels[3].set_markup.call_args[0][0])
-        self.assertIn('Track', accordion._tab_labels[3].set_markup.call_args[0][0])
+        self.assertNotIn('(', accordion._tab_labels[2].set_markup.call_args[0][0])
+        self.assertIn('Track', accordion._tab_labels[2].set_markup.call_args[0][0])
+        self.assertIn('(3)', accordion._tab_labels[3].set_markup.call_args[0][0])
+        self.assertIn('Seen', accordion._tab_labels[3].set_markup.call_args[0][0])
 
 
     @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')

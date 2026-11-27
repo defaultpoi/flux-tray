@@ -2171,8 +2171,8 @@ def _destroy_rows(listbox):
 
 class MediaAccordion:
     """A slide-up accordion (Gtk.Revealer) containing a Gtk.Notebook with four tabs: Watch (ready/downloading
-    episodes), Discover (IMDb charts), Dismissed (what was dismissed; a click brings a title back to Track),
-    Track (being looked for, being followed). Collapsed by default, header shows item counts."""
+    episodes), Discover (IMDb charts), Track (being looked for, being followed), Seen (what was dismissed; a
+    click brings a title back to Track). Collapsed by default, header shows item counts."""
 
     def __init__(self, parent):
         self.parent = parent  # The PopupMixin instance
@@ -2223,7 +2223,8 @@ class MediaAccordion:
         self.notebook = Gtk.Notebook()
         self.notebook.set_show_tabs(True)
         self.notebook.set_show_border(False)
-        self.notebook.set_scrollable(True)
+        self.notebook.set_scrollable(False)  # no arrows: the four tabs share the width of the popup (see _add_tab)
+        self.notebook.get_style_context().add_class('media-tabs')  # narrow tabs: POPUP_CSS
         self.revealer.add(self.notebook)
 
         # Tab 0: Watch - downloadable episodes
@@ -2247,16 +2248,7 @@ class MediaAccordion:
         self.discover_scroller.add(self.discover_listbox)
         self._add_tab(self.discover_scroller, 'Discover', 1)
 
-        # Tab 2: Dismissed - titles that were dismissed; a click puts one back on the watch list (Track)
-        self.dismissed_listbox = Gtk.ListBox()
-        self.dismissed_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.dismissed_listbox.connect('row-activated', self._on_dismissed_row_activated)
-        self.dismissed_scroller = Gtk.ScrolledWindow()
-        self.dismissed_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.dismissed_scroller.add(self.dismissed_listbox)
-        self._add_tab(self.dismissed_scroller, 'Dismissed', 2)
-
-        # Tab 3: Track - titles being looked for and series being followed
+        # Tab 2: Track - titles being looked for and series being followed
         self.track_listbox = Gtk.ListBox()
         self.track_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         self.track_listbox.connect('row-activated', self._on_track_row_activated)
@@ -2264,7 +2256,16 @@ class MediaAccordion:
         self.track_scroller = Gtk.ScrolledWindow()
         self.track_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.track_scroller.add(self.track_listbox)
-        self._add_tab(self.track_scroller, 'Track', 3)
+        self._add_tab(self.track_scroller, 'Track', 2)
+
+        # Tab 3: Seen - titles that were dismissed; a click puts one back on the watch list (Track)
+        self.dismissed_listbox = Gtk.ListBox()
+        self.dismissed_listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.dismissed_listbox.connect('row-activated', self._on_dismissed_row_activated)
+        self.dismissed_scroller = Gtk.ScrolledWindow()
+        self.dismissed_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.dismissed_scroller.add(self.dismissed_listbox)
+        self._add_tab(self.dismissed_scroller, 'Seen', 3)
 
         # Constrain the notebook height so scrolled windows can scroll
         # 75% of screen height minus header/footer space (similar to main scroller)
@@ -2285,15 +2286,19 @@ class MediaAccordion:
     def _add_tab(self, child, title, index):
         """Add a tab to the notebook with a label that can be updated for counts."""
         label = Gtk.Label(label=title)
-        label.set_xalign(0)
-        label.set_margin_start(6)
-        label.set_margin_end(6)
+        label.set_xalign(0.5)
+        label.set_margin_start(2)
+        label.set_margin_end(2)
+        # A label that can be cut short lets a notebook that cannot scroll be narrower than its tabs: a long
+        # count shortens its title with an ellipsis, and the popup is not made wider (nor arrows shown).
+        label.set_ellipsize(Pango.EllipsizeMode.END)
         self._tab_labels[index] = label
         self.notebook.append_page(child, label)
+        self.notebook.child_set_property(child, 'tab-expand', True)
 
     def _setup_listbox_hover_events(self):
         """Connect motion and leave events to accordion listboxes for metadata popover tracking."""
-        for listbox in (self.watch_listbox, self.discover_listbox, self.dismissed_listbox, self.track_listbox):
+        for listbox in (self.watch_listbox, self.discover_listbox, self.track_listbox, self.dismissed_listbox):
             listbox.connect('motion-notify-event', self._on_listbox_motion)
             listbox.connect('leave-notify-event', self._on_listbox_leave)
             # Enable motion and leave events
@@ -2346,7 +2351,7 @@ class MediaAccordion:
         destroy the rows of these lists (the lists hold them and this object holds the lists, and the
         buttons' handlers hold this object), so every rebuild of the popup left its rows, the accordion and
         their widgets behind: about 30 kB for each title of the Discover tab, per rebuild."""
-        for listbox in (self.watch_listbox, self.discover_listbox, self.dismissed_listbox, self.track_listbox):
+        for listbox in (self.watch_listbox, self.discover_listbox, self.track_listbox, self.dismissed_listbox):
             _destroy_rows(listbox)
         self._hovered_row = None
 
@@ -2354,13 +2359,13 @@ class MediaAccordion:
         """Rebuild all four tabs with current data and update header counts."""
         self._refresh_watch_tab()
         self._refresh_discover_tab()
-        self._refresh_dismissed_tab()
         self._refresh_track_tab()
+        self._refresh_dismissed_tab()
         self._update_header_label()
 
     def _update_header_label(self):
         """Update the header button label with total counts (Watch + Discover only;
-        Dismissed and Track tab items are not counted in the header badge)."""
+        Track and Seen tab items are not counted in the header badge)."""
         watch_count = len(self.watch_listbox.get_children())
         discover_count = len(self.discover_listbox.get_children())
         total = watch_count + discover_count
@@ -2372,9 +2377,9 @@ class MediaAccordion:
     def _update_tab_counts(self):
         """Update tab labels with item counts."""
         for idx, label in self._tab_labels.items():
-            listbox = [self.watch_listbox, self.discover_listbox, self.dismissed_listbox, self.track_listbox][idx]
+            listbox = [self.watch_listbox, self.discover_listbox, self.track_listbox, self.dismissed_listbox][idx]
             count = len(listbox.get_children())
-            base_title = ['Watch', 'Discover', 'Dismissed', 'Track'][idx]
+            base_title = ['Watch', 'Discover', 'Track', 'Seen'][idx]
             if count > 0:
                 label.set_markup(f'<b>{base_title}</b> <span size="small">({count})</span>')
             else:
