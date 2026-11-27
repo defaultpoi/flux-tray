@@ -3,5 +3,5 @@
 name = "flux-tray"
 description = "A tray dispatcher for news, live streams, weather, media and package updates, for XFCE on Void Linux"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = ["feedparser", "PyGObject", "pycairo"]

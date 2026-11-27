@@ -1,9 +1,9 @@
 """Flux Tray: news, live streams, weather, media and package updates in one tray
-icon and popup, for XFCE on Void Linux. Python 3.14 only."""
+icon and popup, for XFCE on Void Linux. Python 3.12 or newer."""
 import sys
 
-if sys.version_info < (3, 14):
-    raise SystemExit(f'Flux Tray needs Python 3.14 or newer; this is Python {sys.version.split()[0]}.')
+if sys.version_info < (3, 12):
+    raise SystemExit(f'Flux Tray needs Python 3.12 or newer; this is Python {sys.version.split()[0]}.')
 
 import warnings
 

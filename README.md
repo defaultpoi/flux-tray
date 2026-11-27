@@ -1,6 +1,6 @@
 # flux-tray
 
-Flux Tray is a personal tray application for XFCE on Void Linux, written for Python 3.14 and GTK3 and for no other setup. It takes in what several services have to say (news feeds, Twitch and YouTube live channels, weather and its alerts, podcasts and series, package updates), keeps track of it, and shows it in one tray icon and one popup. What is muted, saved for later, highlighted or checked, and when, is decided by rules of your own in `config.conf`; what the app does and does not do yet in that respect is in [docs/DESIGN.md](docs/DESIGN.md).
+Flux Tray is a personal tray application for XFCE on Void Linux, written for Python 3.12 or newer and GTK3 and for no other setup. It takes in what several services have to say (news feeds, Twitch and YouTube live channels, weather and its alerts, podcasts and series, package updates), keeps track of it, and shows it in one tray icon and one popup. What is muted, saved for later, highlighted or checked, and when, is decided by rules of your own in `config.conf`; what the app does and does not do yet in that respect is in [docs/DESIGN.md](docs/DESIGN.md).
 
 Working on it with an assistant? Start with [AGENTS.md](AGENTS.md).
 
@@ -132,7 +132,7 @@ print(driver.name, '-', title, '-', len(episodes), 'episodes'); [print(e) for e 
 
 ## Requirements
 
-- Python 3.14 (older versions are refused at start), PyGObject (GTK3), pycairo, `feedparser`
+- Python 3.12 or newer (older versions are refused at start), PyGObject (GTK3), pycairo, `feedparser`
 - `xbps-install` / `xbps-query` for update detection (Void Linux only)
 - `topgrade` (optional, `sudo xbps-install topgrade`) to install updates with it; see [Passwordless updates](#passwordless-updates-optional)
 - `streamlink` and `mpv` for Twitch and YouTube Live streams; `mpv` also plays the podcasts, series and movies

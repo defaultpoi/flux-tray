@@ -45,7 +45,7 @@ window, a real network).
 | F30 | Debug logging to stderr, switched on by an environment variable | test_config.TestDebugLogging | 1 |
 | F31 | Notification sound, SIGINT and SIGTERM leave the main loop cleanly | test_desktop.TestNotificationSound, test_app.TestUnixSignalAdd | 4 |
 | F32 | Installing: link into ~/.local/bin, optional autostart entry, uninstall that keeps the config | test_install.TestInstallScripts | 1 |
-| F33 | Runs on Python 3.14 only, and says so | test_python_version.TestPythonVersion | 1 |
+| F33 | Runs on Python 3.12 or newer, and says so | test_python_version.TestPythonVersion | 1 |
 | F34 | Taking fully watched sources off the Media list: right-click menu for one or all, the line leaves [media], the state is forgotten, the files stay, the list is updated in place | test_config.TestRemoveMediaSources, test_ui_media.TestRemovingWatchedSources, test_rules.TestHeaderClicks, test_golden_popup.TestPopupAppearance | 2 |
 | F35 | Carrying on where an episode stopped, also after a stream took the mpv window; a file replacing a stream stops its streamlink; mpv's loadfile in both forms, with a fallback | test_playback.TestResumePoint, test_playback.TestLoadingWithAStart, test_playback.TestLoadingWhenTheStartIsRefused, test_playback.TestAFileReplacingAStream, test_ui_media.TestPlayingFromWhereItStopped, test_ui_media.TestWhatPlaybackLeavesBehind, test_state.TestMediaEntryResumeAndRemoval | 3 |
 | F36 | What counts as watched: time actually played, not seeking over it; mpv silent for a few polls does not end the tracking; an episode put back as not watched | test_playback.TestWatchingTime, test_playback.TestWatchingThroughSilence, test_playback.TestCountingAsWatchedByPlayedTime, test_ui_media.TestPuttingAnEpisodeBack | 3 |

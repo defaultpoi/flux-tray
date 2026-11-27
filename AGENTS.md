@@ -1,6 +1,6 @@
 # Start here (for an assistant)
 
-Flux Tray: one owner's GTK3 tray app, Python 3.14 only, XFCE on Void Linux. A new chat needs no brief from them: read this
+Flux Tray: one owner's GTK3 tray app, Python 3.12 or newer, XFCE on Void Linux. A new chat needs no brief from them: read this
 page, [CONTRIBUTING.md](CONTRIBUTING.md) (the rules), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (the design),
 [docs/STATUS.md](docs/STATUS.md) and [docs/BACKLOG.md](docs/BACKLOG.md), then only what the task needs (the map below).
 The history is `git log`; per-change evidence older than 2026-11-27 is in [docs/HISTORY.md](docs/HISTORY.md).
