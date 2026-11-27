@@ -5,7 +5,7 @@
 
 `old` must occur exactly once in FILE (or pass --all to break every occurrence). Exit 0 when the tests FAILED
 (the break was caught), 1 when they passed (it was not), 2 when it could not be tried.
-Environment: FLUX_PYTHON (default python3); xvfb-run is used when it exists.
+Python: FLUX_PYTHON, else .venv/bin/python when it exists (tools/check.sh makes it), else python3; xvfb-run is used when it exists.
 """
 import argparse
 import hashlib
@@ -24,8 +24,7 @@ def main():
     parser.add_argument('--all', action='store_true')
     args = parser.parse_args()
 
-    root = os.environ.get('CLAUDE_PROJECT_DIR') or subprocess.run(
-        ['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True).stdout.strip() or os.getcwd()
+    root = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True).stdout.strip() or os.getcwd()
     path = os.path.abspath(args.file)
     with open(path, encoding='utf-8') as f:
         original = f.read()
@@ -34,7 +33,9 @@ def main():
         print(f'cannot try: the old text occurs {count} times in {args.file} (it must occur once, or use --all)')
         return 2
     before = hashlib.sha256(original.encode()).hexdigest()
-    command = [os.environ.get('FLUX_PYTHON', 'python3'), '-W', 'ignore', '-m', 'unittest', *args.test]
+    venv_python = os.path.join(root, '.venv', 'bin', 'python')
+    python = os.environ.get('FLUX_PYTHON') or (venv_python if os.path.exists(venv_python) else 'python3')
+    command = [python, '-W', 'ignore', '-m', 'unittest', *args.test]
     if shutil.which('xvfb-run'):
         command = ['xvfb-run', '-a', *command]
     try:
