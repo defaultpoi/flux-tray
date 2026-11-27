@@ -7,10 +7,10 @@ The history is `git log`; per-change evidence older than 2026-11-27 is in [docs/
 
 ## Open a session
 
-1. **Token.** The owner pastes a fine-grained token for this repo only (Contents: read and write), ideally valid for a day.
-   If there is none, or a push fails on it, ask for a new one; do not work around it. It goes into a command as a header,
-   never into a URL, a file, a commit, a log or a reply (the API takes `Authorization: Bearer`):
-   `H="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"; git -c http.extraheader="$H" clone https://github.com/defaultpoi/flux-tray.git`
+1. **Token.** It is in the Project instructions (the owner may also paste one): a fine-grained token for this repo only, Contents read and write.
+   Cloning needs none (the repo is public); only a push and the GitHub API do. If there is none, or a push fails on it, ask the owner for a new one; do not work around it.
+   It goes into a command as a header, never into a URL, a file, a commit, a log or a reply (the API takes `Authorization: Bearer`):
+   `git clone https://github.com/defaultpoi/flux-tray.git`, and later `H="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"; git -c http.extraheader="$H" push origin HEAD:main`
 2. **The clone.** `git config user.name defaultpoi; git config user.email defaultpoi@users.noreply.github.com; git config core.hooksPath .githooks`
    (the hook refuses a push that would drop commits from origin).
 3. **Baseline.** `tools/check.sh` (the first run makes `.venv`; the system libraries are in [docs/WORKFLOW.md](docs/WORKFLOW.md)). Know it is green before you change anything.
