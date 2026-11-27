@@ -405,7 +405,7 @@ class TestTwoPluginFolders(PluginCase):
 
 class TestTheAppsPluginFolder(unittest.TestCase):
     """The app reads the plugins in the repo and nothing in the person's config folder (app.py hands
-    MediaSources the one constant there is; the real run is in STATUS.md)."""
+    MediaSources the one constant there is; the real run is in HISTORY.md)."""
 
     def test_there_is_one_folder_and_it_is_the_one_in_the_repo(self):
         self.assertTrue(rt.MEDIA_PLUGIN_DIR.endswith(os.path.join('addons', 'media-plugins')))

@@ -2,6 +2,8 @@
 
 Flux Tray is a personal tray application for XFCE on Void Linux, written for Python 3.14 and GTK3 and for no other setup. It takes in what several services have to say (news feeds, Twitch and YouTube live channels, weather and its alerts, podcasts and series, package updates), keeps track of it, and shows it in one tray icon and one popup. What is muted, saved for later, highlighted or checked, and when, is decided by rules of your own in `config.conf`; what the app does and does not do yet in that respect is in [docs/DESIGN.md](docs/DESIGN.md).
 
+Working on it with an assistant? Start with [AGENTS.md](AGENTS.md).
+
 ## Features
 
 ### Tray icon, popup and feeds
@@ -427,7 +429,11 @@ flux_tray/
   ui/                  mixins: feeds, live, weather, updates, timer, icon, connectivity, popup
 tests/                 one test file per module, plus facade.py, helpers.py and run_stubbed.py
 tests/golden/          the popup's widget tree for two scenarios, and the script that makes it
-docs/                  FEATURES.md (what each test pins), ARCHITECTURE.md, STATUS.md, XFCE-VALIDATION.md
+docs/                  FEATURES.md (what each test pins), ARCHITECTURE.md, DESIGN.md, STATUS.md (what is verified), BACKLOG.md (what is open),
+                       HISTORY.md (older per-change evidence), WORKFLOW.md (running things in a session), GOTCHAS.md, XFCE-VALIDATION.md
+addons/media-plugins/  the site plugins (fsonline_one, imdb_charts; _sitefilme_com is parked)
+tools/                 check.sh (CI's checks in one command), mutate.py (break the code on purpose, see a test fail)
+AGENTS.md              where an assistant starts
 install.sh, uninstall.sh
 ```
 
@@ -438,6 +444,7 @@ Pure logic (parsers, config readers, schedule maths) lives in the top-level modu
 ```bash
 python3 -m unittest discover -s tests -v   # real PyGObject (needs PyGObject and feedparser)
 python3 tests/run_stubbed.py               # GTK replaced by mocks; both must pass
+tools/check.sh                            # pyflakes and both of the above, with the output cut down (makes .venv on the first run)
 ```
 
 `tests/test_golden_popup.py` compares the real popup's widget tree with the files in `tests/golden/` (it needs a display, so run the first command under `xvfb-run -a`), and `tests/test_parity.py` checks that every feature in `docs/FEATURES.md` still has its tests; see `CONTRIBUTING.md`. CI runs both modes on every push. Tests refer to the code through `tests/facade.py`, one namespace over the whole package: reading `rt.name` returns the value from the module that defines it, and `mock.patch.object(rt, 'name', ...)` rebinds it in every module that imported it, so a patch reaches the code under test wherever it lives. That only works while a name means one thing, so the facade refuses to build when two modules bind the same name to different objects (for example `import datetime` in one and `from datetime import datetime` in another): every test module then fails to import, with the name and the modules in the message. Rename one of them or import both the same way.

@@ -4,7 +4,7 @@ The tests run without a panel, a tray host, a player window or a network that
 answers like the real ones. Everything below needs the real thing: Void Linux,
 XFCE on X11. [FEATURES.md](FEATURES.md) says which features each section covers.
 Tick an item only after doing it, and write down what was not done in
-[STATUS.md](STATUS.md); a green CI run does not tick anything here.
+the Evidence section below; a green CI run does not tick anything here.
 
 ## 1. Environment and launch
 
@@ -70,4 +70,4 @@ Tick an item only after doing it, and write down what was not done in
 
 ## Evidence
 
-Date, Flux Tray commit, Void package versions, XFCE, GTK3, Python, the panel's tray host, results, and the log lines that matter go in `docs/STATUS.md`.
+Date, Flux Tray commit, Void package versions, XFCE, GTK3, Python, the panel's tray host, results, and the log lines that matter go below this line, one entry per run.
