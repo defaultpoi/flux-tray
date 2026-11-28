@@ -123,12 +123,6 @@ class PopupMixin:
         max_height = int(screen_height * 0.75)
         self.scroller.set_max_content_height(max_height)
 
-    def on_popup_focus_out(self, win, _event):
-        if self._launcher_open:
-            return False  # the Launch list took focus; don't close under it
-        win.hide()
-        return False
-
     def on_launcher_button_clicked(self, button):
         """Builds the Launch list fresh (so config edits show up immediately)
         and pops it up above the button."""
@@ -231,7 +225,6 @@ class PopupMixin:
         win.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
         win.set_keep_above(True)
         win.set_default_size(WINDOW_WIDTH, -1)
-        win.connect('focus-out-event', self.on_popup_focus_out)
         win.connect('key-press-event', self.on_popup_key)
         return win
 
@@ -443,6 +436,12 @@ class PopupMixin:
         footer.pack_start(quit_btn, True, True, 0)
         return footer
 
+    def _media_tab_open(self):
+        """True while the Media accordion is expanded: the popup does not close itself under it, even with every
+        news item read. The popup is rebuilt closed each time it is opened, so this is the person's own opening."""
+        revealer = getattr(self, 'media_accordion_revealer', None)
+        return bool(revealer is not None and revealer.get_reveal_child())
+
     def on_popup_key(self, widget, event):
         if event.keyval == Gdk.KEY_Escape:
             widget.hide()
@@ -559,7 +558,8 @@ class PopupMixin:
     def refresh_list(self, keep_open=False):
         """Rebuilds the list. With nothing to show a visible popup closes itself,
         unless keep_open is set (refreshes the person did not ask for, such as a
-        finished orphan scan) or an orphan removal is showing its result."""
+        finished orphan scan), an orphan removal is showing its result or the Media
+        tab is open."""
         self._breaking_rows = []
         self._media_header_row = None
         self._highlight_words = load_highlight_words()
@@ -594,7 +594,8 @@ class PopupMixin:
         # The accordions are refreshed whether or not the list collapses: a popup kept open by a click in one
         # of them (or by a status) must show their rows.
         self._refresh_media_accordions()
-        close_popup = should_hide and not keep_open and not self.orphan_status and not self.update_summary
+        close_popup = (should_hide and not keep_open and not self.orphan_status and not self.update_summary
+                       and not self._media_tab_open())
 
         if should_hide:
             row = Gtk.ListBoxRow()

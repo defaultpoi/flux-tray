@@ -122,17 +122,6 @@ class TestLauncher(TmpConfigCase):
         with mock.patch.object(rt.subprocess, 'Popen', side_effect=OSError('nope')), mock.patch.object(rt, '_log'):
             self.assertFalse(rt.run_launcher_command('x'))
 
-    def test_popup_stays_open_while_the_launch_list_has_focus(self):
-        class Stub:
-            on_popup_focus_out = rt.FluxTray.on_popup_focus_out
-            _launcher_open = True
-        win = mock.MagicMock()
-        Stub().on_popup_focus_out(win, None)
-        win.hide.assert_not_called()
-        Stub._launcher_open = False
-        Stub().on_popup_focus_out(win, None)
-        win.hide.assert_called_once()
-
 
 class TestScheduleIconAndCss(unittest.TestCase):
     def test_warning_css_keeps_button_text_dark(self):

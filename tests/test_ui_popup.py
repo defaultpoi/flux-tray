@@ -56,6 +56,16 @@ class TestEmptyAreaClick(unittest.TestCase):
         stub.popup.hide.assert_not_called()
 
 
+class TestPopupWindowDoesNotHideItself(unittest.TestCase):
+    def test_the_window_listens_for_keys_only_so_losing_focus_never_hides_it(self):
+        app = mock.MagicMock()
+        gtk = mock.MagicMock()
+        with mock.patch.object(rt, 'Gtk', gtk), mock.patch.object(rt, 'Gdk', mock.MagicMock()):
+            rt.FluxTray._new_popup_window(app)
+        signals = [call.args[0] for call in gtk.Window.return_value.connect.call_args_list]
+        self.assertEqual(signals, ['key-press-event'])
+
+
 class TestPopupRebuildRules(unittest.TestCase):
     class Stub:
         show_popup = rt.FluxTray.show_popup
@@ -325,6 +335,7 @@ class TestRefreshListOrphans(unittest.TestCase):
     class Stub:
         refresh_list = rt.FluxTray.refresh_list
         _refresh_media_accordions = rt.FluxTray._refresh_media_accordions
+        _media_tab_open = rt.FluxTray._media_tab_open
         build_orphans_header = rt.FluxTray.build_orphans_header
         add_orphan_rows = rt.FluxTray.add_orphan_rows
         add_update_summary_rows = rt.FluxTray.add_update_summary_rows
@@ -360,6 +371,7 @@ class TestRefreshListOrphans(unittest.TestCase):
             self.discovery_source_urls = lambda: list(self.media_discovery_urls)
             self.build_media_row = mock.Mock(return_value=mock.MagicMock())
             self.track_item_count = mock.Mock(return_value=0)
+            self.media_accordion_revealer = None  # the Media tab: collapsed unless a test opens it
 
             # Mock the media accordion
             self._media_accordion = mock.MagicMock()
@@ -458,6 +470,36 @@ class TestRefreshListOrphans(unittest.TestCase):
         self.refresh(stub)
         stub.popup.hide.assert_called()
         stub._media_accordion.refresh.assert_called()
+
+    def open_media_tab(self, stub, is_open=True):
+        stub.media_accordion_revealer = mock.MagicMock()
+        stub.media_accordion_revealer.get_reveal_child.return_value = is_open
+
+    def test_reading_the_last_news_item_leaves_the_popup_open_while_the_media_tab_is_open(self):
+        stub = self.Stub({}, popup_visible=True)
+        self.open_media_tab(stub)
+        self.refresh(stub)
+        stub.popup.hide.assert_not_called()
+        stub.listbox.add.assert_called()  # the "No unread items" row is there, under the open tab
+
+    def test_the_media_tab_also_holds_a_popup_that_has_media_ready(self):
+        stub = self.Stub({}, popup_visible=True)
+        stub.media_urls = ['https://example.com/feed.xml']
+        self.open_media_tab(stub)
+        self.refresh(stub)
+        stub.popup.hide.assert_not_called()
+
+    def test_with_the_media_tab_closed_the_last_news_item_still_closes_the_popup(self):
+        stub = self.Stub({}, popup_visible=True)
+        self.open_media_tab(stub, is_open=False)
+        self.refresh(stub)
+        stub.popup.hide.assert_called_once()
+
+    def test_the_podcast_tab_does_not_hold_the_popup_open(self):
+        stub = self.Stub({}, popup_visible=True)
+        stub._podcast_accordion.revealer.get_reveal_child.return_value = True
+        self.refresh(stub)
+        stub.popup.hide.assert_called_once()
         stub._podcast_accordion.refresh.assert_called()
 
     def test_without_media_there_is_no_section(self):

@@ -12,6 +12,7 @@ ones are in [HISTORY.md](HISTORY.md) (grep a word of the line).
 ## Found, not changed
 
 Behaviour:
+- [found] Collapsing the Media accordion after the last news item was read leaves the empty popup open (it closes on the next right-click on an empty part, Escape or tray click, or the next rebuild that finds nothing unread).
 - [found] A film leaves Track as soon as a site is found for it, not when its first read or download works: until then it is in neither tab, and a source whose first read fails is shown nowhere.
 - [found] A series added by a click leaves Watch only through its right-click menu, "Remove from list, mark seen, delete files", which also trashes its files.
 - [found] A source typed by hand into `[media]` whose plugin is gone (a `sitefilme_com:` line, say) is not on the watch list, so nothing looks for it again: its row shows the "no source handler" error until the line is removed. The app does not rewrite `config.conf`.
@@ -27,6 +28,7 @@ Behaviour:
 - [found] Running `test_fsonline` alone from `tests/` makes `TestNormTitleWatchModule` fail to import `flux_tray`; it passes in the whole suite.
 
 Cleanup:
+- [found] `_launcher_open` (set by the Launch list, the feed menu and the media menus) had one reader, the popup's focus-out handler, which is gone: nothing reads it now, only tests assert it is set.
 - [found] No caller: `format_metadata_for_tooltip` in `metadata.py` (and `test_metadata.TestTheHoverText`), `_pick_vidmoly` in `fsonline_one.py`, and its `fetch_new_episodes` and `fetch_new_movies` (the sitemap check was never wired in).
 - [found] Internal names still say "dismissed" (`get_dismissed_items`, `dismissed_listbox`, `TestTheDismissedTab`) for what the Seen tab lists.
 - [found] `schedule.load_schedule_settings` still reads the older single-schedule keys of `[schedule]`.

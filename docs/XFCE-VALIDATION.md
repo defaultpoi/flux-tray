@@ -18,7 +18,7 @@ the Evidence section below; a green CI run does not tick anything here.
 ## 2. Tray icon and popup
 
 - [ ] The icon in each state: nothing unread (with the temperature), unread news, updates available, severe weather alert (the temperature alternating between the severity colour and white at the severity's rate, no disc; with unread items the disc with the count pulses instead); the badge counts news, updates and alerts and nothing else.
-- [ ] Left click and right click open the popup; click elsewhere, Escape and switching windows close it; it does not steal focus from the active window or stay stuck open.
+- [ ] Left click and right click open the popup; click elsewhere and switching windows leave it open; Escape, a click on the tray icon and a right-click on an empty part of it close it; it does not steal focus from the active window. With the Media accordion open and every news item read it stays open.
 - [ ] Compare the popup with `tests/golden/popup_full.json`'s rows: Live now, Media, feeds, Read later, Updates available, orphans, then the timer area and the buttons Launch, Timer, Edit config, Refresh, Mark all read, Quit.
 - [ ] A long feed list, long titles, non-ASCII text, a narrow panel; the popup width with and without the weather bar.
 - [ ] Left click on a row opens it in the browser and marks it read; right click marks it read only; the bookmark icon saves it; a feed header click marks the feed read; the feed menu (open, open all as tabs, mute, send to Read later).
