@@ -711,3 +711,19 @@ class TestItemsFromEntries(unittest.TestCase):
         rules = rt.parse_mute_rules('author=Pat')
         (new, later, newly_seen), _ = self.run_entries([entry], mute_rules=rules, later_rules=rules)
         self.assertEqual((new, later, len(newly_seen)), ([], [], 1))
+
+
+class TestItemSummary(unittest.TestCase):
+    SUMMARIES = {'https://g1line.ro/api/news.php': {'a': 'About a.'}}
+
+    def test_the_summary_of_an_item_of_that_feed(self):
+        self.assertEqual(rt.item_summary(self.SUMMARIES, {'id': 'a', 'feed_url': 'https://g1line.ro/api/news.php'}), 'About a.')
+
+    def test_nothing_for_an_item_of_another_feed_or_one_it_did_not_give(self):
+        self.assertEqual(rt.item_summary(self.SUMMARIES, {'id': 'a', 'feed_url': 'https://other.example/feed'}), '')
+        self.assertEqual(rt.item_summary(self.SUMMARIES, {'id': 'b', 'feed_url': 'https://g1line.ro/api/news.php'}), '')
+        self.assertEqual(rt.item_summary(self.SUMMARIES, {'id': 'a'}), '')
+
+    def test_nothing_when_there_are_no_summaries_or_a_wrong_shape(self):
+        self.assertEqual(rt.item_summary(None, {'id': 'a', 'feed_url': 'u'}), '')
+        self.assertEqual(rt.item_summary({'u': {'a': 5}}, {'id': 'a', 'feed_url': 'u'}), '')

@@ -16,7 +16,7 @@ from ..desktop import edit_file_externally, is_fullscreen_active, run_launcher_c
 from ..links import open_link
 from ..log import _log
 from ..playback import open_twitch_stream, open_youtube_stream
-from ..rules import group_unread_by_feed, item_detail_text, item_is_highlighted
+from ..rules import group_unread_by_feed, item_detail_text, item_is_highlighted, item_summary
 from ..updates import format_change
 from .timer import TIMER_RESERVED_HEIGHT_PX, format_timer_countdown
 from .media import MediaAccordion, PodcastAccordion
@@ -889,7 +889,8 @@ class PopupMixin:
 
         full_title = entry['title']
         label, truncated = _title_label(full_title)
-        tooltip = '\n'.join(part for part in (full_title if truncated else '', item_detail_text(entry)) if part)
+        summary = item_summary(getattr(self, 'item_summaries', None), entry)
+        tooltip = '\n'.join(part for part in (full_title if truncated else '', summary, item_detail_text(entry)) if part)
         if entry.get('live'):
             tooltip = 'Updated since last check\n' + tooltip
         if tooltip:

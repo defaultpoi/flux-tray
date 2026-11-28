@@ -37,6 +37,7 @@ For the owner to decide:
 
 ## Proposed
 
+- [proposed] G1line through `https://r.jina.ai/` when the direct read fails (the way the imdb-charts plugin asks the proxy for IMDb): add it only if the owner's log shows g1line.ro turning the app's request away.
 - [proposed] `flux-tray --version` and `flux-tray --report`: print the commit, memory use, the number of live accordions, the counts in `media.json` and the last 50 log lines with URLs masked, so a bug report says what is running. Today the app prints no version.
 - [proposed] A nightly soak in CI: the app under xvfb with fake feeds and fast timers for about 30 minutes, failing if memory keeps climbing. The 100 MB to 1 GB leak showed only with a full list and hours of use.
 - [proposed] Split `ui/media.py`: plan in a chat of its own, then one extraction per commit with the golden and parity tests green after each.

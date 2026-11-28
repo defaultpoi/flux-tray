@@ -7,11 +7,13 @@ import time as time_module
 from ..gi_env import GLib, Gdk, Gtk, Pango
 from ..config import load_feeds, load_mute_filters
 from ..desktop import play_notification_sound
+from ..jsonfeeds import fetch_json_feed, is_json_feed
 from ..links import open_link
 from ..network import run_when_online
 from ..rules import (
     add_feed_mute_rule,
     add_feed_readlater_rule,
+    entry_id,
     entry_matches_mute_rules,
     escape_mute_value,
     failed_fetch_checked_at,
@@ -69,9 +71,10 @@ class FeedsMixin:
         feed_mute_rules = load_feed_mute_rules()
         feed_later_rules = load_feed_readlater_rules()
         newly_seen_ids, new_items, later_items, feed_links = set(), [], [], {}
+        summaries = {}  # feed url -> {item id: summary} of the feeds that give one; kept in memory only
         for url, interval in feeds_due(feeds, last_checked, now, force):
             try:
-                parsed = feedparser.parse(url)
+                parsed = fetch_json_feed(url) if is_json_feed(url) else feedparser.parse(url)
             except Exception:
                 parsed = None
             if parsed is None or (getattr(parsed, 'bozo', False) and not parsed.entries):
@@ -82,6 +85,8 @@ class FeedsMixin:
             site_link = (getattr(parsed, 'feed', None) or {}).get('link')
             if isinstance(site_link, str) and site_link:
                 feed_links[url] = site_link
+            if is_json_feed(url):  # the hover text of its rows: every entry of this read, seen or not
+                summaries[url] = {entry_id(e, url): e['summary'] for e in parsed.entries if e.get('summary')}
             fresh, later, seen_ids = items_from_entries(
                 parsed.entries, url, seen, mute_phrases,
                 feed_mute_rules.get(url, ()), feed_later_rules.get(url, ()))
@@ -94,6 +99,8 @@ class FeedsMixin:
             new_items, later_items = merge_feed_check(
                 self.state, now, newly_seen_ids, last_checked, feed_links, new_items, later_items)
             save_state(self.state)
+            if summaries:
+                self.item_summaries.update(summaries)
         if new_items:
             # a live update (an entry that was edited) sounds twice; one that was not really added does not count
             if any(item.get('live') for item in new_items):

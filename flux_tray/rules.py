@@ -189,6 +189,13 @@ def item_detail_text(item):
     return '\n'.join(lines)
 
 
+def item_summary(summaries, item):
+    """The summary a feed gave for `item` at its last read ('' if it gave none): `summaries` is
+    {feed url: {item id: text}}, which is kept in memory and not in state.json."""
+    text = ((summaries or {}).get(item.get('feed_url')) or {}).get(item.get('id'))
+    return text if isinstance(text, str) else ''
+
+
 def escape_mute_value(value):
     """`value` as a mute-rule pattern that matches exactly that text: glob
     characters are bracketed, commas escaped, and the two separators of the

@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from facade import rt
@@ -52,6 +53,100 @@ class TestFeedCheckRobustness(TmpConfigCase):
                 mock.patch.object(rt, 'save_state'):
             stub.check_feeds()
         self.assertEqual(stub.state['last_checked']['https://a.example/feed'], 1_000_000.0)
+
+
+class TestG1lineFeed(TmpConfigCase):
+    """The g1line.ro news API is read by its own reader, every other address by feedparser."""
+    URL = 'https://g1line.ro/api/news.php'
+
+    class Stub:
+        check_feeds = rt.FluxTray.check_feeds
+
+        def __init__(self):
+            self.online = True
+            self.lock = rt.threading.Lock()
+            self.state = {'seen': {}, 'unread': [], 'last_checked': {}}
+            self.item_summaries = {}
+            self.on_new_items = mock.Mock()
+            self.note_request_failure = mock.Mock()
+
+    def entries(self):
+        return rt.entries_from_payload({'items': [
+            {'id': 2, 'source': 'CNN', 'title': 'Second', 'source_url': 'https://cnn.example.com/2',
+             'summary': 'About the second.', 'region': 'Europa'},
+            {'id': 1, 'source': 'AP', 'title': 'First', 'source_url': 'https://ap.example.com/1', 'summary': 'About the first.'}]})
+
+    def check(self, stub, entries=None, **kwargs):
+        self.conf(f'[feeds]\n{self.URL}|G1line\n')
+        parsed = SimpleNamespace(bozo=False, entries=self.entries() if entries is None else entries, feed={'link': 'https://g1line.ro/'})
+        with mock.patch.object(rt, 'fetch_json_feed', return_value=parsed) as fetch, \
+                mock.patch.object(rt.feedparser, 'parse') as parse, \
+                mock.patch.object(rt, 'save_state'), mock.patch.object(rt.GLib, 'idle_add'):
+            stub.check_feeds(force=True, **kwargs)
+        return fetch, parse
+
+    def test_the_api_is_read_by_its_own_reader_not_by_feedparser(self):
+        fetch, parse = self.check(self.Stub())
+        fetch.assert_called_once_with(self.URL)
+        parse.assert_not_called()
+
+    def test_another_address_still_goes_to_feedparser(self):
+        stub = self.Stub()
+        self.conf('[feeds]\nhttps://a.example/feed\n')
+        parsed = mock.Mock(bozo=False, entries=[])
+        with mock.patch.object(rt, 'fetch_json_feed') as fetch, mock.patch.object(rt.feedparser, 'parse', return_value=parsed) as parse, \
+                mock.patch.object(rt, 'save_state'):
+            stub.check_feeds(force=True)
+        parse.assert_called_once_with('https://a.example/feed')
+        fetch.assert_not_called()
+
+    def test_the_items_are_source_and_title_with_the_source_page_as_the_link(self):
+        stub = self.Stub()
+        self.check(stub)
+        self.assertEqual([(i['title'], i['link'], i['tags']) for i in stub.state['unread'] if 'tags' in i],
+                         [('CNN: Second', 'https://cnn.example.com/2', ['Europa'])])
+        self.assertEqual({i['title']: i['link'] for i in stub.state['unread']},
+                         {'CNN: Second': 'https://cnn.example.com/2', 'AP: First': 'https://ap.example.com/1'})
+
+    def test_the_summaries_are_in_memory_and_not_in_the_state_file(self):
+        stub = self.Stub()
+        self.check(stub)
+        by_title = {i['title']: i for i in stub.state['unread']}
+        self.assertEqual(rt.item_summary(stub.item_summaries, by_title['CNN: Second']), 'About the second.')
+        self.assertEqual(rt.item_summary(stub.item_summaries, by_title['AP: First']), 'About the first.')
+        self.assertNotIn('About the', rt.json.dumps(stub.state))
+
+    def test_an_item_already_seen_keeps_its_summary_and_is_not_shown_again(self):
+        stub = self.Stub()
+        self.check(stub)
+        stub.item_summaries.clear()  # as after a restart
+        self.check(stub)
+        self.assertEqual(len(stub.state['unread']), 2)
+        self.assertEqual(len(stub.item_summaries[self.URL]), 2)
+
+    def test_an_item_shows_when_it_is_new_and_the_first_read_shows_every_item(self):
+        stub = self.Stub()
+        self.check(stub)
+        self.assertEqual(len(stub.state['unread']), 2)  # no date, so nothing is "too old"
+        more = self.entries() + rt.entries_from_payload({'items': [{'id': 3, 'source': 'BBC', 'title': 'Third'}]})
+        self.check(stub, more)
+        self.assertEqual([i['title'] for i in stub.state['unread']][0], 'BBC: Third')
+        self.assertEqual(len(stub.state['unread']), 3)
+
+    def test_a_failed_read_is_a_failed_fetch(self):
+        stub = self.Stub()
+        self.conf(f'[feeds]\n{self.URL}\n')
+        with mock.patch.object(rt, 'fetch_json_feed', side_effect=ValueError('not a g1line news response')), \
+                mock.patch.object(rt, 'save_state'):
+            stub.check_feeds(force=True)
+        stub.note_request_failure.assert_called_once()
+        self.assertEqual(stub.state['unread'], [])
+        self.assertEqual(stub.item_summaries, {})
+
+    def test_the_feed_menu_s_website_button_goes_to_g1line(self):
+        stub = self.Stub()
+        self.check(stub)
+        self.assertEqual(rt.feed_source_url(self.URL, stub.state['feed_links']), 'https://g1line.ro/')
 
 
 class TestLiveUpdates(TmpConfigCase):

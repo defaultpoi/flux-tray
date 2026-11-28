@@ -31,6 +31,7 @@ class FluxTray(ConnectivityMixin, FeedsMixin, IconMixin, LiveMixin, MediaMixin, 
         ensure_config()
         self.state = load_state()
         self.lock = threading.Lock()
+        self.item_summaries = {}  # feed url -> {item id: summary} for the feeds that give one (g1line), in memory only
         self._check_lock = threading.Lock()  # guards overlapping feed-check cycles only
         self._xbps_lock = threading.Lock()   # guards xbps db access (scans + installs), separately
         self._twitch_lock = threading.Lock()  # guards overlapping Twitch-check cycles

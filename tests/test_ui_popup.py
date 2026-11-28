@@ -178,8 +178,9 @@ class TestBreakingPulse(unittest.TestCase):
 
 
 class TestItemTooltipDetails(unittest.TestCase):
-    def tooltip(self, entry):
+    def tooltip(self, entry, summaries=None):
         stub = TestBreakingPulse.Stub()
+        stub.item_summaries = summaries
         row = mock.MagicMock()
         with mock.patch.object(rt.Gtk, 'ListBoxRow', return_value=row), mock.patch.object(rt.Gtk, 'Box'), \
                 mock.patch.object(rt.Gtk, 'Button'), mock.patch.object(rt.Gtk, 'Image'), mock.patch.object(rt.Gtk, 'Label'), \
@@ -198,6 +199,23 @@ class TestItemTooltipDetails(unittest.TestCase):
 
     def test_no_tooltip_for_a_short_title_without_details(self):
         self.assertIsNone(self.tooltip({'id': '1', 'link': 'l', 'title': 'Short'}))
+
+    SUMMARIES = {'feed': {'1': 'What it is about.'}}
+
+    def test_the_summary_a_feed_gave_is_in_the_tooltip_before_the_categories(self):
+        self.assertEqual(self.tooltip({'id': '1', 'link': 'l', 'title': 'Short', 'feed_url': 'feed', 'tags': ['a']}, self.SUMMARIES),
+                         'What it is about.\nCategories: a')
+
+    def test_a_trimmed_title_comes_first_then_the_summary(self):
+        long_title = 'x' * (rt.MAX_TITLE_LEN + 20)
+        self.assertEqual(self.tooltip({'id': '1', 'link': 'l', 'title': long_title, 'feed_url': 'feed'}, self.SUMMARIES),
+                         long_title + '\nWhat it is about.')
+
+    def test_a_short_title_is_not_repeated_in_the_tooltip(self):
+        self.assertNotIn('Short', self.tooltip({'id': '1', 'link': 'l', 'title': 'Short', 'feed_url': 'feed'}, self.SUMMARIES))
+
+    def test_an_item_of_another_feed_gets_no_summary(self):
+        self.assertIsNone(self.tooltip({'id': '1', 'link': 'l', 'title': 'Short', 'feed_url': 'other'}, self.SUMMARIES))
 
 
 POPUP_BUILDERS = ('_new_popup_window', '_add_weather_bar', '_add_offline_banner', '_add_schedule_warning',
