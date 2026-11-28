@@ -680,7 +680,7 @@ class PopupMixin:
         """The Read later list: saved items, newest first, under their own header. Neither
         it nor its length keeps the popup open or counts in the badge."""
         self.listbox.add(self.build_header_row(
-            '__readlater__', f'Read later ({len(read_later)})', is_first=is_first, clickable=False))
+            '__readlater__', f'Read later ({len(read_later)})', is_first=is_first, clickable=False, readlater=True))
         for entry in read_later[:MAX_LIST_ITEMS]:
             self.listbox.add(self.build_row(entry, saved=True))
         if len(read_later) > MAX_LIST_ITEMS:
@@ -789,14 +789,18 @@ class PopupMixin:
                              + (f"\n\n{listing}" if listing else ''))
         return row
 
-    def build_header_row(self, feed_url, feed_name, is_first=False, clickable=True, install_all=False, orphans=False, summary=False):
+    def build_header_row(self, feed_url, feed_name, is_first=False, clickable=True, install_all=False, orphans=False, summary=False,
+                         readlater=False):
         row = Gtk.ListBoxRow()
         row.set_selectable(False)
-        row.set_activatable(clickable or install_all or orphans or summary)
+        row.set_activatable(clickable or install_all or orphans or summary or readlater)
         if orphans:
             row.orphans_header = True
         if summary:
             row.summary_header = True
+        if readlater:
+            row.readlater_header = True
+            row.set_tooltip_text("Open all saved items as tabs")
         if install_all:
             row.install_all_header = True
             row.set_tooltip_text("Install all available updates")
@@ -977,12 +981,15 @@ class PopupMixin:
         if hasattr(row, 'discovery_item'):  # left-click: queue for download
             self._on_discovery_row_activated(row.discovery_item)
             return
-        if not self.online and (getattr(row, 'install_all_header', False)
+        if not self.online and (getattr(row, 'install_all_header', False) or getattr(row, 'readlater_header', False)
                                 or hasattr(row, 'header_feed_url') or hasattr(row, 'entry_id') or hasattr(row, 'readlater_id')
                                 or hasattr(row, 'twitch_channel') or hasattr(row, 'youtube_channel')):
             return  # offline: news, feed headers, "install all" and live channels do nothing
         if getattr(row, 'install_all_header', False):
             self.install_all_updates()
+            return
+        if getattr(row, 'readlater_header', False):
+            self.open_all_read_later()
             return
         if hasattr(row, 'header_feed_url'):
             self.mark_feed_read(row.header_feed_url)

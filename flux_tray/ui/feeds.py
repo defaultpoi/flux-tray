@@ -302,6 +302,19 @@ class FeedsMixin:
         if link:
             open_link(link)
 
+    def open_all_read_later(self):
+        """A click on the Read later header: every saved item becomes a browser tab and leaves the list,
+        as opening one does. The tabs open in the background, newest first, so a long list does not
+        freeze the popup."""
+        with self.lock:
+            opened = list(self.state.get('read_later', []))
+            self.state['read_later'] = []
+            save_state(self.state)
+        self.refresh_list()
+        links = [e['link'] for e in opened if e.get('link')]
+        if links:
+            threading.Thread(target=self._open_tabs, args=(links,), daemon=True).start()
+
     def _remove_unread(self, item_id):
         with self.lock:
             self.state['unread'] = [e for e in self.state.get('unread', []) if e['id'] != item_id]

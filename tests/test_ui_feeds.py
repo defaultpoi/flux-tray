@@ -414,6 +414,53 @@ class TestOpenAllAsTabs(unittest.TestCase):
         self.assertEqual(events, [('tab', 'https://x.example/b'), ('sleep', rt.OPEN_TABS_DELAY_SECONDS)])
 
 
+class TestOpenAllReadLater(unittest.TestCase):
+    class Stub:
+        open_all_read_later = rt.FluxTray.open_all_read_later
+        _open_tabs = staticmethod(rt.FluxTray._open_tabs)
+
+        def __init__(self, read_later=None):
+            self.lock = rt.threading.Lock()
+            self.state = {
+                'unread': [{'id': 'u1', 'feed_url': 'f', 'title': 'unread', 'link': 'https://x/u1'}],
+                'read_later': [
+                    {'id': '1', 'title': 'a', 'link': 'https://x/1'},
+                    {'id': '2', 'title': 'b', 'link': ''},
+                    {'id': '3', 'title': 'c', 'link': 'https://x/3'}] if read_later is None else read_later}
+            self.refresh_list = mock.Mock()
+
+    def click(self, stub):
+        with mock.patch.object(rt, 'save_state') as save, mock.patch.object(rt.threading, 'Thread') as thread:
+            stub.open_all_read_later()
+        return save, thread
+
+    def test_every_saved_item_is_opened_as_a_tab_in_the_background_in_list_order(self):
+        stub = self.Stub()
+        _, thread = self.click(stub)
+        thread.assert_called_once_with(target=stub._open_tabs, args=(['https://x/1', 'https://x/3'],), daemon=True)
+        thread.return_value.start.assert_called_once()
+
+    def test_opened_items_leave_the_list_as_opening_one_does_and_unread_news_is_untouched(self):
+        stub = self.Stub()
+        save, _ = self.click(stub)
+        self.assertEqual(stub.state['read_later'], [])  # the link-less item leaves too
+        self.assertEqual([e['id'] for e in stub.state['unread']], ['u1'])
+        save.assert_called_once_with(stub.state)
+        stub.refresh_list.assert_called_once()
+
+    def test_an_empty_list_starts_no_thread(self):
+        stub = self.Stub(read_later=[])
+        _, thread = self.click(stub)
+        thread.assert_not_called()
+
+    def test_the_tabs_are_new_browser_tabs(self):
+        events = []
+        with mock.patch.object(rt.webbrowser, 'open_new_tab', side_effect=lambda l: events.append(l)), \
+                mock.patch.object(rt.time_module, 'sleep'):
+            rt.FluxTray._open_tabs(['https://x.example/a', 'https://x.example/b'])
+        self.assertEqual(events, ['https://x.example/a', 'https://x.example/b'])
+
+
 class TestFeedMenuReadLater(unittest.TestCase):
     class Stub:
         _feed_menu_later = rt.FluxTray._feed_menu_later

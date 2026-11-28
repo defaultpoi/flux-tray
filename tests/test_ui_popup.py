@@ -1099,6 +1099,67 @@ class TestSavedRowActivation(unittest.TestCase):
         stub.open_read_later.assert_not_called()
 
 
+class TestReadLaterHeaderClick(unittest.TestCase):
+    class Stub:
+        on_row_activated = rt.FluxTray.on_row_activated
+        build_header_row = rt.FluxTray.build_header_row
+
+        def __init__(self, online=True):
+            self.online = online
+            self.active_installs = 0
+            self.orphan_status = None
+            self.orphans_expanded = False
+            self.open_all_read_later = mock.Mock()
+            self.mark_feed_read = mock.Mock()
+            self.install_all_updates = mock.Mock()
+
+    class Row:  # a row that keeps the attributes the code sets on it, as a GTK row does
+        def __init__(self):
+            self.activatable = self.tooltip = None
+
+        def set_activatable(self, value):
+            self.activatable = value
+
+        def set_tooltip_text(self, text):
+            self.tooltip = text
+
+        def __getattr__(self, name):
+            if name.startswith('set_') or name == 'add':
+                return lambda *args: None
+            raise AttributeError(name)
+
+    def header(self, stub):
+        gtk = mock.MagicMock()
+        gtk.ListBoxRow.side_effect = self.Row
+        with mock.patch.object(rt, 'Gtk', gtk):
+            return stub.build_header_row('__readlater__', 'Read later (2)', clickable=False, readlater=True)
+
+    def test_a_click_on_the_header_opens_all_saved_items_and_marks_no_feed_read(self):
+        stub = self.Stub()
+        stub.on_row_activated(None, self.header(stub))
+        stub.open_all_read_later.assert_called_once_with()
+        stub.mark_feed_read.assert_not_called()
+
+    def test_offline_it_does_nothing_like_the_other_news_headers(self):
+        stub = self.Stub(online=False)
+        stub.on_row_activated(None, self.header(stub))
+        stub.open_all_read_later.assert_not_called()
+
+    def test_the_header_can_be_clicked_and_says_what_a_click_does(self):
+        row = self.header(self.Stub())
+        self.assertTrue(row.activatable)
+        self.assertEqual(row.tooltip, 'Open all saved items as tabs')
+
+    def test_the_section_builds_its_header_that_way(self):
+        stub = TestReadLaterSection.Stub({})
+        calls = []
+        stub.build_header_row = lambda feed_url, title, **kw: calls.append(kw) or mock.MagicMock()
+        stub.build_row = mock.Mock(return_value=mock.MagicMock())
+        with mock.patch.object(rt.Gtk, 'ListBoxRow'), mock.patch.object(rt.Gtk, 'Label'):
+            rt.FluxTray.add_read_later_rows(stub, [{'id': '1', 'title': 't', 'link': 'l', 'feed_url': 'f'}])
+        self.assertTrue(calls[0]['readlater'])
+
+
 class TestFeedSectionOrder(unittest.TestCase):
     Stub = TestRefreshListOrphans.Stub
     FEEDS = [('a', 'Feed A', None), ('b', 'Feed B', None), ('c', 'Feed C', None)]

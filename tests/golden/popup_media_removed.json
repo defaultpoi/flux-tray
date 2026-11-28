@@ -191,7 +191,10 @@
                {
                 "children": [
                  {
-                  "activatable": false,
+                  "activatable": true,
+                  "attrs": {
+                   "readlater_header": true
+                  },
                   "children": [
                    {
                     "children": [
@@ -234,6 +237,7 @@
                   ],
                   "selectable": false,
                   "sensitive": true,
+                  "tooltip": "Open all saved items as tabs",
                   "type": "ListBoxRow",
                   "visible": true
                  },
