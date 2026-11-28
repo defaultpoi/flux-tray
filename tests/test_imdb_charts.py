@@ -45,13 +45,20 @@ class Response:
         return False
 
 
-def site(direct, proxy):
-    """urlopen as the site and the proxy answer it: a text, or an exception to raise; the requests it got are in `.asked`."""
+def site(direct, proxy_html=None, proxy_markdown=None):
+    """urlopen as the site and the proxy answer it: a text, or an exception to raise (None: an exception
+    for a request that is not expected); the requests it got are in `.asked`: 'direct', 'html' or 'markdown'."""
     asked = []
 
     def urlopen(request, timeout=None):
-        asked.append(request.full_url)
-        answer = proxy if request.full_url.startswith('https://r.jina.ai/') else direct
+        if request.full_url.startswith('https://r.jina.ai/'):
+            kind = 'html' if request.get_header('X-return-format') == 'html' else 'markdown'
+        else:
+            kind = 'direct'
+        asked.append(kind)
+        answer = {'direct': direct, 'html': proxy_html, 'markdown': proxy_markdown}[kind]
+        if answer is None:
+            answer = urllib.error.URLError(f'{kind} not expected')
         if isinstance(answer, Exception):
             raise answer
         return Response(answer)
@@ -102,38 +109,46 @@ class TestTheChartPage(unittest.TestCase):
 
 class TestFetchingThePage(unittest.TestCase):
     MARKDOWN = '[Proxy Film](https://www.imdb.com/title/tt9/) and [Other](https://www.imdb.com/title/tt8/)'
+    CHALLENGE = '<!DOCTYPE html><html><head><title></title></head><body><script>AwsWafIntegration</script></body></html>'
 
     def episodes(self, urlopen):
         with mock.patch.object(imdb_charts.urllib.request, 'urlopen', urlopen):
             return imdb_charts.list_episodes('moviemeter')
 
     def test_the_page_is_asked_for_first_and_the_proxy_is_not_asked_when_it_has_the_chart(self):
-        urlopen = site(page(FIRST), self.MARKDOWN)
+        urlopen = site(page(FIRST))
         title, episodes = self.episodes(urlopen)
-        self.assertEqual(urlopen.asked, [MOVIEMETER])
+        self.assertEqual(urlopen.asked, ['direct'])
         self.assertEqual((title, episodes[0]['rating'], episodes[0]['image']), ('IMDB Most Popular Movies', 7.5, POSTER))
 
-    def test_a_page_with_no_chart_in_it_goes_to_the_proxy_which_gives_the_titles_only(self):
-        urlopen = site('<html>Please prove you are human</html>', self.MARKDOWN)
-        _, episodes = self.episodes(urlopen)
-        self.assertEqual(len(urlopen.asked), 2)
-        self.assertTrue(urlopen.asked[1].startswith('https://r.jina.ai/'))
-        self.assertEqual([(e['id'], e.get('rating'), e.get('image')) for e in episodes], [('tt9', None, None), ('tt8', None, None)])
+    def test_an_empty_202_goes_to_the_proxy_asked_for_the_html_which_has_the_rating_and_poster(self):
+        for answer in ('', self.CHALLENGE):  # what IMDb's WAF gave the owner's app and a browser's User-Agent on 2026-11-28
+            urlopen = site(answer, proxy_html=page(FIRST))
+            _, episodes = self.episodes(urlopen)
+            self.assertEqual(urlopen.asked, ['direct', 'html'])
+            self.assertEqual([(e['id'], e['rating'], e['image'], e['ref']) for e in episodes], [('tt32558705', 7.5, POSTER, 'moviemeter')])
 
     def test_a_refusal_by_the_site_goes_to_the_proxy_too(self):
         refused = urllib.error.HTTPError(MOVIEMETER, 403, 'Forbidden', {}, None)
-        _, episodes = self.episodes(site(refused, self.MARKDOWN))
-        self.assertEqual([e['id'] for e in episodes], ['tt9', 'tt8'])
+        urlopen = site(refused, proxy_html=page(FIRST))
+        _, episodes = self.episodes(urlopen)
+        self.assertEqual((urlopen.asked, episodes[0]['rating']), (['direct', 'html'], 7.5))
 
-    def test_when_neither_answers_the_error_is_the_sites(self):
+    def test_when_the_html_from_the_proxy_has_no_chart_or_fails_its_markdown_gives_the_titles_only(self):
+        for html in (self.CHALLENGE, urllib.error.URLError('proxy down')):
+            urlopen = site('', proxy_html=html, proxy_markdown=self.MARKDOWN)
+            _, episodes = self.episodes(urlopen)
+            self.assertEqual(urlopen.asked, ['direct', 'html', 'markdown'])
+            self.assertEqual([(e['id'], e.get('rating'), e.get('image')) for e in episodes], [('tt9', None, None), ('tt8', None, None)])
+
+    def test_when_nothing_answers_the_error_is_the_sites(self):
         down = urllib.error.URLError('site down')
         with self.assertRaises(urllib.error.URLError) as caught:
-            self.episodes(site(down, urllib.error.URLError('proxy down')))
+            self.episodes(site(down))
         self.assertIs(caught.exception, down)
 
     def test_a_page_with_no_chart_that_the_proxy_cannot_help_with_is_still_read_as_it_always_was(self):
-        html = '<a href="/title/tt5/">Linked Film</a>'
-        _, episodes = self.episodes(site(html, urllib.error.URLError('proxy down')))
+        _, episodes = self.episodes(site('<a href="/title/tt5/">Linked Film</a>'))
         self.assertEqual([e['id'] for e in episodes], ['tt5'])
 
 

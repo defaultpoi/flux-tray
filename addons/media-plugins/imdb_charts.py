@@ -89,28 +89,41 @@ def list_episodes(source):
     return title, episodes
 
 
+def _get(url, headers=None):
+    request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT, **(headers or {})})
+    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+        return response.read().decode('utf-8', errors='replace')
+
+
+def _has_chart(page):
+    return bool(_extract_from_ld_json(page, '') or _NEXT_DATA_RE.search(page))
+
+
 def _fetch_page(url):
-    """Fetch the chart page itself first: its own data (a list in `ld+json`) gives each title's
-    rating and poster. If the site turns that request away (a WAF answers with an error, or with
-    a page that has no chart in it), ask the r.jina.ai proxy, which reads the page for us but
-    gives the titles only."""
+    """Fetch the chart page with the list in it (`ld+json`), which gives each title's rating and
+    poster. IMDb's WAF answers a plain request with an empty 202, so the usual way is r.jina.ai asked
+    for the page's HTML; the plain request is tried first all the same, in case it is let through.
+    Last, the proxy's markdown, which has the titles only."""
     page = error = None
     try:
-        request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-            page = response.read().decode('utf-8', errors='replace')
-        if _extract_from_ld_json(page, '') or _NEXT_DATA_RE.search(page):
+        page = _get(url)
+        if _has_chart(page):
             return page
     except (urllib.error.URLError, TimeoutError) as e:  # an HTTPError is a URLError
         error = e
 
     proxy_url = f'https://r.jina.ai/http://{url.removeprefix("https://")}'
     try:
-        request = urllib.request.Request(proxy_url, headers={'User-Agent': USER_AGENT})
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-            content = response.read().decode('utf-8', errors='replace')
-            if _JINA_TITLE_RE.search(content):
-                return content
+        content = _get(proxy_url, {'X-Return-Format': 'html'})
+        if _has_chart(content):
+            return content
+    except (urllib.error.URLError, TimeoutError):
+        pass
+
+    try:
+        content = _get(proxy_url)
+        if _JINA_TITLE_RE.search(content):
+            return content
     except (urllib.error.URLError, TimeoutError):
         pass
 
