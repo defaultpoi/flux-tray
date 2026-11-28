@@ -27,6 +27,7 @@ _JINA_TITLE_RE = re.compile(
 
 _TITLE_ID_RE = re.compile(r'/title/(tt\d+)')
 
+_LD_JSON_RE = re.compile(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', re.DOTALL | re.IGNORECASE)
 _NEXT_DATA_RE = re.compile(
     r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
     re.DOTALL
@@ -60,6 +61,7 @@ def list_episodes(source):
       - date: empty (charts don't have dates)
       - url: the IMDB title page URL
       - ref: the chart type ('moviemeter' or 'tvmeter')
+      - rating, image: the IMDb rating and the poster, when the page itself was read (not via the proxy)
     """
     # The app takes the plugin's name off a line like imdb-charts:moviemeter before it calls this, so the
     # chart arrives as 'moviemeter'; a full 'imdb-charts:moviemeter' is accepted too
@@ -88,36 +90,45 @@ def list_episodes(source):
 
 
 def _fetch_page(url):
-    """Fetch a page via r.jina.ai proxy to bypass AWS WAF blocking.
+    """Fetch the chart page itself first: its own data (a list in `ld+json`) gives each title's
+    rating and poster. If the site turns that request away (a WAF answers with an error, or with
+    a page that has no chart in it), ask the r.jina.ai proxy, which reads the page for us but
+    gives the titles only."""
+    page = error = None
+    try:
+        request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            page = response.read().decode('utf-8', errors='replace')
+        if _extract_from_ld_json(page, '') or _NEXT_DATA_RE.search(page):
+            return page
+    except (urllib.error.URLError, TimeoutError) as e:  # an HTTPError is a URLError
+        error = e
 
-    The proxy returns markdown content with title links that we can parse.
-    Falls back to direct fetch if proxy fails.
-    """
-    # Use jina.ai as a content extraction proxy
     proxy_url = f'https://r.jina.ai/http://{url.removeprefix("https://")}'
     try:
         request = urllib.request.Request(proxy_url, headers={'User-Agent': USER_AGENT})
         with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
             content = response.read().decode('utf-8', errors='replace')
-            # Check if we got actual markdown content with titles
             if _JINA_TITLE_RE.search(content):
                 return content
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+    except (urllib.error.URLError, TimeoutError):
         pass
 
-    # Fallback: direct fetch (may be blocked by WAF)
-    request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
-    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-        return response.read().decode('utf-8', errors='replace')
+    if page is None:
+        raise error
+    return page  # the page without a chart in it: the last parsers may still find titles
 
 
 def _parse_chart_html(html, chart_type):
     """Extract title IDs from IMDB chart content.
 
-    Tries jina.ai markdown format first, then __NEXT_DATA__ JSON (modern IMDB),
-    then falls back to regex extraction from HTML.
+    Tries the page's own `ld+json` list first (it has the rating and the poster), then jina.ai
+    markdown (the proxy), then __NEXT_DATA__ JSON, then falls back to regex extraction from HTML.
     """
-    # Try jina.ai markdown format first (our primary method via proxy)
+    episodes = _extract_from_ld_json(html, chart_type)
+    if episodes:
+        return episodes
+
     episodes = _extract_from_jina_markdown(html)
     if episodes:
         return episodes
@@ -133,6 +144,43 @@ def _parse_chart_html(html, chart_type):
 
     # Fallback: regex extraction from HTML
     return _extract_from_html(html)
+
+
+def _extract_from_ld_json(html, chart_type):
+    """Episodes from the page's own list: an ItemList in a `ld+json` script, in the chart's order,
+    each with the title's page, name, poster and IMDb rating."""
+    for match in _LD_JSON_RE.finditer(html):
+        try:
+            data = json.loads(match.group(1))
+        except ValueError:
+            continue
+        elements = data.get('itemListElement') if isinstance(data, dict) and data.get('@type') == 'ItemList' else None
+        if not isinstance(elements, list):
+            continue
+        episodes = []
+        seen = set()
+        for element in elements:
+            item = element.get('item') if isinstance(element, dict) else None
+            if not isinstance(item, dict):
+                continue
+            found = _TITLE_ID_RE.search(str(item.get('url') or ''))
+            name = item.get('name')
+            if not found or not isinstance(name, str) or not name.strip() or found.group(1) in seen:
+                continue
+            title_id = found.group(1)
+            seen.add(title_id)
+            episode = {'id': title_id, 'title': name.strip(), 'date': '',
+                       'url': f'https://www.imdb.com/title/{title_id}/', 'ref': chart_type or 'chart'}
+            rating = (item.get('aggregateRating') or {}).get('ratingValue') if isinstance(item.get('aggregateRating'), dict) else None
+            if isinstance(rating, (int, float)) and not isinstance(rating, bool) and 0 < rating <= 10:
+                episode['rating'] = float(rating)
+            image = item.get('image')
+            if isinstance(image, str) and image.startswith('https://'):
+                episode['image'] = image
+            episodes.append(episode)
+        if episodes:
+            return episodes
+    return []
 
 
 def _extract_from_jina_markdown(markdown):

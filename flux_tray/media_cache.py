@@ -121,7 +121,14 @@ def get_or_create_entry(cache: dict, item: dict) -> dict:
         }
     entry['last_seen'] = now
     if item.get('rank'):
+        before = entry.get('rank')
+        if not entry.get('listed', True):
+            entry.pop('moved', None)  # it was off the chart: the place it had is no place to compare with
+        elif before and before != item['rank']:
+            entry['moved'] = before - item['rank']  # places up the chart (negative: down), kept until it moves again
         entry['rank'] = item['rank']  # its place in the chart it was last seen in
+    if item.get('rating'):
+        entry['rating'] = item['rating']  # the chart's IMDb rating: the newest word counts
     if url:
         entry['urls'][plugin] = url
     for field in ('image', 'genre', 'date'):
@@ -182,7 +189,8 @@ def get_all_cached_items(cache: dict, only_listed: bool = True) -> list[dict]:
             'image': entry.get('image'), 'genre': entry.get('genre') or [], 'quality': entry.get('quality'),
             'tmdb_id': entry.get('tmdb_id'), 'imdb_id': entry.get('imdb_id'),
             'urls': urls, '_cache_key': key, 'first_seen': entry.get('first_seen', ''),
-            'rank': entry.get('rank'), 'listed': entry.get('listed', True),
+            'rank': entry.get('rank'), 'moved': entry.get('moved'), 'rating': entry.get('rating'),
+            'listed': entry.get('listed', True),
         })
     ranked = sorted((i for i in items if i['rank'] is not None), key=lambda item: item['rank'])  # ties keep the order filed in
     unranked = sorted((i for i in items if i['rank'] is None), key=lambda item: item['date'] or item['first_seen'], reverse=True)
@@ -215,7 +223,7 @@ def sync_metadata_ids(cache: dict, seen_set: set[str], lookup) -> tuple[dict, se
         else:
             for plugin, url in entry.get('urls', {}).items():
                 target['urls'].setdefault(plugin, url)
-            for field in ('image', 'genre', 'date', 'year', 'quality', 'rank'):
+            for field in ('image', 'genre', 'date', 'year', 'quality', 'rank', 'moved', 'rating'):
                 if entry.get(field) and not target.get(field):
                     target[field] = entry[field]
             target['first_seen'] = min(target.get('first_seen', ''), entry.get('first_seen', '')) or target.get('first_seen', '')

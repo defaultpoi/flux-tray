@@ -55,8 +55,11 @@ def _chart_item(episode, kind, rank, plugin):
     imdb_id = ident if re.fullmatch(r'tt\d+', ident) else (episode.get('imdb_id') or None)
     year = str(episode.get('year') or '')
     url = episode.get('url') or ident
+    rating, image = episode.get('rating'), episode.get('image')  # what the chart itself says of it, if it does
     return {'id': url, 'title': episode.get('title') or ident, 'type': kind, 'url': url, 'imdb_id': imdb_id,
-            'year': year if re.fullmatch(r'(?:19|20)\d{2}', year) else '', 'date': '', 'rank': rank, '_plugin': plugin}
+            'year': year if re.fullmatch(r'(?:19|20)\d{2}', year) else '', 'date': '', 'rank': rank, '_plugin': plugin,
+            'rating': float(rating) if isinstance(rating, (int, float)) and not isinstance(rating, bool) and 0 < rating <= 10 else None,
+            'image': image if isinstance(image, str) and image.startswith('https://') else None}
 
 
 def _give_known_ids(item):
@@ -151,6 +154,20 @@ def describe_media_error(error):
     if isinstance(error, (NoDriver, ValueError)) and message:
         return message[:300]
     return f'{error.__class__.__name__}: {message}'[:300].rstrip(': ')
+
+
+def with_chart_data(meta, title, imdb_id, rating, image):
+    """What a hover shows for a title of a chart: the chart's own rating and poster in front of
+    what OMDb or TMDb gave, which is nothing yet if they have not been asked or know nothing of the
+    title. (A poster file already cached still comes first in the tooltip.)"""
+    if not (rating or image):
+        return meta
+    merged = dict(meta) if meta else {'title': title, 'imdb_id': imdb_id}
+    if rating:
+        merged['imdb_rating'] = rating
+    if image:
+        merged['poster'] = image
+    return merged
 
 
 def create_metadata_tooltip(meta):
@@ -2054,6 +2071,7 @@ class MediaMixin:
                 imdb_id=imdb_id,
                 tmdb_id=tmdb_id,
             )
+            meta = with_chart_data(meta, title, imdb_id, data.get('rating'), data.get('image'))
         else:
             # Regular media row
             entry = data['entry']
@@ -2454,10 +2472,7 @@ class MediaAccordion:
         box.set_margin_top(3)
         box.set_margin_bottom(3)
 
-        badge_text = '🎬' if item.get('type') == 'movie' else '📺'
-        badge = Gtk.Label(label=badge_text)
-        badge.set_margin_end(6)
-        box.pack_start(badge, False, False, 0)
+        box.pack_start(self._move_badge(item), False, False, 0)
 
         text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         text_box.set_hexpand(True)
@@ -2471,8 +2486,9 @@ class MediaAccordion:
         # Show genre and rating
         api_genre = meta.get('genre') if meta else None
         site_genre = ', '.join(item['genre']) if item.get('genre') else None
-        rating = meta.get('imdb_rating') if meta else None
-        genre = ' '.join(part for part in (f'⭐ {rating}' if rating else '', f'🎭 {api_genre or site_genre}' if (api_genre or site_genre) else '') if part)
+        rating = item.get('rating') or (meta.get('imdb_rating') if meta else None)  # the chart's own word first
+        kind = 'movie' if item.get('type') == 'movie' else 'series'
+        genre = ' '.join(part for part in (kind, f'⭐ {rating}' if rating else '', f'🎭 {api_genre or site_genre}' if (api_genre or site_genre) else '') if part)
 
         # Show genre and source on the same row
         genre_source_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -2530,10 +2546,26 @@ class MediaAccordion:
             'urls': item.get('urls', {}),
             'imdb_id': item.get('imdb_id'),
             'tmdb_id': item.get('tmdb_id'),
+            'rating': item.get('rating'),
+            'image': item.get('image'),
         }
 
         row.add(box)
         return row
+
+    @staticmethod
+    def _move_badge(item):
+        """The left cell of a Discover row: a green ▲ or a red ▼ and the number of places the title last
+        moved in its chart (kept until it moves again). Empty, but as wide, for one that has not moved,
+        so that the titles stay in line."""
+        moved = item.get('moved')
+        badge = Gtk.Label()
+        badge.set_width_chars(4)
+        badge.set_margin_end(6)
+        if isinstance(moved, int) and not isinstance(moved, bool) and moved:
+            color = MEDIA_MARKER_COLORS['ready'] if moved > 0 else MEDIA_MARKER_COLORS['failed']
+            badge.set_markup(f'<span foreground="{color}">{"▲" if moved > 0 else "▼"}{abs(moved)}</span>')
+        return badge
 
     def _on_discover_row_activated(self, _listbox, row):
         if hasattr(row, 'discovery_item'):

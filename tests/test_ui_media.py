@@ -3637,6 +3637,91 @@ class TestMediaAccordion(TmpConfigCase):
         self.assertTrue(row.get_activatable())
         self.assertIs(row.discovery_item, item)
 
+    def discover_row(self, item, meta=None):
+        stub = self.make_stub()
+        accordion = rt.MediaAccordion(stub)
+        accordion.build()
+        item = {'title': 'A Film', 'type': 'movie', 'imdb_id': 'tt1', '_cache_key': 'imdb:tt1', 'genre': [],
+                'urls': {'imdb-charts': 'https://www.imdb.com/title/tt1/'}, 'quality': None, **item}
+        stub._get_discovery_items_cached = mock.Mock(return_value=([item], {'imdb:tt1': item}, {'imdb:tt1': meta}))
+        return stub, accordion._build_discover_row('discovery:imdb:tt1')
+
+    @staticmethod
+    def labels(widget):
+        found = [widget] if isinstance(widget, rt.Gtk.Label) else []
+        for child in (widget.get_children() if isinstance(widget, rt.Gtk.Container) else ()):
+            found += TestMediaAccordion.labels(child)
+        return found
+
+    def texts(self, row):
+        return [label.get_text() for label in self.labels(row)]
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_a_title_that_went_up_the_chart_has_a_green_arrow_and_one_that_went_down_a_red_one_in_place_of_the_icon(self):
+        for moved, arrow, color in ((3, '▲3', '#2e8b57'), (-2, '▼2', '#c0392b'), (12, '▲12', '#2e8b57')):
+            _, row = self.discover_row({'moved': moved})
+            arrows = [label for label in self.labels(row) if label.get_text() == arrow]
+            self.assertEqual(len(arrows), 1, arrow)
+            self.assertIn(f'foreground="{color}"', arrows[0].get_label())
+            self.assertFalse({'🎬', '📺'} & set(self.texts(row)))
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_a_title_that_has_not_moved_has_no_arrow_and_no_icon_but_the_title_stays_in_line(self):
+        widths = set()
+        for extra in ({}, {'moved': None}, {'moved': 0}, {'moved': 'junk'}, {'moved': True}, {'moved': 4}, {'moved': -1}):
+            _, row = self.discover_row(extra)
+            first = row.get_child().get_children()[0]
+            widths.add(first.get_width_chars())
+            if extra.get('moved') in (None, 0, 'junk', True) or not extra:
+                self.assertFalse(any(ch in ''.join(self.texts(row)) for ch in '▲▼🎬📺'), extra)
+        self.assertEqual(widths, {4})  # the cell is as wide with an arrow as without, so the titles do not move
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_the_second_line_starts_with_movie_or_series_before_the_stars_and_the_genre(self):
+        _, row = self.discover_row({'type': 'movie', 'rating': 7.5, 'genre': ['Action']})
+        self.assertIn('movie ⭐ 7.5 🎭 Action', self.texts(row))
+        _, row = self.discover_row({'type': 'series', 'rating': 8.0, 'genre': ['Drama']})
+        self.assertIn('series ⭐ 8.0 🎭 Drama', self.texts(row))
+        _, row = self.discover_row({'type': 'series'})  # nothing known of it: the type is still said
+        self.assertIn('series', self.texts(row))
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_the_rating_of_the_chart_is_shown_and_the_one_of_omdb_only_where_the_chart_gave_none(self):
+        _, row = self.discover_row({'rating': 7.5}, meta={'imdb_rating': 7.4, 'genre': 'Drama'})
+        self.assertIn('movie ⭐ 7.5 🎭 Drama', self.texts(row))
+        _, row = self.discover_row({'rating': None}, meta={'imdb_rating': 7.4, 'genre': 'Drama'})
+        self.assertIn('movie ⭐ 7.4 🎭 Drama', self.texts(row))
+
+    @unittest.skipIf(isinstance(rt.Gtk, mock.Mock), 'needs the real GTK bindings')
+    def test_a_hover_over_a_title_of_a_chart_shows_the_charts_rating_and_poster_before_omdb_has_been_asked(self):
+        stub, row = self.discover_row({'rating': 7.5, 'image': 'https://m.media-amazon.com/x.jpg'})
+        box = row.get_child()
+        stub._show_metadata_popover = mock.Mock()
+        with mock.patch.object(rt, 'get_cached_metadata', return_value=None), \
+                mock.patch.object(rt, 'create_metadata_tooltip', return_value=rt.Gtk.Label()) as tooltip:
+            stub._on_media_row_enter(box, None)
+        shown = tooltip.call_args.args[0]
+        self.assertEqual((shown['imdb_rating'], shown['poster'], shown['imdb_id'], shown['title']),
+                         (7.5, 'https://m.media-amazon.com/x.jpg', 'tt1', 'A Film'))
+        stub._show_metadata_popover.assert_called_once()
+
+    def test_what_the_chart_says_goes_in_front_of_what_omdb_gave_and_the_rest_of_it_stays(self):
+        omdb = {'title': 'A Film', 'imdb_id': 'tt1', 'imdb_rating': 7.4, 'poster': 'https://omdb/p.jpg', 'plot': 'A plot.'}
+        shown = rt.with_chart_data(omdb, 'A Film', 'tt1', 7.5, 'https://chart/p.jpg')
+        self.assertEqual(shown, {**omdb, 'imdb_rating': 7.5, 'poster': 'https://chart/p.jpg'})
+        self.assertEqual(omdb['imdb_rating'], 7.4)  # the cached dict is not changed
+        self.assertEqual(rt.with_chart_data(omdb, 'A Film', 'tt1', None, None), omdb)
+        self.assertIsNone(rt.with_chart_data(None, 'A Film', 'tt1', None, None))
+        self.assertEqual(rt.with_chart_data(None, 'A Film', 'tt1', 7.5, None), {'title': 'A Film', 'imdb_id': 'tt1', 'imdb_rating': 7.5})
+
+    def test_a_chart_item_carries_the_rating_and_poster_the_plugin_gave_and_none_that_are_not_one(self):
+        episode = {'id': 'tt1', 'title': 'A Film', 'url': 'https://www.imdb.com/title/tt1/', 'rating': 7.5, 'image': 'https://x/p.jpg'}
+        made = rt._chart_item(episode, 'movie', 4, 'imdb-charts')
+        self.assertEqual((made['rating'], made['image'], made['rank']), (7.5, 'https://x/p.jpg', 4))
+        for bad in ({'rating': 11, 'image': 'http://x/p.jpg'}, {'rating': True, 'image': 5}, {'rating': '7.5', 'image': ''}, {}):
+            made = rt._chart_item({**episode, **{k: v for k, v in bad.items()}} if bad else {k: v for k, v in episode.items() if k not in ('rating', 'image')}, 'movie', 4, 'imdb-charts')
+            self.assertEqual((made['rating'], made['image']), (None, None), bad)
+
     def test_a_left_click_on_a_title_puts_it_on_the_watch_list_dismisses_it_from_discover_and_looks_for_it_at_once(self):
         stub = self.make_stub()
         stub.media_registry.finding = [FakeFinder('fsonline_one', None)]

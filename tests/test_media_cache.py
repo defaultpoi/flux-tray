@@ -240,6 +240,85 @@ class TestCharts(unittest.TestCase):
         self.assertEqual(rt.get_all_cached_items({'k': {'title': 'Old', 'urls': {'p': 'u'}}})[0]['listed'], True)
 
 
+class TestWhatTheChartSays(unittest.TestCase):
+    """How a title moves in its chart and what rating the chart gives it: kept in the cache, for the Discover tab."""
+
+    def chart(self, *titles, **extra):
+        return [item(t, imdb_id=f'tt-{t}', rank=i, _plugin='imdb-charts', url=f'https://www.imdb.com/title/tt-{t}/', **extra)
+                for i, t in enumerate(titles, start=1)]
+
+    def check(self, cache, items):
+        for i in items:
+            rt.get_or_create_entry(cache, i)
+        rt.mark_listing(cache, items, {('imdb-charts', 'movie')})
+
+    def moves(self, cache):
+        return {i['title']: i['moved'] for i in rt.get_all_cached_items(cache)}
+
+    def test_a_title_that_goes_up_has_the_places_it_gained_and_one_that_goes_down_a_negative_number(self):
+        cache = {}
+        self.check(cache, self.chart('A', 'B', 'C'))
+        self.check(cache, self.chart('C', 'A', 'B'))
+        self.assertEqual(self.moves(cache), {'C': 2, 'A': -1, 'B': -1})
+
+    def test_there_is_no_move_before_a_title_has_been_seen_twice_nor_when_it_stays(self):
+        cache = {}
+        self.check(cache, self.chart('A', 'B'))
+        self.assertEqual(self.moves(cache), {'A': None, 'B': None})
+        self.check(cache, self.chart('A', 'B'))
+        self.assertEqual(self.moves(cache), {'A': None, 'B': None})
+
+    def test_a_move_is_kept_through_the_checks_where_the_title_stays_and_is_replaced_when_it_moves_again(self):
+        cache = {}
+        self.check(cache, self.chart('A', 'B', 'C'))
+        self.check(cache, self.chart('B', 'A', 'C'))
+        self.check(cache, self.chart('B', 'A', 'C'))
+        self.check(cache, self.chart('B', 'A', 'C'))
+        self.assertEqual(self.moves(cache), {'B': 1, 'A': -1, 'C': None})
+        self.check(cache, self.chart('B', 'C', 'A'))
+        self.assertEqual(self.moves(cache), {'B': 1, 'C': 1, 'A': -1})
+        self.check(cache, self.chart('C', 'B', 'A'))
+        self.assertEqual(self.moves(cache), {'C': 1, 'B': -1, 'A': -1})
+
+    def test_one_fetch_filed_twice_does_not_move_a_title_against_itself(self):
+        cache = {}
+        self.check(cache, self.chart('A', 'B'))
+        self.check(cache, self.chart('B', 'A'))
+        self.check(cache, self.chart('B', 'A'))
+        self.assertEqual(self.moves(cache), {'B': 1, 'A': -1})
+
+    def test_a_title_that_comes_back_after_dropping_off_the_chart_is_not_compared_with_the_place_it_had(self):
+        cache = {}
+        self.check(cache, self.chart('A', 'B', 'C'))
+        self.check(cache, self.chart('B', 'A', 'C'))  # A: -1
+        self.check(cache, self.chart('B', 'C'))       # A is off the chart
+        self.check(cache, self.chart('A', 'B', 'C'))  # and back, at the top
+        self.assertEqual(self.moves(cache)['A'], None)
+
+    def test_the_rating_of_the_chart_is_kept_and_the_newest_counts(self):
+        cache = {}
+        self.check(cache, self.chart('A', rating=7.5))
+        self.assertEqual(rt.get_all_cached_items(cache)[0]['rating'], 7.5)
+        self.check(cache, self.chart('A', rating=7.4))
+        self.assertEqual(rt.get_all_cached_items(cache)[0]['rating'], 7.4)
+        self.check(cache, self.chart('A'))  # a check that had no rating (the proxy) does not take it away
+        self.assertEqual(rt.get_all_cached_items(cache)[0]['rating'], 7.4)
+
+    def test_an_entry_from_before_there_were_moves_and_ratings_lists_none(self):
+        listed = rt.get_all_cached_items({'k': {'title': 'Old', 'urls': {'p': 'u'}, 'rank': 3}})[0]
+        self.assertEqual((listed['moved'], listed['rating']), (None, None))
+
+    def test_the_move_and_the_rating_go_with_an_entry_that_is_given_its_ids(self):
+        cache = {}
+        rt.get_or_create_entry(cache, item('Dune: Part Two', year='2023', _plugin='sitefilme', url='https://s/1'))  # filed first: the entry the other is merged into
+        self.check(cache, [item('Dune Part Two (2024)', _plugin='imdb-charts', url='https://i/d', rank=2)])
+        self.check(cache, [item('Dune Part Two (2024)', _plugin='imdb-charts', url='https://i/d', rank=1, rating=8.5)])
+        self.assertEqual(len(cache), 2)
+        rt.sync_metadata_ids(cache, set(), lambda e: {'tmdb_id': '693134'})
+        merged = rt.get_all_cached_items(cache)[0]
+        self.assertEqual((len(cache), merged['moved'], merged['rating']), (1, 1, 8.5))
+
+
 class TestGivingEntriesTheirIds(unittest.TestCase):
     def cache_of_one(self, **extra):
         cache = {}
