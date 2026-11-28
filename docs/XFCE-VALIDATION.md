@@ -32,7 +32,7 @@ the Evidence section below; a green CI run does not tick anything here.
 - [ ] Weather: today and forecast, the arrow button, the popup refits when data arrives; an alert changes the icon.
 - [ ] With the MeteoAlarm feed listing an alert for a coming day: the `›` button on the first slide takes the severity colour (its arrow stays readable), its tooltip names the day and the hazard, and on the forecast slide that day's glyph has the colour (a ⚠ if the day had no rain glyph). Note how many days ahead your country's feed really goes, and whether an alert that spans midnight lands on the right days.
 - [ ] Discovery, with one plugin that has `fetch_discovery`: its new films and series show under the Media sources (title, genres, the sites, an HD or CAM badge); a left click adds the source and the row goes; a right click dismisses it for good (restart and check). New items play the sound and open the popup. Hover a row and a source: the preview opens to the left of the popup, shows the poster once it is cached, and closes when the mouse leaves. Leave a download running with the popup open for a minute and hover: the preview appears once, not repeatedly.
-- [ ] With `https://g1line.ro/api/news.php|G1line` in `[feeds]` (the real site): a **G1line** section appears with up to 30 rows reading `source: title` (the region in the hover's Categories line); hovering a row whose title is cut shows the whole title, then the summary; a left click opens the source's page in the browser and marks the row read. Quit and start again: the rows still read the same and the summaries are back after the first check. Note how many items the first read gave (30 if `per_page` is honoured, 12 if the API ignores it).
+- [x] (2026-11-28) With `https://g1line.ro/api/news.php|G1line` in `[feeds]` (the real site): a **G1line** section appears with up to 30 rows reading `source: title` (the region in the hover's Categories line); hovering a row whose title is cut shows the whole title, then the summary; a left click opens the source's page in the browser and marks the row read. Quit and start again: the rows still read the same and the summaries are back after the first check. Note how many items the first read gave (30 if `per_page` is honoured, 12 if the API ignores it).
 
 ## 3. Background activity, network and the real tools
 
@@ -73,3 +73,7 @@ the Evidence section below; a green CI run does not tick anything here.
 ## Evidence
 
 Date, Flux Tray commit, Void package versions, XFCE, GTK3, Python, the panel's tray host, results, and the log lines that matter go below this line, one entry per run.
+
+### 2026-11-28, G1line (commit 225ff6d)
+
+The owner ran the G1line item of section 2 on their desktop and answered ✓ for all four steps (the section, the hover with title, summary and region, the click, the restart), and reported that the first read gave 30 items. Not reported, so not recorded: the Void package versions, XFCE, GTK3, Python and the panel's tray host. Nothing else in this file was run.
